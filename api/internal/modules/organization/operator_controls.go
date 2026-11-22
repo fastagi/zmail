@@ -74,9 +74,7 @@ func (h *OperatorHandler) SetSendLimit(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var body struct {
-		DailySendLimit json.RawMessage `json:"daily_send_limit"`
-	}
+	var body sendLimitBody
 	if !handler.BindJSON(c, &body) {
 		return
 	}
@@ -190,4 +188,17 @@ func (r *repository) operatorUpdate(
 		return nil, nil, err
 	}
 	return before, after, nil
+}
+
+// sendLimitBody keeps daily_send_limit raw so an absent field differs from an explicit null.
+type sendLimitBody struct {
+	DailySendLimit json.RawMessage `json:"daily_send_limit"`
+}
+
+func (b *sendLimitBody) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return errors.New("body must be a JSON object")
+	}
+	type plain sendLimitBody
+	return json.Unmarshal(data, (*plain)(b))
 }

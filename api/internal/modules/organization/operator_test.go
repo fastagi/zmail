@@ -226,6 +226,8 @@ func TestOperatorControlHandlersValidateTheirBodies(t *testing.T) {
 		{"limit rejects fractions", http.MethodPut, "/1/send-limit", `{"daily_send_limit":1.5}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
 		{"limit rejects past the maximum", http.MethodPut, "/1/send-limit", `{"daily_send_limit":1000001}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
 		{"limit rejects a non-object", http.MethodPut, "/1/send-limit", `[]`, h.SetSendLimit, 400, response.ErrorCodeInvalidInput},
+		{"limit rejects a null body", http.MethodPut, "/1/send-limit", `null`, h.SetSendLimit, 400, response.ErrorCodeInvalidInput},
+		{"limit rejects zero", http.MethodPut, "/1/send-limit", `{"daily_send_limit":0}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
 		{"limit set", http.MethodPut, "/1/send-limit", `{"daily_send_limit":5000}`, h.SetSendLimit, 200, ""},
 		{"limit cleared", http.MethodPut, "/1/send-limit", `{"daily_send_limit":null}`, h.SetSendLimit, 200, ""},
 	}
