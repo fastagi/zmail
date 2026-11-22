@@ -264,6 +264,15 @@ TABLE mail_content_access_audits
   COLUMN reason character varying(500) NOT NULL
   COLUMN accessed_at timestamp with time zone NOT NULL
 
+TABLE mail_deleted_sends
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_deleted_sends_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN send_lane character varying(16) NOT NULL
+  COLUMN send_attempted_at timestamp with time zone NOT NULL
+  COLUMN bounced boolean NOT NULL DEFAULT false
+  COLUMN complained boolean NOT NULL DEFAULT false
+
 TABLE mail_domains
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_domains_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -958,6 +967,8 @@ CONSTRAINT mail_contacts.fk_mail_contacts_organization FOREIGN KEY (organization
 CONSTRAINT mail_contacts.mail_contacts_pkey PRIMARY KEY (id)
 CONSTRAINT mail_content_access_audits.mail_content_access_audits_pkey PRIMARY KEY (id)
 CONSTRAINT mail_content_access_audits.mail_content_access_audits_reason_check CHECK ((btrim((reason)::text) <> ''::text))
+CONSTRAINT mail_deleted_sends.mail_deleted_sends_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_deleted_sends.mail_deleted_sends_pkey PRIMARY KEY (id)
 CONSTRAINT mail_domains.chk_mail_domains_capability CHECK (((capability)::text = ANY ((ARRAY['send_receive'::character varying, 'send_only'::character varying])::text[])))
 CONSTRAINT mail_domains.chk_mail_domains_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'verified'::character varying])::text[])))
 CONSTRAINT mail_domains.fk_mail_domains_mail_zone FOREIGN KEY (mail_zone_id) REFERENCES mail_zones(id)
@@ -1275,6 +1286,10 @@ INDEX CREATE INDEX idx_mail_content_access_audits_organization ON mail_content_a
 INDEX CREATE INDEX idx_mail_content_access_audits_time ON mail_content_access_audits USING btree (accessed_at DESC, id DESC)
 INDEX CREATE INDEX idx_mail_content_access_audits_viewer ON mail_content_access_audits USING btree (viewer_user_id, accessed_at DESC, id DESC)
 INDEX CREATE UNIQUE INDEX mail_content_access_audits_pkey ON mail_content_access_audits USING btree (id)
+INDEX CREATE INDEX idx_mail_deleted_sends_attempted ON mail_deleted_sends USING btree (send_attempted_at)
+INDEX CREATE INDEX idx_mail_deleted_sends_lane ON mail_deleted_sends USING btree (organization_id, send_lane, send_attempted_at)
+INDEX CREATE INDEX idx_mail_deleted_sends_mailbox ON mail_deleted_sends USING btree (mailbox_id, send_attempted_at)
+INDEX CREATE UNIQUE INDEX mail_deleted_sends_pkey ON mail_deleted_sends USING btree (id)
 INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)

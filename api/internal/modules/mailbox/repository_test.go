@@ -26,7 +26,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailDeletedSendPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
 		// Triage reads a connected mailbox's connection status.
 		&ExternalMailConnectionPO{},
 		&MailAgentGrantPO{}, &MailAgentEventPO{}, &MailAgentAuditPO{}, &MailAgentDraftPO{}, &apikey.APIKeyPO{})
@@ -1222,5 +1222,83 @@ func TestRepositoryThreadsIgnoreSealedMessages(t *testing.T) {
 	}
 	if _, err := repo.FindMessageByRFCMessageID(ctx, mailbox.ID, "old@mail.example"); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("FindMessageByRFCMessageID after handover = %v; want not found", err)
+	}
+}
+
+// Deleting sent mail for good, one message, a trash, or a whole mailbox, frees no room in the send
+// window and keeps every bounce it drew in the sending-health counts.
+func TestDeletedSendsStillCountAgainstTheWindow(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	other := createMailbox(t, repo, "other@mail.example")
+	send := func(box *domain.Mailbox, attemptedAt time.Time) *domain.MailMessage {
+		t.Helper()
+		message := &domain.MailMessage{
+			MailboxID: box.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusSent,
+			FromAddress: box.Address, To: []string{"bob@example.com"}, Subject: "Out", SendAttemptedAt: &attemptedAt,
+		}
+		if _, err := repo.CreateMessage(ctx, message); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		return message
+	}
+	now := time.Now().UTC()
+	bounced := send(mailbox, now.Add(-time.Hour))
+	trashed := send(mailbox, now.Add(-2*time.Hour))
+	send(other, now.Add(-3*time.Hour))
+	stale := send(mailbox, now.Add(-25*time.Hour))
+	if _, _, err := repo.AddMessageEvents(ctx, bounced.ID, []domain.MailEvent{
+		{Type: domain.MailEventBounced, Recipient: "bob@example.com", OccurredAt: now},
+	}); err != nil {
+		t.Fatalf("AddMessageEvents: %v", err)
+	}
+	window := now.Add(-sendLimitWindow)
+	counts := func() (int64, int64) {
+		t.Helper()
+		attempted, bounces, _, err := repo.CountPersonalOutcomesSince(ctx, 1, window)
+		total, countErr := repo.CountOutboundSince(ctx, 1, domain.SendLanePersonal, window)
+		if err != nil || countErr != nil || total != attempted {
+			t.Fatalf("outcomes = %d, %v; CountOutboundSince = %d, %v", attempted, err, total, countErr)
+		}
+		return attempted, bounces
+	}
+	if attempted, bounces := counts(); attempted != 3 || bounces != 1 {
+		t.Fatalf("before deleting: %d attempts, %d bounces; want 3 and 1", attempted, bounces)
+	}
+
+	if err := repo.DeleteMessage(ctx, mailbox.ID, bounced.ID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	if err := repo.DeleteMessage(ctx, mailbox.ID, stale.ID); err != nil {
+		t.Fatalf("DeleteMessage stale: %v", err)
+	}
+	if err := db.Model(&MailMessagePO{}).Where("id = ?", trashed.ID).
+		Updates(map[string]any{"placement": string(domain.MailPlacementTrash), "trashed_at": now}).Error; err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	if deleted, err := repo.DeleteTrashedMessages(ctx, mailbox.ID, nil); err != nil || deleted != 1 {
+		t.Fatalf("DeleteTrashedMessages = %d, %v", deleted, err)
+	}
+	if err := repo.DeleteMailbox(ctx, 1, other.ID); err != nil {
+		t.Fatalf("DeleteMailbox: %v", err)
+	}
+	if attempted, bounces := counts(); attempted != 3 || bounces != 1 {
+		t.Fatalf("after deleting: %d attempts, %d bounces; want 3 and 1", attempted, bounces)
+	}
+	entries, err := repo.ListMailboxDirectory(ctx, 1, domain.MailboxDirectoryFilter{Limit: 10}, window)
+	if err != nil || len(entries) != 1 || entries[0].SentLast24h != 2 {
+		t.Fatalf("directory = %+v, %v; want the live mailbox with its 2 deleted attempts", entries, err)
+	}
+	var kept int64
+	if err := db.Model(&MailDeletedSendPO{}).Count(&kept).Error; err != nil || kept != 3 {
+		t.Fatalf("kept %d records, %v; want 3, the stale attempt left the window", kept, err)
+	}
+	if err := repo.DeleteMessage(ctx, mailbox.ID, bounced.ID); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("second delete = %v", err)
+	}
+	if err := db.Model(&MailDeletedSendPO{}).Count(&kept).Error; err != nil || kept != 3 {
+		t.Fatalf("a delete that found nothing kept a record: %d, %v", kept, err)
 	}
 }
