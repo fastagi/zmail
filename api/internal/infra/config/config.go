@@ -382,6 +382,9 @@ type AuthenticationConfig struct {
 	// RegistrationEmailCodeRequired makes POST /v1/register demand a code mailed by
 	// POST /v1/register/email-codes. AUTH_REGISTRATION_EMAIL_CODE_REQUIRED defaults to true.
 	RegistrationEmailCodeRequired bool
+	// TOTPEncryptionKey encrypts authenticator secrets (AUTH_TOTP_ENCRYPTION_KEY); empty turns
+	// two-factor enrollment off.
+	TOTPEncryptionKey string
 }
 
 type LogConfig struct {
@@ -700,6 +703,7 @@ func Load() (*Config, error) {
 			SessionRetention:              env.GetDuration("AUTH_SESSION_RETENTION", DefaultAuthenticationSessionRetention),
 			RegistrationDisabled:          !env.GetBool("AUTH_REGISTRATION_ENABLED", true),
 			RegistrationEmailCodeRequired: env.GetBool("AUTH_REGISTRATION_EMAIL_CODE_REQUIRED", true),
+			TOTPEncryptionKey:             env.Get("AUTH_TOTP_ENCRYPTION_KEY", ""),
 		},
 		Log: LogConfig{
 			Level:       env.Get("LOG_LEVEL", defaultLogLevel(isProd)),

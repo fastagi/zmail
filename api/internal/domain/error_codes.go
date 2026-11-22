@@ -27,6 +27,10 @@ const (
 	CodeUsernameAlreadyExists     = "USER.USERNAME_ALREADY_EXISTS"
 	CodeInvalidCredentials        = "AUTH.INVALID_CREDENTIALS"
 	CodeAccountDisabled           = "AUTH.ACCOUNT_DISABLED"
+	CodeTOTPRequired              = "AUTH.TOTP_REQUIRED"
+	CodeTOTPInvalid               = "AUTH.TOTP_INVALID"
+	CodeTOTPAlreadyEnabled        = "AUTH.TOTP_ALREADY_ENABLED"
+	CodeTOTPNotEnabled            = "AUTH.TOTP_NOT_ENABLED"
 	CodePasswordResetTokenInvalid = "AUTH.PASSWORD_RESET_TOKEN_INVALID"
 	CodePasswordResetTokenExpired = "AUTH.PASSWORD_RESET_TOKEN_EXPIRED"
 

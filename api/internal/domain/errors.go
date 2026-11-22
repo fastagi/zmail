@@ -19,6 +19,10 @@ var (
 	ErrPasswordResetTokenInvalid = errors.New("password reset token is invalid")
 	ErrPasswordResetTokenExpired = errors.New("password reset token is expired")
 	ErrSignInThrottled           = errors.New("too many failed sign-in attempts")
+	ErrTOTPRequired              = errors.New("an authenticator code is required")
+	ErrTOTPInvalid               = errors.New("the authenticator code is wrong or already used")
+	ErrTOTPAlreadyEnabled        = errors.New("two-factor sign-in is already on")
+	ErrTOTPNotEnabled            = errors.New("two-factor sign-in is off")
 
 	// ErrRegistrationEmailCodeRequired means registration needs an email code and none was sent.
 	ErrRegistrationEmailCodeRequired = errors.New("registration email code is required")
