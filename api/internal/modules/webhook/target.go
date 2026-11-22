@@ -88,7 +88,8 @@ func (p *targetPolicy) normalizeSyntax(value string) (string, *url.URL, error) {
 	}
 
 	hostname := strings.ToLower(parsed.Hostname())
-	if hostname == "" || strings.HasSuffix(hostname, ".") || strings.Contains(hostname, "%") || !asciiHostname(hostname) {
+	if hostname == "" || strings.HasSuffix(hostname, ".") || strings.Contains(hostname, "%") || !asciiHostname(hostname) ||
+		legacyNumericHost(hostname) {
 		return "", nil, domain.ErrWebhookInvalidTarget
 	}
 	port := parsed.Port()
@@ -118,6 +119,26 @@ func (p *targetPolicy) normalizeSyntax(value string) (string, *url.URL, error) {
 		return "", nil, domain.ErrWebhookInvalidTarget
 	}
 	return normalized, parsed, nil
+}
+
+// legacyNumericHost reports a name that browsers and inet_aton read as an IPv4
+// address (2130706433, 0x7f000001, 127.1): its last label is a number.
+func legacyNumericHost(hostname string) bool {
+	if strings.Contains(hostname, ":") {
+		return false
+	}
+	if _, err := netip.ParseAddr(hostname); err == nil {
+		return false
+	}
+	label := hostname[strings.LastIndexByte(hostname, '.')+1:]
+	digits := "0123456789"
+	if hex, ok := strings.CutPrefix(label, "0x"); ok {
+		label, digits = hex, "0123456789abcdef"
+		if label == "" {
+			return true
+		}
+	}
+	return label != "" && strings.Trim(label, digits) == ""
 }
 
 func (p *targetPolicy) resolveAllowed(ctx context.Context, hostname string) ([]netip.Addr, error) {

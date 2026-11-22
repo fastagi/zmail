@@ -75,7 +75,8 @@ disabled status, a monotonic version, and one endpoint-unique signing secret.
 Target rules:
 
 - absolute `https` URL by default;
-- no user information, fragment, query string, or ambiguous hostname;
+- no user information, fragment, query string, or ambiguous hostname; a name whose last label is a
+  number (`2130706433`, `0x7f000001`, `127.1`) is read as an IPv4 address elsewhere and is rejected;
 - at most 2,048 bytes;
 - redirects are never followed;
 - setup resolves the hostname: a name that does not exist or has no address fails with

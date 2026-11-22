@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,4 +124,22 @@ func TestTargetPolicySetupRejectsNamesThatDoNotResolve(t *testing.T) {
 	policy.resolver = staticIPResolver{err: &net.DNSError{Err: "i/o timeout", Name: "hooks.example.com", IsTimeout: true}}
 	_, _, err = policy.Normalize(context.Background(), "https://hooks.example.com/hook")
 	assert.ErrorIs(t, err, domain.ErrServiceUnavailable)
+}
+
+func TestTargetPolicyRejectsNamesOtherParsersReadAsIPv4(t *testing.T) {
+	policy := NewTargetPolicy(nil)
+	public := []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}
+	numeric := []string{"2130706433", "0x7f000001", "0X7F000001", "127.1", "0177.0.0.1", "hooks.example.0x", "hooks.example.42"}
+	addresses := map[string][]net.IPAddr{"hooks.example.42a": public}
+	for _, name := range numeric {
+		addresses[strings.ToLower(name)] = public
+	}
+	policy.resolver = staticIPResolver{addresses: addresses}
+
+	for _, name := range numeric {
+		_, _, err := policy.Normalize(context.Background(), "https://"+name+"/hook")
+		assert.ErrorIs(t, err, domain.ErrWebhookInvalidTarget, name)
+	}
+	_, _, err := policy.Normalize(context.Background(), "https://hooks.example.42a/hook")
+	assert.NoError(t, err)
 }
