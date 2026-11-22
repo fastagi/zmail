@@ -185,6 +185,86 @@ describe('organization mail domains', () => {
     ).toHaveAttribute('role', 'alert');
   });
 
+  it('explains when to use each way of connecting a domain (#130)', async () => {
+    renderPage();
+
+    expect(
+      await screen.findByRole('heading', { name: 'Option 1: Use your own Cloudflare account' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Option 2: Let Zmail set up DNS (no token needed)' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Most domains use option 2, which needs no token/u)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/DNS is already in your own Cloudflare account/u)).toBeInTheDocument();
+  });
+
+  it("names the server's Cloudflare account, not a token, when a tokenless connect is refused (#130)", async () => {
+    state.connect.mutateAsync.mockRejectedValue(
+      new ApiError('refused', ApiErrorCode.MAILBOX_DOMAIN_PROVIDER_FAILED, 502)
+    );
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'devin-qa.example' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+
+    const alert = await screen.findByText(/no token of yours was used/u);
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveTextContent(/reserved names such as \.example/u);
+    expect(screen.queryByText(/Check that the API token/u)).toBeNull();
+  });
+
+  it('says the pasted token was refused when its zones cannot be listed (#130)', async () => {
+    const post = vi
+      .spyOn(request, 'post')
+      .mockRejectedValue(
+        new ApiError('Could not list', ApiErrorCode.COMMON_VALIDATION_FAILED, 422)
+      );
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Cloudflare API token'), {
+      target: { value: 'cf-token-value' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Find accessible zones' }));
+
+    expect(
+      await screen.findByText(/Cloudflare did not accept the token you entered/u)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Could not list')).toBeNull();
+    post.mockRestore();
+  });
+
+  it('explains a domain outside the connected zone and a token without DNS access (#130)', async () => {
+    vi.spyOn(request, 'get').mockResolvedValue({
+      connection: { id: 'c1', zone_name: 'example.org', worker: 'zmail-c1' },
+    });
+    const post = vi
+      .spyOn(request, 'post')
+      .mockRejectedValueOnce(new ApiError('zone', ApiErrorCode.MAILBOX_DOMAIN_ZONE_NOT_FOUND, 422))
+      .mockRejectedValueOnce(
+        new ApiError('provider', ApiErrorCode.MAILBOX_DOMAIN_PROVIDER_FAILED, 502)
+      );
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Mail domain'), {
+      target: { value: 'other.net' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Set up domain' }));
+    expect(
+      await screen.findByText('Use example.org or a subdomain of it, such as mail.example.org.')
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Mail domain'), {
+      target: { value: 'mail.example.org' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Set up domain' }));
+    expect(
+      await screen.findByText(/Give the token DNS Edit and Zone Read on example.org/u)
+    ).toBeInTheDocument();
+    post.mockRestore();
+  });
+
   it('checks a domain and removes it after confirmation', async () => {
     state.refresh.mutateAsync.mockResolvedValue({ ...pendingDomain(), status: 'pending' });
     state.remove.mutateAsync.mockResolvedValue(undefined);
