@@ -23,10 +23,12 @@ type fakeZones struct {
 	routingErr error
 	ruleErr    error
 	// ruleErrFor fails the routing rule of one address only.
-	ruleErrFor  map[string]error
-	created     []mailtransport.DNSRecord
-	routingFor  []string
-	nextRuleNum int
+	ruleErrFor map[string]error
+	created    []mailtransport.DNSRecord
+	routingFor []string
+	// routingZones is the zone name each routing request named, beside routingFor.
+	routingZones []string
+	nextRuleNum  int
 	// Zone management: zones created and deleted through the provider, and the scans asked for.
 	createZoneErr error
 	createdZones  []string // zone names
@@ -82,11 +84,12 @@ func (z *fakeZones) FindZone(_ context.Context, name string) (mailtransport.Zone
 	return mailtransport.Zone{}, mailtransport.ErrZoneNotFound
 }
 
-func (z *fakeZones) EnableRouting(_ context.Context, _, name string) error {
+func (z *fakeZones) EnableRouting(_ context.Context, _, zoneName, name string) error {
 	if z.routingErr != nil {
 		return z.routingErr
 	}
 	z.routingFor = append(z.routingFor, name)
+	z.routingZones = append(z.routingZones, zoneName)
 	if len(z.records[name]) == 0 {
 		for i, host := range routingMXHosts {
 			z.add(mailtransport.DNSRecord{Type: "MX", Name: name, Content: host, Priority: 10 + i})
@@ -465,6 +468,20 @@ func TestConnectingADomainSetsUpReceivingSendingAndDMARC(t *testing.T) {
 	again, err := fixture.service.SetUpMailDomain(context.Background(), 7, mailDomain.ID)
 	if err != nil || again.Status != domain.MailDomainStatusVerified || len(fixture.zones.created) != before {
 		t.Fatalf("second setup = %+v, %v, created %d", again, err, len(fixture.zones.created)-before)
+	}
+}
+
+// The provider leaves the name out at the zone apex, so the setup must tell it the zone.
+func TestConnectingAZoneApexNamesItsZoneForRouting(t *testing.T) {
+	fixture := newDomainFixture(t)
+	mailDomain := fixture.connect(t, "example.com")
+
+	if mailDomain.Status != domain.MailDomainStatusVerified {
+		t.Fatalf("status = %s, error = %q", mailDomain.Status, mailDomain.LastError)
+	}
+	if len(fixture.zones.routingFor) != 1 || fixture.zones.routingFor[0] != "example.com" ||
+		len(fixture.zones.routingZones) != 1 || fixture.zones.routingZones[0] != "example.com" {
+		t.Fatalf("routing enabled for %v in zones %v", fixture.zones.routingFor, fixture.zones.routingZones)
 	}
 }
 
