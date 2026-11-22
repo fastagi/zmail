@@ -20,6 +20,8 @@ type ExternalMailProviderReleasePO struct {
 	StopPush           bool      `gorm:"not null;default:false"`
 	StopSubscriptionID string    `gorm:"size:255;not null;default:''"`
 	StopWatchKey       string    `gorm:"size:320;not null;default:''"`
+	OwnerScope         string    `gorm:"size:16;not null;default:'unknown'"`
+	OwnerUserID        *uint     `gorm:""`
 	Attempts           int       `gorm:"type:smallint;not null;default:0"`
 	NextAttemptAt      time.Time `gorm:"not null;index"`
 	ExpiresAt          time.Time `gorm:"not null"`
@@ -35,8 +37,17 @@ func (po *ExternalMailProviderReleasePO) toDomain() *domain.ExternalMailProvider
 		ID: po.ID, OrganizationID: po.OrganizationID, ConnectionID: po.ConnectionID, Provider: domain.ExternalMailProvider(po.Provider),
 		AccountAddress: po.AccountAddress, TenantID: po.TenantID, TenantDirectoryID: po.TenantDirectoryID,
 		EncryptedGrant: po.EncryptedGrant, StopPush: po.StopPush, StopSubscriptionID: po.StopSubscriptionID, StopWatchKey: po.StopWatchKey,
+		OwnerScope: domain.ExternalMailReleaseOwnerScope(po.OwnerScope), OwnerUserID: po.OwnerUserID,
 		Attempts: po.Attempts, NextAttemptAt: po.NextAttemptAt, ExpiresAt: po.ExpiresAt, CreatedAt: po.CreatedAt,
 	}
+}
+
+// releaseOwnerScope stores an unset scope as unknown, the conservative rule.
+func releaseOwnerScope(scope domain.ExternalMailReleaseOwnerScope) domain.ExternalMailReleaseOwnerScope {
+	if scope == "" {
+		return domain.ExternalMailReleaseOwnerUnknown
+	}
+	return scope
 }
 
 var _ domain.ExternalMailReleaseRepository = (*repository)(nil)
@@ -49,7 +60,8 @@ func (r *repository) CreateExternalMailProviderRelease(ctx context.Context, rele
 		OrganizationID: release.OrganizationID, ConnectionID: release.ConnectionID, Provider: string(release.Provider),
 		AccountAddress: release.AccountAddress, TenantID: release.TenantID, TenantDirectoryID: release.TenantDirectoryID,
 		EncryptedGrant: release.EncryptedGrant, StopPush: release.StopPush, StopSubscriptionID: release.StopSubscriptionID,
-		StopWatchKey: release.StopWatchKey, NextAttemptAt: release.NextAttemptAt, ExpiresAt: release.ExpiresAt, CreatedAt: release.CreatedAt,
+		StopWatchKey: release.StopWatchKey, OwnerScope: string(releaseOwnerScope(release.OwnerScope)), OwnerUserID: release.OwnerUserID,
+		NextAttemptAt: release.NextAttemptAt, ExpiresAt: release.ExpiresAt, CreatedAt: release.CreatedAt,
 	}
 	if err := r.conn(ctx).Create(po).Error; err != nil {
 		return err

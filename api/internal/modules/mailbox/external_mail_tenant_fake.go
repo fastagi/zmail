@@ -14,6 +14,62 @@ var _ ExternalMailTenantSource = (*FakeExternalMailSource)(nil)
 // fakeTenantCredential is the credential a fake tenant stores: its identifier behind a prefix.
 const fakeTenantCredential = "fake-tenant:"
 
+// Development tenants (api/docs/EXTERNAL_MAIL_DEVELOPMENT.md). A running stack has no way to call
+// AddTenant, and its API and sync worker each hold their own in-memory fake, so the fake also accepts
+// a synthetic credential and derives everything about such a tenant from its identifier alone: every
+// process agrees on its directory without sharing state. The fake source exists only while `fake`
+// is the active external mail source, which configuration refuses in production; no real connector
+// knows any of this.
+const (
+	// FakeDevTenantSecret is the synthetic credential the fake accepts for a development tenant, as
+	// the Google service account key or the Microsoft client secret. Nothing else accepts it.
+	FakeDevTenantSecret = "fake-tenant-dev-only"
+	// fakeDevTenantCredential is the stored credential of a development tenant: its identifier
+	// behind a prefix of its own.
+	fakeDevTenantCredential = "fake-dev-tenant:"
+	// fakeDevTenantSuffix ends every development tenant identifier: a reserved, never resolvable
+	// domain (RFC 2606).
+	fakeDevTenantSuffix = ".invalid"
+	// FakeDevTenantDirectorySize is the number of ordinary mailboxes of a development tenant's
+	// directory, enough for several pages.
+	FakeDevTenantDirectorySize = 30
+	// FakeDevTenantRefusedLocal is the local part of the one directory mailbox whose token the fake
+	// refuses while the tenant works, to exercise a single assignment losing access.
+	FakeDevTenantRefusedLocal = "refused"
+)
+
+// fakeDevTenantIdentifier reports whether identifier names a development tenant: a lowercase domain
+// under .invalid of at most 63 characters, such as acme.invalid.
+func fakeDevTenantIdentifier(identifier string) bool {
+	name, found := strings.CutSuffix(identifier, fakeDevTenantSuffix)
+	if !found || name == "" || len(identifier) > 63 || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") || strings.Contains(name, "..") {
+		return false
+	}
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// fakeDevTenant is the development tenant named identifier: user01@ to user30@ its domain, in order,
+// then refused@, whose mailbox token is always refused.
+func fakeDevTenant(identifier string) *fakeTenant {
+	directory := make([]ExternalMailDirectoryEntry, 0, FakeDevTenantDirectorySize+1)
+	for i := 1; i <= FakeDevTenantDirectorySize; i++ {
+		local := fmt.Sprintf("user%02d", i)
+		directory = append(directory, ExternalMailDirectoryEntry{
+			Address: local + "@" + identifier, DisplayName: fmt.Sprintf("Fake User %02d", i), DirectoryID: "fake-" + local + "-" + identifier,
+		})
+	}
+	refused := FakeDevTenantRefusedLocal + "@" + identifier
+	directory = append(directory, ExternalMailDirectoryEntry{
+		Address: refused, DisplayName: "Refused Mailbox", DirectoryID: "fake-" + FakeDevTenantRefusedLocal + "-" + identifier,
+	})
+	return &fakeTenant{directory: directory, refusedMailbox: refused}
+}
+
 // AddTenant makes the source accept the tenant identifier with the directory, in order.
 func (f *FakeExternalMailSource) AddTenant(identifier string, directory ...ExternalMailDirectoryEntry) {
 	f.mu.Lock()
@@ -55,6 +111,13 @@ func (f *FakeExternalMailSource) AuthorizeTenant(_ context.Context, grant Extern
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	tenant, known := f.tenants[identifier]
+	if !known && (grant.ServiceAccountKey == FakeDevTenantSecret || grant.ClientSecret == FakeDevTenantSecret) &&
+		fakeDevTenantIdentifier(identifier) {
+		// A development tenant: the synthetic credential and a reserved domain.
+		return ExternalMailTenantAuthorization{
+			TenantIdentifier: identifier, DisplayName: identifier, Credential: fakeDevTenantCredential + identifier,
+		}, nil
+	}
 	if !known || tenant.refused || grant.ServiceAccountKey == "refuse" {
 		return ExternalMailTenantAuthorization{}, ErrExternalMailAuth
 	}
@@ -65,6 +128,12 @@ func (f *FakeExternalMailSource) AuthorizeTenant(_ context.Context, grant Extern
 
 // tenant resolves a stored credential to its tenant, or ErrExternalMailAuth.
 func (f *FakeExternalMailSource) tenant(credential string) (*fakeTenant, error) {
+	if identifier, dev := strings.CutPrefix(credential, fakeDevTenantCredential); dev {
+		if !fakeDevTenantIdentifier(identifier) {
+			return nil, ErrExternalMailAuth
+		}
+		return fakeDevTenant(identifier), nil
+	}
 	identifier, found := strings.CutPrefix(credential, fakeTenantCredential)
 	if !found {
 		return nil, ErrExternalMailAuth
@@ -124,10 +193,11 @@ func (f *FakeExternalMailSource) LookupTenantMailbox(_ context.Context, credenti
 func (f *FakeExternalMailSource) MailboxToken(_ context.Context, credential, address, directoryID string) (ExternalMailToken, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, err := f.tenant(credential); err != nil {
+	tenant, err := f.tenant(credential)
+	if err != nil {
 		return ExternalMailToken{}, err
 	}
-	if f.refusedMailboxes[strings.ToLower(address)] {
+	if f.refusedMailboxes[strings.ToLower(address)] || (tenant.refusedMailbox != "" && strings.EqualFold(tenant.refusedMailbox, address)) {
 		return ExternalMailToken{}, ErrExternalMailAuth
 	}
 	return ExternalMailToken{AccessToken: TenantMailboxToken(address), DirectoryID: directoryID}, nil

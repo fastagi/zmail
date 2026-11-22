@@ -624,6 +624,13 @@ func (s *service) planProviderRelease(ctx context.Context, connection *domain.Ex
 		OrganizationID: connection.OrganizationID, ConnectionID: connection.ID, Provider: connection.Provider,
 		AccountAddress: connection.AccountAddress, TenantID: connection.TenantID, TenantDirectoryID: connection.TenantDirectoryID,
 	}
+	// Whose pending sign-in holds the release back is decided now, while the connection row exists:
+	// the purge may delete it before the release runs.
+	if connection.Shared {
+		release.OwnerScope = domain.ExternalMailReleaseOwnerShared
+	} else {
+		release.OwnerScope, release.OwnerUserID = domain.ExternalMailReleaseOwnerMember, connection.OwnerUserID
+	}
 	if connector, registered := s.externalConnectors.lookup(connection.Provider); registered && connector.RevokesGrant && connection.TenantID == nil {
 		release.EncryptedGrant = connection.EncryptedRefreshToken
 	}
@@ -720,25 +727,40 @@ func (s *service) performProviderRelease(ctx context.Context, release *domain.Ex
 
 // releaseBlocked reports whether the release must not run now, and settles it: it is dropped when
 // its connection was bound again since (still there, but no longer revoked as of the release), and
-// postponed while a sign-in that may bind the account again is pending in the organization (the
-// connection's member's, or any member's when the connection has none or is gone).
+// postponed while a sign-in that may bind the account again is pending in the organization: the
+// member's own for a personal connection (none once that user was deleted), anyone's for a shared
+// one, whether or not the connection row still exists. A release recorded before its scope was kept
+// falls back to the connection's member, or anyone's once the connection is gone.
 func (s *service) releaseBlocked(ctx context.Context, release *domain.ExternalMailProviderRelease) bool {
-	var owner uint
 	connection, err := s.externalMail.FindExternalMailConnection(ctx, release.OrganizationID, release.ConnectionID)
 	switch {
 	case errors.Is(err, ErrExternalMailConnectionNotFound):
 		// Purged since: it cannot have been bound again; the account checks still apply.
+		connection = nil
 	case err != nil:
 		s.deferProviderRelease(ctx, release)
 		return true
 	case connection.Status != domain.ExternalMailStatusRevoked || connection.RevokedAt == nil || connection.RevokedAt.After(release.CreatedAt):
 		s.finishProviderRelease(ctx, release, "rebound")
 		return true
-	case connection.OwnerUserID != nil:
-		owner = *connection.OwnerUserID
 	}
 	if s.releases == nil {
 		return false
+	}
+	// owner 0 counts anyone's sign-in in the organization.
+	var owner uint
+	switch release.OwnerScope {
+	case domain.ExternalMailReleaseOwnerMember:
+		if release.OwnerUserID == nil {
+			// The member's user account was deleted: nobody can bind their account again.
+			return false
+		}
+		owner = *release.OwnerUserID
+	case domain.ExternalMailReleaseOwnerShared:
+	default:
+		if connection != nil && connection.OwnerUserID != nil {
+			owner = *connection.OwnerUserID
+		}
 	}
 	pending, err := s.releases.CountPendingExternalMailAuthorizations(ctx, release.OrganizationID, release.Provider, owner, release.ConnectionID, s.now().UTC())
 	if err != nil || pending > 0 {

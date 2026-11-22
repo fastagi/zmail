@@ -35,6 +35,7 @@ func TestMailRolesMigrationUpDown(t *testing.T) {
 
 	// The platform account ledger references mail_roles, so it rolls back first; AI triage adds a
 	// mailboxes column after role_id, so it rolls back too to keep the column order.
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
@@ -58,6 +59,7 @@ func TestMailRolesMigrationUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	require.NoError(t, (&addExternalMailPush{}).Up(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "upgrading must leave the golden schema")
 
 	var grouped int64
@@ -73,6 +75,7 @@ func TestMailRolesMigrationUpDown(t *testing.T) {
 	exec(`INSERT INTO mail_roles (id, organization_id, name, owner_user_id, created_at, updated_at) VALUES (6, 10, 'Sales', 901, now(), now())`)
 	exec(`UPDATE mailboxes SET role_id = 6 WHERE id = 1`)
 
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
@@ -90,6 +93,7 @@ func TestMailRolesMigrationUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	require.NoError(t, (&addExternalMailPush{}).Up(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 

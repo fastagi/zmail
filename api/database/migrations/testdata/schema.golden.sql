@@ -141,6 +141,8 @@ TABLE external_mail_provider_releases
   COLUMN next_attempt_at timestamp with time zone NOT NULL
   COLUMN expires_at timestamp with time zone NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN owner_scope character varying(16) NOT NULL DEFAULT 'unknown'::character varying
+  COLUMN owner_user_id bigint
 
 TABLE external_mail_subscriptions
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_subscriptions_id_seq'::regclass)
@@ -1002,10 +1004,13 @@ CONSTRAINT external_mail_connections.external_mail_connections_status_check CHEC
 CONSTRAINT external_mail_connections.external_mail_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
 CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_attempts CHECK ((attempts >= 0))
 CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_deadline CHECK ((expires_at > created_at))
+CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_owner CHECK ((((owner_scope)::text = 'member'::text) OR (owner_user_id IS NULL)))
+CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_owner_scope CHECK (((owner_scope)::text = ANY ((ARRAY['unknown'::character varying, 'member'::character varying, 'shared'::character varying])::text[])))
 CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
 CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_tenant_grant CHECK (((tenant_id IS NULL) OR (encrypted_grant = ''::text)))
 CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_work CHECK ((stop_push OR (encrypted_grant <> ''::text)))
 CONSTRAINT external_mail_provider_releases.external_mail_provider_releases_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT external_mail_provider_releases.external_mail_provider_releases_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_provider_releases.external_mail_provider_releases_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_active CHECK ((((status)::text <> 'active'::text) OR (((lookup_key)::text <> ''::text) AND (expires_at IS NOT NULL))))
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_failures CHECK ((consecutive_failures >= 0))
@@ -1358,6 +1363,7 @@ INDEX CREATE UNIQUE INDEX external_mail_provider_releases_pkey ON external_mail_
 INDEX CREATE INDEX idx_external_mail_provider_releases_account ON external_mail_provider_releases USING btree (organization_id, provider, lower((account_address)::text))
 INDEX CREATE INDEX idx_external_mail_provider_releases_due ON external_mail_provider_releases USING btree (next_attempt_at, id)
 INDEX CREATE INDEX idx_external_mail_provider_releases_expiry ON external_mail_provider_releases USING btree (expires_at, id)
+INDEX CREATE INDEX idx_external_mail_provider_releases_owner ON external_mail_provider_releases USING btree (owner_user_id) WHERE (owner_user_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX external_mail_subscriptions_pkey ON external_mail_subscriptions USING btree (id)
 INDEX CREATE INDEX idx_external_mail_subscriptions_lookup ON external_mail_subscriptions USING btree (provider, lookup_key) WHERE ((status)::text <> 'stopped'::text)
 INDEX CREATE INDEX idx_external_mail_subscriptions_open ON external_mail_subscriptions USING btree (connection_id) WHERE ((status)::text <> 'stopped'::text)
