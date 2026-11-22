@@ -532,6 +532,8 @@ func TestExternalMailPushStopsWithItsConnection(t *testing.T) {
 		if after := f.subscription(t, connectionID).LastNotifiedAt; (after == nil) != (notified == nil) || (after != nil && !after.Equal(*notified)) {
 			t.Fatalf("a stopped connection's notification was recorded at %v", after)
 		}
+		// The worker stops the subscriptions of ended connections at most once a minute.
+		f.advance(externalMailPushReconcileEvery)
 		f.sync(t)
 		subscription := f.subscription(t, connectionID)
 		if subscription.Status != domain.ExternalMailSubscriptionStopped || subscription.LookupKey != "" || subscription.SecretHash != "" {

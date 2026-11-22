@@ -244,16 +244,23 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		if stored, applied, err = s.externalMail.SaveExternalMailSync(tx, result); err != nil {
 			return nil, err
 		}
+		for _, message := range stored {
+			announced, storeErr := s.afterInboundStored(tx, mailbox, message)
+			if storeErr != nil {
+				return nil, storeErr
+			}
+			notifications = append(notifications, announced...)
+			if s.afterStoredHook != nil {
+				s.afterStoredHook()
+			}
+		}
+		// The subscription row is taken last, after the per-message work, so the save holds its lock
+		// only for the few statements before the commit and a notification arriving meanwhile is
+		// recorded rather than asked to come again. The connection row, taken by the save above,
+		// stays first in the lock order.
 		degraded := checkMissed && pushMissedMail(subscription, stored, startedAt, s.settings.ExternalMail.Push.Quiet())
 		if err = s.savePushUpkeep(tx, connection, applied, result.LastErrorCode == "", upkeep, degraded, trigger, startedAt); err != nil {
 			return nil, err
-		}
-		for _, message := range stored {
-			announced, err := s.afterInboundStored(tx, mailbox, message)
-			if err != nil {
-				return nil, err
-			}
-			notifications = append(notifications, announced...)
 		}
 		return notifications, nil
 	})

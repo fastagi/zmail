@@ -117,13 +117,13 @@ func (r *repository) DeleteExpiredExternalMailProviderReleases(ctx context.Conte
 	return int(result.RowsAffected), result.Error
 }
 
-func (r *repository) DeleteExternalMailProviderReleasesForAccount(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string) error {
+func (r *repository) DeleteExternalMailProviderReleasesForAccount(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, stopOnly bool) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Exec(`DELETE FROM external_mail_provider_releases
-		WHERE organization_id = ? AND provider = ? AND lower(account_address) = lower(?)`,
-		organizationID, string(provider), address).Error
+		WHERE organization_id = ? AND provider = ? AND lower(account_address) = lower(?) AND (NOT ? OR encrypted_grant = '')`,
+		organizationID, string(provider), address, stopOnly).Error
 }
 
 func (r *repository) CountLiveExternalMailAccountGrants(ctx context.Context, provider domain.ExternalMailProvider, address string, exceptConnectionID uint) (int, error) {

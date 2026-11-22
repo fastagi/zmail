@@ -1152,8 +1152,10 @@ When a notification arrives:
     which runs whether or not a connector is enabled, deletes it then. A Gmail grant that could not be
     handed back by then is not revoked by Zmail and does not lapse on its own: the member removes
     Zmail's access in their Google account to end it.
-  - Deleting an organization deletes its pending releases undone. Assigning or restoring a tenant
-    mailbox, and binding an account again, delete the organization's pending releases of that address.
+  - Deleting an organization deletes its pending releases undone. Binding an account again deletes
+    the organization's pending releases of that address. Assigning or restoring a tenant mailbox
+    deletes only those that stop a subscription: a member's own grant is still handed back, since the
+    tenant reads with its own credential.
   - A release is also postponed, not dropped, while the member (or, for a shared connection, anyone
     in the organization) has a sign-in pending for the provider, and everything that would make a
     hand-back harmful is checked again right before the hand-back call.
@@ -1164,7 +1166,8 @@ When a notification arrives:
     grant of its own, since at Google revoking one token revokes the user's whole grant. A Google
     account bound by several connections therefore keeps Zmail's access until its last binding goes.
   - A revoked tenant, a connection that needs reconnecting, and the retention purge stop it in Zmail
-    only. Their provider subscription lapses at its expiry: at most 7 days for Gmail, 70 hours for
+    only (the worker does so at most once a minute; the connection's notifications are ignored from
+    the moment it stops being `active`). Their provider subscription lapses at its expiry: at most 7 days for Gmail, 70 hours for
     Outlook.
   - A subscription a sync created while the connection was being revoked is stopped again at the
     provider, unless another live connection of the same account (by Gmail's primary address)

@@ -462,3 +462,91 @@ func TestExternalMailProviderReleaseWaitsForAPendingSignIn(t *testing.T) {
 		t.Fatal("the release never ran once the sign-in expired")
 	}
 }
+
+// TestExternalMailPushRecordedDuringTheSavesMessageWork: a notification that arrives while a sync's
+// save is still doing its per-message work is recorded and answered normally, not asked to come again,
+// and it still causes one more sync after the save.
+func TestExternalMailPushRecordedDuringTheSavesMessageWork(t *testing.T) {
+	f := newPushFixture(t)
+	f.sync(t)
+	received := f.service.now().UTC()
+	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", received), externalMessage("g-2", "Two", received))
+	f.advance(config.DefaultExternalMailPushPollInterval)
+	id, secret, _ := f.source.PushSubscription(externalTestToken)
+	var during error
+	notified := false
+	f.service.afterStoredHook = func() {
+		if notified {
+			return
+		}
+		notified = true
+		f.advance(time.Second)
+		_, during = f.service.ReceiveExternalMailPush(context.Background(), domain.ExternalMailProviderGmail, ExternalMailPushDelivery{
+			Header: http.Header{}, Query: url.Values{}, Body: fakeNotificationBody(id, secret, ""), ClientIP: "40.0.0.1",
+		})
+	}
+	f.sync(t)
+	f.service.afterStoredHook = nil
+	if !notified || during != nil {
+		t.Fatalf("a notification during the save's message work was answered %v", during)
+	}
+	if subscription := f.subscription(t, f.connection.ID); subscription.PendingAt == nil {
+		t.Fatal("the notification during the save was answered by it")
+	}
+	f.advance(f.service.settings.ExternalMail.Sync.Spacing())
+	f.sync(t)
+	if runs := f.runs(t); runs[0].Trigger != domain.ExternalMailSyncTriggerPush {
+		t.Fatalf("no sync followed the notification: newest run %+v", runs[0])
+	}
+}
+
+// TestExternalMailPushReconcilesAtMostOnceAMinute: the stop of subscriptions of ended connections runs
+// at most once a minute per process, whatever the worker's idle wait, and still runs.
+func TestExternalMailPushReconcilesAtMostOnceAMinute(t *testing.T) {
+	f := newPushFixture(t)
+	f.sync(t)
+	if err := f.repo.(*repository).db.Exec(`UPDATE external_mail_connections SET status = 'revoked', revoked_at = ? WHERE id = ?`,
+		f.service.now().UTC(), f.connection.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		f.advance(2 * time.Second)
+		f.sync(t)
+	}
+	if subscription := f.subscription(t, f.connection.ID); subscription.Status == domain.ExternalMailSubscriptionStopped {
+		t.Fatal("the stop ran on every pass")
+	}
+	f.advance(externalMailPushReconcileEvery)
+	f.sync(t)
+	if subscription := f.subscription(t, f.connection.ID); subscription.Status != domain.ExternalMailSubscriptionStopped {
+		t.Fatalf("the stop never ran: %+v", subscription)
+	}
+}
+
+// TestExternalMailProviderReleaseOutlivesATenantAssignment: assigning the address from a tenant does
+// not cancel the hand-back a member's own revoked grant is still owed: the tenant reads with its own
+// credential, so the member's grant is still handed back.
+func TestExternalMailProviderReleaseOutlivesATenantAssignment(t *testing.T) {
+	tf := newTenantFixture(t)
+	source := flakyRevokeSource{FakeExternalMailSource: tf.source, failing: &atomic.Bool{}, revokes: &atomic.Int32{}}
+	source.failing.Store(true)
+	registry := fakeExternalMailRegistry(source)
+	registry.connectors[0].Tenant = tf.source
+	tf.service.externalConnectors = registry
+	own := tf.connectionIn(t, accessOrg, tenantAddress("alice"), "alice-own-grant")
+	if err := tf.service.RevokeExternalMailConnection(context.Background(), tf.b, own.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if rows := tf.releaseRows(t, own.ID); len(rows) != 1 || rows[0].EncryptedGrant == "" {
+		t.Fatalf("release of the member's grant = %+v", rows)
+	}
+	tf.mustAssign(t, personalRow("alice", accessB))
+	if rows := tf.releaseRows(t, own.ID); len(rows) != 1 {
+		t.Fatalf("the tenant assignment canceled the member's hand-back: %+v", rows)
+	}
+	source.failing.Store(false)
+	tf.runReleaseWorker(t)
+	if !tf.source.Revoked("alice-own-grant") {
+		t.Fatal("the member's grant was never handed back")
+	}
+}

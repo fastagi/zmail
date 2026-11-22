@@ -174,7 +174,8 @@ requested for 70 hours and renewed after 35.
     because revoking one token at Google revokes the whole grant.
   - **Postponed.** A record waits while the member has a sign-in pending for the provider, and its
     conditions are checked again right before the hand-back, after the slower subscription stop.
-    Assigning or restoring a tenant mailbox deletes the organization's records for that address.
+    Assigning or restoring a tenant mailbox deletes the organization's stop-only records for that
+    address; a record that still owes a member's own grant its hand-back is kept.
   - **Follow-up.** The connection list does not yet show a member that a hand-back was never
     delivered; there is no existing field for it.
 - **Revoking.**

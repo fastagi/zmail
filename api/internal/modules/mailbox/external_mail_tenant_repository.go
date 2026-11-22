@@ -319,7 +319,7 @@ func (r *repository) RestoreTenantConnection(ctx context.Context, connectionID, 
 	}
 	restored := rows[0].toDomain()
 	// The address is read again: what an earlier revocation left to do at the provider must not run.
-	if err = r.DeleteExternalMailProviderReleasesForAccount(ctx, restored.OrganizationID, restored.Provider, restored.AccountAddress); err != nil {
+	if err = r.DeleteExternalMailProviderReleasesForAccount(ctx, restored.OrganizationID, restored.Provider, restored.AccountAddress, true); err != nil {
 		return nil, err
 	}
 	return restored, nil

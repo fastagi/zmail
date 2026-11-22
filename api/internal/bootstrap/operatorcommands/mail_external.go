@@ -67,13 +67,13 @@ func parseExternalMailWorkerArgs(args []string) (webhookWorkerConfig, error) {
 
 // externalMailWorkerPoll is the idle wait: the --poll the operator gave, or, without one, a short
 // wait while push subscriptions are on, so a notification is synced within seconds.
-func externalMailWorkerPoll(args []string, parsed time.Duration, push config.ExternalMailPushConfig) time.Duration {
+func externalMailWorkerPoll(args []string, parsed time.Duration, external config.ExternalMailConfig) time.Duration {
 	for _, arg := range args {
 		if arg == "--poll" || strings.HasPrefix(arg, "--poll=") {
 			return parsed
 		}
 	}
-	if push.Enabled {
+	if external.PushActive() {
 		return defaultExternalMailPushWorkerPoll
 	}
 	return parsed
@@ -88,7 +88,7 @@ func (c *MailExternalSyncCommand) Run(args []string) error {
 	if err != nil {
 		return err
 	}
-	workerConfig.Poll = externalMailWorkerPoll(args, workerConfig.Poll, cfg.ExternalMail.Push)
+	workerConfig.Poll = externalMailWorkerPoll(args, workerConfig.Poll, cfg.ExternalMail)
 	if !cfg.ExternalMail.Enabled() {
 		slog.Info("external_mail.worker_disabled", "reason", "EXTERNAL_MAIL_PROVIDERS is empty")
 		c.output.Info("External mail is off (EXTERNAL_MAIL_PROVIDERS is empty); nothing to sync")

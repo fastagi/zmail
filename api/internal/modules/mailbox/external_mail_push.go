@@ -368,15 +368,41 @@ func (s *service) maintainExternalMailPush(ctx context.Context, now time.Time) {
 	if !s.pushOn() {
 		return
 	}
-	if stopped, err := s.pushStore.StopOrphanedExternalMailSubscriptions(ctx, now, externalMailPushReconcileBatch); err != nil {
-		slog.WarnContext(ctx, "external_mail.push_reconcile_failed", slog.String("error", err.Error()))
-	} else if stopped > 0 {
-		slog.InfoContext(ctx, "external_mail.push_stopped", slog.Int("subscriptions", stopped), slog.String("reason", "connection_inactive"))
+	// The stop of subscriptions of ended connections joins every open subscription to its connection,
+	// so it runs at most once a minute per process, however short the worker's idle wait; the
+	// notifications of an ended connection are ignored in between all the same.
+	if s.pushReconcile.due(now) {
+		if stopped, err := s.pushStore.StopOrphanedExternalMailSubscriptions(ctx, now, externalMailPushReconcileBatch); err != nil {
+			slog.WarnContext(ctx, "external_mail.push_reconcile_failed", slog.String("error", err.Error()))
+		} else if stopped > 0 {
+			slog.InfoContext(ctx, "external_mail.push_stopped", slog.Int("subscriptions", stopped), slog.String("reason", "connection_inactive"))
+		}
 	}
 	if _, err := s.pushStore.PromotePendingExternalMailPush(ctx, now, s.settings.ExternalMail.Push.Coalesce(),
 		s.settings.ExternalMail.Sync.Spacing(), externalMailPushPromoteBatch); err != nil {
 		slog.WarnContext(ctx, "external_mail.push_promote_failed", slog.String("error", err.Error()))
 	}
+}
+
+// externalMailPushReconcileEvery is the least time between two stops of subscriptions of ended
+// connections in one process.
+const externalMailPushReconcileEvery = time.Minute
+
+// pushReconcileClock remembers when this process last stopped the subscriptions of ended connections.
+type pushReconcileClock struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+// due reports whether the stop runs at now, and records it when it does.
+func (c *pushReconcileClock) due(now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.last.IsZero() && now.Sub(c.last) < externalMailPushReconcileEvery && !now.Before(c.last) {
+		return false
+	}
+	c.last = now
+	return true
 }
 
 // pushUpkeep is what one sync did to the connection's subscription.
