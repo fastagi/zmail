@@ -125,6 +125,8 @@ const (
 	CodeMailDraftNotFound               = "MAILBOX.DRAFT_NOT_FOUND"
 	CodeMailDraftLimitReached           = "MAILBOX.DRAFT_LIMIT_REACHED"
 	CodeMailThreadAssignmentUnavailable = "MAILBOX.ASSIGNMENT_UNAVAILABLE"
+	CodeMailThreadNoteNotFound          = "MAILBOX.NOTE_NOT_FOUND"
+	CodeMailThreadNoteLimitReached      = "MAILBOX.NOTE_LIMIT_REACHED"
 	CodeMailTemplateInvalid             = "MAILBOX.TEMPLATE_INVALID"
 	CodeMailTemplateNameTaken           = "MAILBOX.TEMPLATE_NAME_TAKEN"
 	CodeMailTemplateLimitReached        = "MAILBOX.TEMPLATE_LIMIT_REACHED"

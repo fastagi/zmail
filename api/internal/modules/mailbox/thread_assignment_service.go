@@ -67,24 +67,13 @@ func (s *service) SaveMailThreadAssignment(
 func (s *service) assignableThread(
 	ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint, need func(domain.MailboxAccess) bool,
 ) (domain.MailThreadAssignmentRepository, []uint, error) {
-	if s.assignments == nil || s.organize == nil {
+	if s.assignments == nil {
 		return nil, nil, domain.ErrServiceUnavailable
 	}
-	mailbox, err := s.authorizeMailbox(ctx, viewer, mailboxID, need)
-	if err != nil {
+	if err := s.sharedThread(ctx, viewer, mailboxID, threadID, need); err != nil {
 		return nil, nil, err
 	}
-	if mailbox.Type != domain.MailboxTypeShared || mailbox.Connected() {
-		return nil, nil, ErrMailThreadAssignmentUnavailable
-	}
-	messages, err := s.organize.ThreadMessages(ctx, mailbox.ID, threadID, viewer.MembershipID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(messages) == 0 {
-		return nil, nil, ErrMailMessageNotFound
-	}
-	members, err := s.repo.ListMailboxMembers(ctx, mailbox.ID)
+	members, err := s.repo.ListMailboxMembers(ctx, mailboxID)
 	if err != nil {
 		return nil, nil, err
 	}

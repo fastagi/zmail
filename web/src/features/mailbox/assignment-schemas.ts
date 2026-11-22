@@ -1,4 +1,12 @@
-import { array, literal, nullable, strictObject, union, type infer as Infer } from 'zod/mini';
+import {
+  array,
+  literal,
+  nullable,
+  string,
+  strictObject,
+  union,
+  type infer as Infer,
+} from 'zod/mini';
 
 import { safeIdSchema, timestampSchema } from '@/features/mailbox/schemas';
 
@@ -24,3 +32,19 @@ export interface MailThreadAssignmentInput {
   assignee_user_id: number | null;
   status: MailThreadStatus;
 }
+
+/** An internal note on a shared mailbox's conversation (`contracts/MAILBOXES.md`, Thread Notes). */
+export const mailThreadNoteSchema = strictObject({
+  id: safeIdSchema,
+  thread_id: safeIdSchema,
+  author_user_id: nullable(safeIdSchema),
+  body: string(),
+  created_at: timestampSchema,
+});
+
+export type MailThreadNote = Infer<typeof mailThreadNoteSchema>;
+
+export const mailThreadNotesSchema = strictObject({ items: array(mailThreadNoteSchema) });
+
+/** Longest note body, in characters. */
+export const MAIL_THREAD_NOTE_MAX_LENGTH = 2000;

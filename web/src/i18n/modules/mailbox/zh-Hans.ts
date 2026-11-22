@@ -284,6 +284,16 @@ const messages = {
     close: '标记为已完成',
     reopen: '重新打开',
   },
+  notes: {
+    label: '内部备注',
+    hint: '只有本邮箱的成员能看到备注，不会发给对方。',
+    empty: '还没有备注。',
+    placeholder: '给团队留一条备注…',
+    add: '添加备注',
+    delete: '删除备注',
+    deletedAuthor: '已离开的成员',
+    count: '{count} 条备注',
+  },
   thread: {
     label: '会话',
     expand: '展开 {sender} 的邮件',
@@ -1615,6 +1625,8 @@ const messages = {
     draftNotFound: '这份草稿已发送或已删除。',
     draftLimitReached: '你已有 200 份草稿，删除一份后才能再保存。',
     assignmentUnavailable: '只有共享邮箱可以分派会话。',
+    noteNotFound: '这条备注已被删除。',
+    noteLimitReached: '这个会话已有 200 条备注，删除一条后才能再添加。',
     templateVariablesMissing: '模板中有变量既没有值也没有默认值。请填写后重新发送。',
     attachmentsInvalid: '最多添加 10 个非空文件，合计不超过 4 MB。',
     addressInvalid:

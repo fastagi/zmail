@@ -422,6 +422,14 @@ TABLE mail_thread_assignments
   COLUMN updated_by_user_id bigint
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE mail_thread_notes
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_thread_notes_id_seq'::regclass)
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN thread_id bigint NOT NULL
+  COLUMN author_user_id bigint
+  COLUMN body text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
 TABLE mail_triage
   COLUMN message_id bigint NOT NULL
   COLUMN mailbox_id bigint NOT NULL
@@ -1013,6 +1021,9 @@ CONSTRAINT mail_thread_assignments.mail_thread_assignments_mailbox_id_fkey FOREI
 CONSTRAINT mail_thread_assignments.mail_thread_assignments_pkey PRIMARY KEY (mailbox_id, thread_id)
 CONSTRAINT mail_thread_assignments.mail_thread_assignments_status_check CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text])))
 CONSTRAINT mail_thread_assignments.mail_thread_assignments_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_thread_notes.mail_thread_notes_author_user_id_fkey FOREIGN KEY (author_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_thread_notes.mail_thread_notes_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_thread_notes.mail_thread_notes_pkey PRIMARY KEY (id)
 CONSTRAINT mail_triage.mail_triage_attempts_check CHECK ((attempts >= 0))
 CONSTRAINT mail_triage.mail_triage_category_check CHECK (((category)::text = ANY ((ARRAY['reply'::character varying, 'deadline'::character varying, 'fyi'::character varying, 'review'::character varying])::text[])))
 CONSTRAINT mail_triage.mail_triage_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
@@ -1320,6 +1331,9 @@ INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
 INDEX CREATE INDEX idx_mail_thread_assignments_assignee ON mail_thread_assignments USING btree (assignee_user_id)
 INDEX CREATE INDEX idx_mail_thread_assignments_updated_by ON mail_thread_assignments USING btree (updated_by_user_id)
 INDEX CREATE UNIQUE INDEX mail_thread_assignments_pkey ON mail_thread_assignments USING btree (mailbox_id, thread_id)
+INDEX CREATE INDEX idx_mail_thread_notes_author ON mail_thread_notes USING btree (author_user_id)
+INDEX CREATE INDEX idx_mail_thread_notes_thread ON mail_thread_notes USING btree (mailbox_id, thread_id, id)
+INDEX CREATE UNIQUE INDEX mail_thread_notes_pkey ON mail_thread_notes USING btree (id)
 INDEX CREATE INDEX idx_mail_triage_overrides ON mail_triage USING btree (mailbox_id, updated_at) WHERE ((source)::text = 'manual'::text)
 INDEX CREATE INDEX idx_mail_triage_pending ON mail_triage USING btree (next_attempt_at, message_id) WHERE ((status)::text = 'pending'::text)
 INDEX CREATE INDEX idx_mail_triage_results ON mail_triage USING btree (mailbox_id, category) WHERE ((status)::text = ANY ((ARRAY['done'::character varying, 'failed'::character varying])::text[]))

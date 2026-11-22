@@ -7602,6 +7602,113 @@ paths:
           $ref: '#/components/responses/InvalidInput'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/threads/{thread_id}/notes:
+    get:
+      operationId: listMailThreadNotes
+      summary: Read the internal notes on a shared mailbox's thread
+      description: Needs `view`. Oldest first; a thread keeps at most 200 notes. Personal and
+        connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      responses:
+        '200':
+          description: The thread's notes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadNotesEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailThreadNote
+      summary: Leave an internal note on a shared mailbox's thread
+      description: Needs `send`. The note is never sent to the correspondent. A thread already
+        keeping 200 notes is `409 MAILBOX.NOTE_LIMIT_REACHED`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMailThreadNoteRequest'
+      responses:
+        '201':
+          description: The saved note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadNoteEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/threads/{thread_id}/notes/{note_id}:
+    delete:
+      operationId: deleteMailThreadNote
+      summary: Delete one of the caller's own notes
+      description: Needs `view`. Another member's note is `404 MAILBOX.NOTE_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+        - name: note_id
+          in: path
+          required: true
+          description: Positive note identifier.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+      responses:
+        '204':
+          description: The note is gone.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/message-counts:
     get:
       operationId: getMailMessageCounts
@@ -10947,6 +11054,8 @@ components:
         - MAILBOX.DRAFT_NOT_FOUND
         - MAILBOX.DRAFT_LIMIT_REACHED
         - MAILBOX.ASSIGNMENT_UNAVAILABLE
+        - MAILBOX.NOTE_NOT_FOUND
+        - MAILBOX.NOTE_LIMIT_REACHED
         - MAILBOX.TEMPLATE_INVALID
         - MAILBOX.TEMPLATE_NAME_TAKEN
         - MAILBOX.TEMPLATE_LIMIT_REACHED
@@ -16729,6 +16838,78 @@ components:
           description: The mailbox's members with `send` or `manage`, ascending.
           items:
             $ref: '#/components/schemas/PositiveID'
+    CreateMailThreadNoteRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - body
+      properties:
+        body:
+          description: 1 to 2000 characters after trimming; line breaks kept, no other control characters.
+          type: string
+          minLength: 1
+          maxLength: 2000
+    MailThreadNote:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - thread_id
+        - author_user_id
+        - body
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        thread_id:
+          $ref: '#/components/schemas/PositiveID'
+        author_user_id:
+          description: Null once the author's account is deleted.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    MailThreadNoteEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailThreadNote'
+    MailThreadNotesEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              maxItems: 200
+              items:
+                $ref: '#/components/schemas/MailThreadNote'
     MailThreadAssignmentEnvelope:
       type: object
       additionalProperties: false

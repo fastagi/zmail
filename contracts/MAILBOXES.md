@@ -1499,6 +1499,30 @@ assignable_user_ids }`.
 - When the assignee or the last editor is deleted, that field becomes `null`; removing a member
   from the mailbox keeps the assignment until someone changes it.
 
+### Thread Notes
+
+Members of a shared Zmail mailbox can leave internal notes on a conversation. Notes are never sent
+to the correspondent. Personal and connected mailboxes have no notes:
+`409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+
+| Action | Route | Needs | Body |
+|---|---|---|---|
+| List | `GET /v1/mailboxes/:mailbox_id/threads/:thread_id/notes` | `view` | none |
+| Add | `POST /v1/mailboxes/:mailbox_id/threads/:thread_id/notes` | `send` | `{ body }` |
+| Delete own | `DELETE /v1/mailboxes/:mailbox_id/threads/:thread_id/notes/:note_id` | `view` | none |
+
+A note is `{ id, thread_id, author_user_id, body, created_at }`; the list is
+`{ items: [note...] }`, oldest first.
+
+- `body` is trimmed and `\r\n` becomes `\n`; it must then be 1 to 2000 characters without
+  control characters other than line breaks and tabs, else `422` on `body`.
+- A thread keeps at most 200 notes; one more is `409 MAILBOX.NOTE_LIMIT_REACHED`.
+- Only the author deletes a note; another member's, or a missing one, is
+  `404 MAILBOX.NOTE_NOT_FOUND`. Deleting the author's account keeps the note with
+  `author_user_id: null`.
+- The thread must have a message the caller sees outside the trash, else
+  `404 MAILBOX.MESSAGE_NOT_FOUND`.
+
 ### Listing And Search
 
 `GET /v1/mailboxes/:mailbox_id/messages` takes these filters, combined with AND:
