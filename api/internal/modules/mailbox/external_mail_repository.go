@@ -112,7 +112,8 @@ func (r *repository) CreateExternalMailConnection(ctx context.Context, connectio
 	*connection = *po.toDomain()
 	// The account is bound again: what an earlier revocation left to do at the provider would now
 	// revoke this binding's grant or watch.
-	return r.DeleteExternalMailProviderReleasesForAccount(ctx, connection.OrganizationID, connection.Provider, connection.AccountAddress)
+	return r.DeleteExternalMailProviderReleasesForAccount(ctx, connection.OrganizationID, connection.Provider, connection.AccountAddress,
+		connection.TenantID != nil)
 }
 
 func (r *repository) ClaimExternalMailConnections(ctx context.Context, claim domain.ExternalMailClaim) ([]*domain.ExternalMailConnection, error) {
@@ -403,7 +404,7 @@ func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind do
 	}
 	rebound := rows[0].toDomain()
 	// Bound again: the releases an earlier revocation left would revoke this grant or watch.
-	if err = r.DeleteExternalMailProviderReleasesForAccount(ctx, rebound.OrganizationID, rebound.Provider, rebound.AccountAddress); err != nil {
+	if err = r.DeleteExternalMailProviderReleasesForAccount(ctx, rebound.OrganizationID, rebound.Provider, rebound.AccountAddress, false); err != nil {
 		return nil, err
 	}
 	return rebound, nil

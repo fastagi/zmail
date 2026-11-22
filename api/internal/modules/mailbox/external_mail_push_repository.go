@@ -154,48 +154,42 @@ func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.Exter
 		renewal = `, renew_after = @now, expires_at = CASE WHEN s.expires_at IS NULL THEN NULL ELSE LEAST(s.expires_at, @now) END,
 			status = CASE WHEN s.status = 'active' THEN 'pending' ELSE s.status END`
 	}
-	window := mark.Window.Seconds()
-	made := 0
-	// Locks are taken in one order everywhere: connection, then subscription, as a sync's save does.
-	// The connections are locked first, in id order, waiting (bounded by lock_timeout) for a save in
-	// progress rather than skipping it, so the notification is kept pending, never lost.
-	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`SET LOCAL lock_timeout = '5s'`).Error; err != nil {
-			return err
-		}
-		if err := tx.Exec(`SELECT c.id FROM external_mail_connections c
-		  JOIN external_mail_subscriptions s ON s.connection_id = c.id
-		  WHERE s.id IN ? ORDER BY c.id FOR UPDATE OF c`, mark.SubscriptionIDs).Error; err != nil {
-			return err
-		}
-		result := tx.Exec(`WITH m AS (
-		  UPDATE external_mail_subscriptions s
-		  SET last_notified_at = @now, pending_at = COALESCE(s.pending_at, @now),
-		    -- Only a change notification shows delivery works; a lifecycle event does not.
-		    degraded_at = CASE WHEN @lifecycle = '' THEN NULL ELSE s.degraded_at END, updated_at = @now`+renewal+`
-		  WHERE s.id IN @ids AND s.status <> 'stopped'
-		  RETURNING s.connection_id, s.scheduled_sync_at, s.last_push_sync_at
-		)
-		UPDATE external_mail_connections c
-		SET next_sync_at = `+pushTargetSQL+`
-		FROM m
-		WHERE c.id = m.connection_id AND `+pushPromotableSQL,
-			map[string]any{"now": mark.Now, "ids": mark.SubscriptionIDs, "window": window, "spacing": mark.Spacing.Seconds(), "lifecycle": mark.Lifecycle})
-		made = int(result.RowsAffected)
-		return result.Error
-	})
-	return made, err
+	// The request path touches subscription rows only, in one statement that never waits: a row a
+	// sync's save holds at that moment is skipped, and the caller answers "try again" for it. The
+	// worker's promotion step makes the connections due, under the usual lock order.
+	var eligible int64
+	if err := r.conn(ctx).Raw(`SELECT count(*) FROM external_mail_subscriptions WHERE id IN ? AND status <> 'stopped'`,
+		mark.SubscriptionIDs).Scan(&eligible).Error; err != nil {
+		return 0, err
+	}
+	result := r.conn(ctx).Exec(`UPDATE external_mail_subscriptions s
+		SET last_notified_at = @now, pending_at = COALESCE(s.pending_at, @now),
+		  -- Only a change notification shows delivery works; a lifecycle event does not.
+		  degraded_at = CASE WHEN @lifecycle = '' THEN NULL ELSE s.degraded_at END, updated_at = @now`+renewal+`
+		WHERE s.id IN (SELECT id FROM external_mail_subscriptions WHERE id IN @ids AND status <> 'stopped'
+		  ORDER BY id FOR UPDATE SKIP LOCKED)`,
+		map[string]any{"now": mark.Now, "ids": mark.SubscriptionIDs, "lifecycle": mark.Lifecycle})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	recorded := int(result.RowsAffected)
+	if int64(recorded) < eligible {
+		return recorded, domain.ErrExternalMailPushBusy
+	}
+	return recorded, nil
 }
 
 // KeepExternalMailRotatedToken stores a grant the provider rotated during a sync whose save failed,
-// so the spent grant is never used again. A revoked connection, or one without a grant of its own,
-// is left as it is.
-func (r *repository) KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, sealed string) error {
+// so the spent grant is never used again: only while the connection still holds the grant the sync
+// started with (previous), so a member's reconnect meanwhile is never overwritten. A revoked
+// connection, or one without a grant of its own, is left as it is.
+func (r *repository) KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, previous, sealed string) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Exec(`UPDATE external_mail_connections SET encrypted_refresh_token = ?
-		WHERE id = ? AND status <> 'revoked' AND tenant_id IS NULL AND encrypted_refresh_token <> ''`, sealed, connectionID).Error
+		WHERE id = ? AND status <> 'revoked' AND tenant_id IS NULL AND encrypted_refresh_token <> ''
+		  AND encrypted_refresh_token = ?`, sealed, connectionID, previous).Error
 }
 
 func (r *repository) PromotePendingExternalMailPush(ctx context.Context, now time.Time, window, spacing time.Duration, limit int) (int, error) {

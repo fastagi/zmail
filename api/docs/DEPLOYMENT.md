@@ -262,7 +262,8 @@ for them.
 Push subscriptions are off until `EXTERNAL_MAIL_PUSH_ENABLED=true`. With them, Gmail (through the
 operator's Cloud Pub/Sub topic) and Outlook (Graph change notifications) call
 `POST /v1/external-mail-notifications/gmail` and `.../outlook` on the API's public origin, and the
-worker syncs that connection within seconds; run it with `--poll=5s` then. The worker also creates
+worker syncs that connection within seconds; without `--poll` it then waits two seconds between idle
+passes. The worker also creates
 and renews the subscriptions. What to create at Google Cloud and in Entra, with least-privilege
 notes, is in [EXTERNAL_MAIL_PUSH.md](EXTERNAL_MAIL_PUSH.md).
 

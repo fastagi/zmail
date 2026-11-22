@@ -224,6 +224,17 @@ func validateExternalMailPushConfig(c ExternalMailPushConfig, production bool) e
 	return nil
 }
 
+// PushActive reports whether push is on and at least one enabled connector can receive it: Gmail or
+// Outlook with its push settings, or the fake source that stands in for both.
+func (c ExternalMailConfig) PushActive() bool {
+	if !c.Push.Enabled {
+		return false
+	}
+	return c.Source() == ExternalMailSourceFake ||
+		(c.Provides(ExternalMailProviderGmail) && c.Push.GmailConfigured()) ||
+		(c.Provides(ExternalMailProviderOutlook) && c.Push.OutlookConfigured())
+}
+
 // validateExternalMailPushExposure refuses push in production when the per-sender budgets could not
 // tell senders apart: behind a load balancer without SERVER_TRUSTED_PROXIES every request seems to
 // come from the balancer, so one noisy sender would use up the budget of Graph's handshakes and of
