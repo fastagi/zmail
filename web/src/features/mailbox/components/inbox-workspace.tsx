@@ -215,13 +215,15 @@ export type InboxDateRange = (typeof INBOX_DATE_RANGES)[number];
 
 /** The calendar day `YYYY-MM-DD` that is `days` before today in `tz`. */
 function daysAgo(tz: string, days: number): string {
-  const today = new Intl.DateTimeFormat('en-CA', {
+  const parts = new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+    month: 'numeric',
+    day: 'numeric',
     timeZone: tz,
-  }).format(new Date());
-  const [year, month, day] = today.split('-').map(Number);
+  }).formatToParts(new Date());
+  const part = (type: 'year' | 'month' | 'day') =>
+    Number(parts.find(item => item.type === type)?.value);
+  const [year, month, day] = [part('year'), part('month'), part('day')];
   return new Date(Date.UTC(year, month - 1, day - days)).toISOString().slice(0, 10);
 }
 
