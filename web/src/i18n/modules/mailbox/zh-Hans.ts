@@ -1373,6 +1373,7 @@ const messages = {
     scheduledFor: '定时于 {time}',
     startedAt: '开始于 {time}',
     finishedAt: '完成于 {time}',
+    canceledAt: '取消于 {time}',
     createdAt: '创建于 {time}',
     open: '打开 {name}',
     back: '返回群发列表',

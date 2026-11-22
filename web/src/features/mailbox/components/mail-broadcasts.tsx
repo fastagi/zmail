@@ -277,8 +277,11 @@ function useWhen() {
   const formatter = useDateTimeFormat();
   return (broadcast: MailBroadcast): string => {
     const time = (value: string) => formatter.format(new Date(value));
-    if (broadcast.finished_at)
-      return t('broadcasts.finishedAt', { time: time(broadcast.finished_at) });
+    if (broadcast.finished_at) {
+      const ended =
+        broadcast.status === 'canceled' ? 'broadcasts.canceledAt' : 'broadcasts.finishedAt';
+      return t(ended, { time: time(broadcast.finished_at) });
+    }
     if (broadcast.status === 'scheduled' && broadcast.scheduled_at) {
       return t('broadcasts.scheduledFor', { time: time(broadcast.scheduled_at) });
     }
