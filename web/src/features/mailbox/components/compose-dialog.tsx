@@ -427,7 +427,7 @@ export function ComposeDialog({
         ...(attachments.length > 0 ? { attachments } : {}),
       };
       const delayMs = undoSendDelayMs();
-      if (onReopen && delayMs > 0) {
+      if (onReopen && delayMs > 0 && !isReplyOrForward) {
         sendLater(input, delayMs, onReopen);
         return;
       }

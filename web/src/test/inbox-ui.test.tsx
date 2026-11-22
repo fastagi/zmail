@@ -2145,6 +2145,22 @@ describe('inbox keyboard shortcuts', () => {
     expect(state.send.mutateAsync).not.toHaveBeenCalled();
   });
 
+  it('a reply sends at once, without the Undo wait', async () => {
+    setUndoSendDelayMs(60_000);
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    press('r');
+    const dialog = await screen.findByRole('dialog', { name: 'Reply' });
+    fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Thanks' } });
+    const toastsBefore = toast.mock.calls.length;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(state.send.mutateAsync).toHaveBeenCalledOnce());
+    expect(toast.mock.calls.slice(toastsBefore).map(call => call[0])).not.toContain('Sending…');
+  });
+
   // Issue #86: leaving the page with the composer open keeps what was written.
   it('navigating away with the composer open keeps the draft for the next compose', async () => {
     const first = renderRoute();
