@@ -110,7 +110,7 @@ func (s *service) RenameMailbox(ctx context.Context, viewer domain.OrganizationC
 	if err != nil {
 		return nil, err
 	}
-	if mailbox.Connected() && mailbox.Type == domain.MailboxTypePersonal {
+	if mailbox.PrivateConnected() {
 		// A member's own outside account is not the organization's to see or rename.
 		return nil, ErrMailboxNotFound
 	}

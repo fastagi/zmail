@@ -77,6 +77,8 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 			Type:           string(mailbox.Type),
 			Origin:         string(mailboxOriginOf(string(mailbox.Origin))),
 			OwnerUserID:    mailbox.OwnerUserID,
+			// Only a connected mailbox comes from a tenant; the schema checks it too.
+			ExternalMailTenantID: mailbox.ExternalTenantID,
 		}
 		if po.Type == "" {
 			po.Type = string(domain.MailboxTypeShared)
@@ -124,7 +126,7 @@ func (r *repository) ListUsableMailboxes(ctx context.Context, organizationID, me
 	}
 	condition := "(type = 'personal' AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
 	if includeAwaitingHandover {
-		condition += " OR (type = 'personal' AND origin = 'zmail' AND owner_left_at IS NOT NULL)"
+		condition += " OR (type = 'personal' AND (origin = 'zmail' OR external_mail_tenant_id IS NOT NULL) AND owner_left_at IS NOT NULL)"
 	}
 	var rows []MailboxPO
 	err := r.conn(ctx).

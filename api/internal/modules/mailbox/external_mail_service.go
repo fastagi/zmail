@@ -3,7 +3,6 @@ package mailbox
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -94,18 +93,22 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		return err
 	}
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
-	refreshToken, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
 	var fetched ExternalMailFetch
-	switch {
-	case !registered:
+	var token ExternalMailToken
+	var tenant *domain.ExternalMailTenant
+	if !registered {
 		err = ErrExternalMailProviderUnavailable
-	case err == nil:
-		// Each fetch has its own deadline, so a slow or hostile provider cannot stall the pass.
+	} else {
+		// Each fetch has its own deadline, a tenant's token minting included, so a slow or hostile
+		// provider cannot stall the pass.
 		fetchCtx, cancel := context.WithTimeout(ctx, budget.Timeout())
-		fetched, err = connector.Source.Fetch(fetchCtx, ExternalMailFetchRequest{
-			Token: ExternalMailToken{RefreshToken: refreshToken}, Cursor: connection.SyncCursor,
-			AccountAddress: connection.AccountAddress, BackfillDays: connection.BackfillDays, Now: now,
-		})
+		token, tenant, err = s.connectionToken(fetchCtx, connection, connector)
+		if err == nil {
+			fetched, err = connector.Source.Fetch(fetchCtx, ExternalMailFetchRequest{
+				Token: token, Cursor: connection.SyncCursor,
+				AccountAddress: connection.AccountAddress, BackfillDays: connection.BackfillDays, Now: now,
+			})
+		}
 		timedOut = errors.Is(fetchCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		cancel()
 		if err != nil && ctx.Err() != nil {
@@ -118,9 +121,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 			// fetch failure and backs off.
 			fetched, err = ExternalMailFetch{RefreshToken: fetched.RefreshToken}, errExternalMailFetchTimeout
 		}
-	default:
-		// A token this instance cannot open is as unusable as one the provider refuses.
-		err = fmt.Errorf("%w: sealed token unreadable", ErrExternalMailAuth)
 	}
 	latency := time.Since(started)
 	outcome := domain.ExternalMailSyncOK
@@ -128,7 +128,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		// An empty cursor cannot expire: a source that says so would restart forever.
 		err = errExternalMailCursorLoop
 	}
-	if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
+	if fetched.RefreshToken != "" && fetched.RefreshToken != token.RefreshToken {
 		// A provider that rotates grants has already spent the old one, so the new one is kept
 		// even when the rest of the fetch failed.
 		sealed, sealErr := s.sealRefreshToken(fetched.RefreshToken)
@@ -199,6 +199,9 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	if saveErr != nil {
 		return saveErr
 	}
+	if tenant != nil && result.Run.Outcome == domain.ExternalMailSyncAuthFailed {
+		s.checkTenantAfterRefusal(ctx, connector, tenant, budget.Timeout())
+	}
 	metrics.RecordExternalMailSync(string(connection.Provider), string(result.Run.Outcome), latency)
 	attributes := []any{
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.Uint64("mailbox_id", uint64(connection.MailboxID)),
@@ -257,6 +260,12 @@ func (s *service) ListExternalMailConnections(ctx context.Context, viewer domain
 	if err != nil {
 		return nil, err
 	}
+	// The organization's mailboxes assigned to the viewer from a tenant follow their own ones.
+	assigned, err := s.externalMail.ListTenantPersonalConnections(ctx, viewer.OrganizationID, viewer.UserID, maxListedTenantPersonalConnections)
+	if err != nil {
+		return nil, err
+	}
+	connections = append(connections, assigned...)
 	manager := viewer.Role.CanManageOrganization()
 	if !manager && viewer.MembershipID == 0 {
 		return connections, nil
@@ -281,6 +290,9 @@ func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domai
 	connection, err := s.externalMail.FindExternalMailConnection(ctx, viewer.OrganizationID, id)
 	if err != nil {
 		return err
+	}
+	if connection.TenantID != nil {
+		return s.unassignTenantConnection(ctx, viewer, connection)
 	}
 	if connection.Shared {
 		// An organization's connection is unbound by whoever manages it, as a disconnect of the
@@ -334,24 +346,7 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, s.now().UTC()); err != nil {
 			return err
 		}
-		// A revoked account's copies never reach the model again, whoever revoked it.
-		if s.triage != nil {
-			if err := s.triage.StopMailboxTriage(tx, connection.MailboxID); err != nil {
-				return err
-			}
-		}
-		// Nor an agent: the mailbox's grants end and its drafts go with the connection.
-		reason := domain.MailAgentRevokedConnectionRevoked
-		if event == domain.MailboxAccessConnectionRevokedLeave {
-			reason = domain.MailAgentRevokedOwnerLeft
-		}
-		if err := s.endAgentMailbox(tx, domain.MailAgentGrantRevocation{
-			OrganizationID: connection.OrganizationID, MailboxID: connection.MailboxID,
-			Reason: reason, RevokedBy: actorUserID,
-		}); err != nil {
-			return err
-		}
-		return s.recordConnectionEvent(tx, connection, event, actorUserID)
+		return s.afterConnectionRevoked(tx, connection, actorUserID, event, nil)
 	})
 	if err != nil {
 		return err
@@ -360,6 +355,29 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
 		slog.String("event", string(event)))
 	return nil
+}
+
+// afterConnectionRevoked ends what a revoked connection's mailbox fed, in the transaction that revoked
+// it, and records the event with extra detail.
+func (s *service) afterConnectionRevoked(tx context.Context, connection *domain.ExternalMailConnection, actorUserID uint, event domain.MailboxAccessEventType, extra map[string]any) error {
+	// A revoked account's copies never reach the model again, whoever revoked it.
+	if s.triage != nil {
+		if err := s.triage.StopMailboxTriage(tx, connection.MailboxID); err != nil {
+			return err
+		}
+	}
+	// Nor an agent: the mailbox's grants end and its drafts go with the connection.
+	reason := domain.MailAgentRevokedConnectionRevoked
+	if event == domain.MailboxAccessConnectionRevokedLeave {
+		reason = domain.MailAgentRevokedOwnerLeft
+	}
+	if err := s.endAgentMailbox(tx, domain.MailAgentGrantRevocation{
+		OrganizationID: connection.OrganizationID, MailboxID: connection.MailboxID,
+		Reason: reason, RevokedBy: actorUserID,
+	}); err != nil {
+		return err
+	}
+	return s.recordConnectionEventWith(tx, connection, event, actorUserID, extra)
 }
 
 // deleteConnectedMailbox revokes the mailbox's connection, then soft-deletes the mailbox, in one
@@ -385,15 +403,28 @@ func (s *service) deleteConnectedMailbox(ctx context.Context, viewer domain.Orga
 // recordConnectionEvent writes a connection event to its mailbox's access history. The detail names
 // the connection and its provider only, never the outside account's address.
 func (s *service) recordConnectionEvent(ctx context.Context, connection *domain.ExternalMailConnection, event domain.MailboxAccessEventType, actorUserID uint) error {
+	return s.recordConnectionEventWith(ctx, connection, event, actorUserID, nil)
+}
+
+// recordConnectionEventWith is recordConnectionEvent with extra detail, such as a reason. A tenant
+// connection's events also name the tenant.
+func (s *service) recordConnectionEventWith(ctx context.Context, connection *domain.ExternalMailConnection, event domain.MailboxAccessEventType, actorUserID uint, extra map[string]any) error {
 	var subject uint
 	if connection.OwnerUserID != nil {
 		subject = *connection.OwnerUserID
 	}
-	mailbox := &domain.Mailbox{ID: connection.MailboxID, OrganizationID: connection.OrganizationID}
-	return s.recordAccess(ctx, mailbox, event, actorUserID, subject, map[string]any{
+	detail := map[string]any{
 		"connection_id": connection.ID,
 		"provider":      string(connection.Provider),
-	})
+	}
+	if connection.TenantID != nil {
+		detail["tenant_id"] = *connection.TenantID
+	}
+	for key, value := range extra {
+		detail[key] = value
+	}
+	mailbox := &domain.Mailbox{ID: connection.MailboxID, OrganizationID: connection.OrganizationID}
+	return s.recordAccess(ctx, mailbox, event, actorUserID, subject, detail)
 }
 
 // handBackExternalGrant revokes a connection's grant at its provider on a best-effort basis: a

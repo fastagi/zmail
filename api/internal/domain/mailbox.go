@@ -291,8 +291,11 @@ type Mailbox struct {
 	// AITriageEnabled queues the mailbox's inbound mail for AI triage when the organization's
 	// switch is on too.
 	AITriageEnabled bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// ExternalTenantID is the authorized tenant a connected mailbox was assigned from; nil for a
+	// Zmail mailbox and for an account a member or manager bound with its own grant.
+	ExternalTenantID *uint
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // Connected reports whether the mailbox holds read-only copies of an outside account.
@@ -300,10 +303,24 @@ func (m *Mailbox) Connected() bool {
 	return m != nil && m.Origin == MailboxOriginConnected
 }
 
-// AwaitingHandover reports whether the mailbox is a Zmail personal mailbox whose owner left. A
-// connected personal mailbox is the owner's own account and never awaits a handover.
+// TenantAssigned reports whether the mailbox was assigned from an organization's authorized tenant:
+// its address is the organization's own, not a member's.
+func (m *Mailbox) TenantAssigned() bool {
+	return m.Connected() && m.ExternalTenantID != nil
+}
+
+// PrivateConnected reports whether the mailbox is a member's own outside account: connected,
+// personal, and bound by the member, never assigned from a tenant. The organization neither sees nor
+// administers it.
+func (m *Mailbox) PrivateConnected() bool {
+	return m.Connected() && m.Type == MailboxTypePersonal && m.ExternalTenantID == nil
+}
+
+// AwaitingHandover reports whether the mailbox is a personal mailbox at an organization address whose
+// owner left: a Zmail one, or one assigned from a tenant. A member's own outside account never awaits
+// a handover.
 func (m *Mailbox) AwaitingHandover() bool {
-	return m != nil && m.Type == MailboxTypePersonal && !m.Connected() && m.OwnerLeftAt != nil
+	return m != nil && m.Type == MailboxTypePersonal && (!m.Connected() || m.TenantAssigned()) && m.OwnerLeftAt != nil
 }
 
 // MailMessage is one stored inbound or outbound message.

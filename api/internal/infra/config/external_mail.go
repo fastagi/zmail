@@ -60,6 +60,25 @@ type ExternalMailConfig struct {
 	// admins) of one organization; zero takes DefaultExternalMailMaxSharedConnections, and -1 marks
 	// a set value that does not parse, which validation refuses.
 	MaxSharedConnections int
+	// MaxTenantAssignments bounds the live connections (assigned mailboxes) of one authorized tenant;
+	// zero takes DefaultExternalMailMaxTenantAssignments, and -1 marks a set value that does not
+	// parse, which validation refuses.
+	MaxTenantAssignments int
+}
+
+// Bounds of the per-tenant assignment ceiling.
+const (
+	DefaultExternalMailMaxTenantAssignments = 1000
+	// MaxExternalMailMaxTenantAssignments matches domain.MaxExternalMailTenantAssignmentsCeiling.
+	MaxExternalMailMaxTenantAssignments = 10000
+)
+
+// TenantAssignmentLimit returns the per-tenant assignment ceiling, or its default.
+func (c ExternalMailConfig) TenantAssignmentLimit() int {
+	if c.MaxTenantAssignments <= 0 {
+		return DefaultExternalMailMaxTenantAssignments
+	}
+	return c.MaxTenantAssignments
 }
 
 // Bounds of the per-organization limit of live shared connections.
@@ -78,8 +97,8 @@ func (c ExternalMailConfig) SharedConnectionLimit() int {
 	return c.MaxSharedConnections
 }
 
-// parseExternalMailMaxSharedConnections reads EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS: empty takes the
-// default (0), a value that is not a positive whole number is -1 and refused by validation.
+// parseExternalMailMaxSharedConnections reads EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS, and
+// EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS the same way: empty takes the default (0), a value that is not a positive whole number is -1 and refused by validation.
 func parseExternalMailMaxSharedConnections(raw string) int {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -300,6 +319,9 @@ func validateExternalMailConfig(c ExternalMailConfig, secretKey string, producti
 	}
 	if c.MaxSharedConnections < 0 || c.MaxSharedConnections > MaxExternalMailMaxSharedConnections {
 		return fmt.Errorf("EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS must be a whole number between 1 and %d", MaxExternalMailMaxSharedConnections)
+	}
+	if c.MaxTenantAssignments < 0 || c.MaxTenantAssignments > MaxExternalMailMaxTenantAssignments {
+		return fmt.Errorf("EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS must be a whole number between 1 and %d", MaxExternalMailMaxTenantAssignments)
 	}
 	for _, provider := range c.Providers {
 		switch provider {

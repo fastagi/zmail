@@ -301,7 +301,7 @@ func (s *service) validPlatformAccount(ctx context.Context, organizationID uint,
 				return nil, err
 			}
 			invalid.add("mailbox_id", "must be a mailbox of the organization or null")
-		} else if mailbox.Connected() && mailbox.Type == domain.MailboxTypePersonal {
+		} else if mailbox.PrivateConnected() {
 			// A member's own outside account is not the organization's to link.
 			invalid.add("mailbox_id", "must be a mailbox of the organization or null")
 		}

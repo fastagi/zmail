@@ -59,6 +59,8 @@ type ExternalMailConnectionPO struct {
 	ConsecutiveMore       int `gorm:"type:smallint;not null;default:0"`
 	RevokedAt             *time.Time
 	PurgeRetryAt          *time.Time
+	TenantID              *uint
+	TenantDirectoryID     string `gorm:"size:255;not null;default:''"`
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
@@ -75,6 +77,7 @@ func (po *ExternalMailConnectionPO) toDomain() *domain.ExternalMailConnection {
 		Status: domain.ExternalMailStatus(po.Status), LastSyncedAt: po.LastSyncedAt,
 		EncryptedRefreshToken: po.EncryptedRefreshToken, SyncCursor: po.SyncCursor, BackfillDays: po.BackfillDays,
 		NextSyncAt: po.NextSyncAt, ConsecutiveFailures: po.ConsecutiveFailures, ConsecutiveMore: po.ConsecutiveMore, RevokedAt: po.RevokedAt,
+		TenantID: po.TenantID, TenantDirectoryID: po.TenantDirectoryID,
 		CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
 	}
 	if po.LastErrorCode != nil {
@@ -96,6 +99,7 @@ func (r *repository) CreateExternalMailConnection(ctx context.Context, connectio
 		Status:                string(domain.ExternalMailStatusActive),
 		EncryptedRefreshToken: connection.EncryptedRefreshToken, SyncCursor: connection.SyncCursor,
 		BackfillDays: connection.BackfillDays, NextSyncAt: connection.NextSyncAt,
+		TenantID: connection.TenantID, TenantDirectoryID: connection.TenantDirectoryID,
 	}
 	if po.BackfillDays == 0 {
 		po.BackfillDays = domain.DefaultExternalMailBackfillDays
@@ -263,7 +267,9 @@ func (r *repository) ListExternalMailConnections(ctx context.Context, organizati
 	}
 	var rows []ExternalMailConnectionPO
 	err := r.conn(ctx).
-		Where("organization_id = ? AND owner_user_id = ? AND NOT shared", organizationID, ownerUserID).
+		// Tenant assignments are the organization's addresses: they are listed apart and never
+		// revoked when the owner leaves.
+		Where("organization_id = ? AND owner_user_id = ? AND NOT shared AND tenant_id IS NULL", organizationID, ownerUserID).
 		// Live connections first: they are bounded by the per-member limit, so none is cut off by
 		// revoked rows kept for a later rebind.
 		Order("(status = 'revoked'), id ASC").
@@ -484,7 +490,8 @@ func (r *repository) CountLiveExternalMailConnections(ctx context.Context, organ
 	}
 	var count int64
 	err := r.conn(ctx).Model(&ExternalMailConnectionPO{}).
-		Where("organization_id = ? AND owner_user_id = ? AND NOT shared AND status <> ?", organizationID, ownerUserID, string(domain.ExternalMailStatusRevoked)).
+		// A tenant assignment never takes one of the member's own places.
+		Where("organization_id = ? AND owner_user_id = ? AND NOT shared AND tenant_id IS NULL AND status <> ?", organizationID, ownerUserID, string(domain.ExternalMailStatusRevoked)).
 		Count(&count).Error
 	return int(count), err
 }

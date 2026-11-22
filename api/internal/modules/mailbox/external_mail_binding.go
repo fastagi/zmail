@@ -95,6 +95,10 @@ func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer dom
 		if err != nil {
 			return ExternalMailAuthorizationStart{}, err
 		}
+		if connection.TenantID != nil {
+			// A tenant assignment has no account grant to renew: its tenant is authorized again.
+			return ExternalMailAuthorizationStart{}, ErrExternalMailAuthorizationInvalid
+		}
 		if provider != "" && provider != connection.Provider {
 			return ExternalMailAuthorizationStart{}, ErrExternalMailAuthorizationInvalid
 		}
@@ -217,6 +221,10 @@ type externalBinding struct {
 	reconnectShared bool
 	// sharing binds a new account into a shared connected mailbox; nil binds the viewer's own.
 	sharing *sharedBinding
+	// tenantID and directoryID mark a mailbox assigned from an authorized tenant, which stores no
+	// account grant.
+	tenantID    *uint
+	directoryID string
 }
 
 // saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
@@ -260,6 +268,21 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 			return findErr
 		case findErr != nil:
 			return findErr
+		}
+		if existing.TenantID != nil {
+			// The organization assigned the account from its tenant: it is never also bound with an
+			// account's own grant. Once unassigned it is freed as any revoked account is.
+			if existing.Status != domain.ExternalMailStatusRevoked || binding.connectionID != nil {
+				return ErrExternalMailAccountTaken
+			}
+			if !existing.Shared {
+				if purgeErr := s.purgeForRebind(tx, viewer, existing); purgeErr != nil {
+					return purgeErr
+				}
+				connection, findErr = s.bindAccount(tx, viewer, binding, sealed)
+				created = findErr == nil
+				return findErr
+			}
 		}
 		if existing.Shared {
 			connection, created, findErr = s.saveOverShared(tx, viewer, connector, token, binding, existing, sealed)

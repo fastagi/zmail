@@ -26,9 +26,15 @@ var (
 	ErrExternalMailCursorExpired = errors.New("external mail cursor expired")
 )
 
-// ExternalMailToken is the credential a source fetches with.
+// ExternalMailToken is the credential a source fetches with: an account's own refresh token, or an
+// access token a tenant credential minted for one mailbox.
 type ExternalMailToken struct {
 	RefreshToken string
+	// AccessToken, when set, is used as it is, without a refresh: a tenant's short-lived token scoped
+	// to the one mailbox DirectoryID (or the account address) names.
+	AccessToken string
+	// DirectoryID is the mailbox's id in its tenant's directory; empty for an account's own grant.
+	DirectoryID string
 }
 
 // ExternalMailAccount is the outside account an authorization code was exchanged for.
@@ -146,12 +152,82 @@ type ExternalMailCapabilities struct {
 }
 
 // ExternalMailConnector is one provider the instance can bind: its id, how it authorizes, what it
-// can do, and the source that speaks its protocol.
+// can do, and the source that speaks its protocol. Tenant is set when an owner may authorize a whole
+// tenant of the provider at once; nil otherwise.
 type ExternalMailConnector struct {
 	ID           domain.ExternalMailProvider
 	AuthKind     ExternalMailAuthKind
 	Capabilities ExternalMailCapabilities
 	Source       ExternalMailSource
+	Tenant       ExternalMailTenantSource
+}
+
+// ExternalMailTenantGrant is what an owner hands over to authorize a tenant. Each provider reads
+// the fields it needs: Google a service account key and an admin to read the directory as;
+// Microsoft the tenant id, with an application of the organization's own or, without one, the
+// operator's application after an admin consented.
+type ExternalMailTenantGrant struct {
+	ServiceAccountKey string
+	AdminSubject      string
+	TenantID          string
+	ClientID          string
+	ClientSecret      string
+}
+
+// ExternalMailTenantAuthorization is a tenant credential the provider accepted.
+type ExternalMailTenantAuthorization struct {
+	// TenantIdentifier is the provider's stable id of the tenant.
+	TenantIdentifier string
+	// DisplayName labels the tenant, such as its primary domain; may be empty.
+	DisplayName string
+	// Credential is the source's own encoding of the tenant credential; the caller seals it and
+	// nothing else reads it.
+	Credential string
+}
+
+// ExternalMailTenantConsent is the admin consent page of a provider that grants tenant access by a
+// redirect, with the single-use state and the callback.
+type ExternalMailTenantConsent struct {
+	TenantID    string
+	State       string
+	RedirectURI string
+}
+
+// ExternalMailDirectoryEntry is one mailbox of a tenant's directory.
+type ExternalMailDirectoryEntry struct {
+	Address     string
+	DisplayName string
+	// DirectoryID is the provider's stable id of the mailbox's user.
+	DirectoryID string
+}
+
+// ExternalMailDirectoryPage is one page of a tenant's directory and the opaque cursor of the next.
+type ExternalMailDirectoryPage struct {
+	Entries []ExternalMailDirectoryEntry
+	Next    string
+}
+
+// ErrExternalMailDirectoryNotFound means an address is not a mailbox of the tenant's directory.
+var ErrExternalMailDirectoryNotFound = errors.New("external mail address is not in the tenant directory")
+
+// ExternalMailTenantSource authorizes a whole tenant of a provider and reads its mailboxes with the
+// tenant credential, one mailbox per token. Every method returns ErrExternalMailAuth when the
+// provider refuses the credential.
+type ExternalMailTenantSource interface {
+	// TenantConsentURL is the admin consent page for the operator's application; false when the
+	// provider takes the credential directly instead.
+	TenantConsentURL(consent ExternalMailTenantConsent) (string, bool)
+	// AuthorizeTenant proves the grant with the provider and returns the credential to store.
+	AuthorizeTenant(ctx context.Context, grant ExternalMailTenantGrant) (ExternalMailTenantAuthorization, error)
+	// VerifyTenant checks that a stored credential still works.
+	VerifyTenant(ctx context.Context, credential string) error
+	// ListTenantDirectory returns at most limit mailboxes after cursor; an empty cursor starts over.
+	ListTenantDirectory(ctx context.Context, credential, cursor string, limit int) (ExternalMailDirectoryPage, error)
+	// LookupTenantMailbox returns the directory entry of one address, or
+	// ErrExternalMailDirectoryNotFound.
+	LookupTenantMailbox(ctx context.Context, credential, address string) (ExternalMailDirectoryEntry, error)
+	// MailboxToken mints a short-lived token that reads only the one mailbox.
+	MailboxToken(ctx context.Context, credential, address, directoryID string) (ExternalMailToken, error)
 }
 
 // externalMailRegistry holds the instance's connectors in a stable order. Adding a provider is one
@@ -200,12 +276,17 @@ func newExternalMailRegistry(cfg config.ExternalMailConfig) *externalMailRegistr
 	return registry
 }
 
-// fakeExternalMailRegistry registers one fake source under the Gmail and Outlook ids.
+// fakeExternalMailRegistry registers one fake source under the Gmail and Outlook ids; a fake that
+// also serves tenants is registered as their tenant source too.
 func fakeExternalMailRegistry(source ExternalMailSource) *externalMailRegistry {
 	read := ExternalMailCapabilities{Read: true}
+	var tenant ExternalMailTenantSource
+	if serves, ok := source.(ExternalMailTenantSource); ok {
+		tenant = serves
+	}
 	return &externalMailRegistry{connectors: []ExternalMailConnector{
-		{ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source},
-		{ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source},
+		{ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant},
+		{ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant},
 	}}
 }
 
@@ -238,6 +319,17 @@ type FakeExternalMailSource struct {
 	expired map[string]bool
 	// requests keeps the last fetch request per account, for assertions.
 	requests map[string]ExternalMailFetchRequest
+	// tenants are the tenants this source accepts, by identifier: their directory, in order, and
+	// whether their credential is refused.
+	tenants map[string]*fakeTenant
+	// refusedMailboxes are tenant mailboxes whose token is refused while the tenant still works.
+	refusedMailboxes map[string]bool
+}
+
+// fakeTenant is one tenant a fake source serves.
+type fakeTenant struct {
+	directory []ExternalMailDirectoryEntry
+	refused   bool
 }
 
 var _ ExternalMailSource = (*FakeExternalMailSource)(nil)
@@ -248,7 +340,7 @@ func NewFakeExternalMailSource() *FakeExternalMailSource {
 		mail: map[string][]ExternalMessage{}, authFail: map[string]bool{},
 		fetches: map[string]int{}, revoked: map[string]bool{}, challenges: map[string]bool{},
 		rotations: map[string]string{}, aliases: map[string]string{}, expired: map[string]bool{}, spent: map[string]bool{},
-		requests: map[string]ExternalMailFetchRequest{},
+		requests: map[string]ExternalMailFetchRequest{}, tenants: map[string]*fakeTenant{}, refusedMailboxes: map[string]bool{},
 	}
 }
 
@@ -338,6 +430,10 @@ func (f *FakeExternalMailSource) Fetch(_ context.Context, request ExternalMailFe
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	token := request.Token.RefreshToken
+	if token == "" {
+		// A tenant fetch reads with the token minted for its one mailbox.
+		token = request.Token.AccessToken
+	}
 	account := f.account(token)
 	f.fetches[account]++
 	f.requests[account] = request

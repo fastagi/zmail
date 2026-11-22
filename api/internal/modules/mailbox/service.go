@@ -271,6 +271,8 @@ type Service interface {
 	ExternalMailOpsService
 	// ExternalMailDirectoryService lists and force-disconnects members' connections for managers.
 	ExternalMailDirectoryService
+	// ExternalMailTenantService authorizes whole tenants and assigns mailboxes from them.
+	ExternalMailTenantService
 	// AgentGrantService issues agent grants and serves the agent mail feed.
 	AgentGrantService
 	// ListLog lists messages across the mailboxes the viewer may read.

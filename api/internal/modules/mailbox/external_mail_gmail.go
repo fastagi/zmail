@@ -77,6 +77,7 @@ func init() {
 		return ExternalMailConnector{
 			ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2,
 			Capabilities: ExternalMailCapabilities{Read: true}, Source: newGmailMailSource(client),
+			Tenant: newGmailTenantSource(),
 		}, true
 	})
 }
@@ -205,6 +206,11 @@ func validHistoryID(id string) bool {
 // cursor, otherwise a page of history. A refresh token Google rotated is returned even when the
 // rest of the fetch fails, since the old one may already be spent.
 func (g *gmailMailSource) Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	if request.Token.AccessToken != "" {
+		// A tenant's token for this one mailbox, delegated to it as the subject: users/me is that
+		// mailbox, and there is nothing to refresh or rotate.
+		return g.fetchPage(ctx, request.Token.AccessToken, request)
+	}
 	if request.Token.RefreshToken == "" {
 		return ExternalMailFetch{}, ErrExternalMailAuth
 	}

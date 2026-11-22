@@ -548,6 +548,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/external-mail-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's authorized tenants
+         * @description Needs the `owner` or `admin` organization role. Lists the Google Workspace and Microsoft 365 tenants the organization authorized, live ones first, then id ascending, at most 50, each with its count of live assignments. Never the credential. Empty while external mail is off. Never cached. Session only; no API key reaches any tenant route.
+         */
+        get: operations["listExternalMailTenants"];
+        put?: never;
+        /**
+         * Authorize a whole tenant
+         * @description Needs the `owner` organization role. Google Workspace takes the organization's service account key with domain-wide delegation (`gmail.readonly` and `admin.directory.user.readonly`) and an administrator to read the directory as; Microsoft 365 takes the Entra tenant id and either the organization's own application (`client_id`, `client_secret`) or, without one, answers `202` with the admin consent page of the operator's application, completed by `POST /v1/external-mail-tenants/completions`. The credential is proven with the provider, then sealed. Authorizing creates no mailbox and lets nobody read anything. A tenant this organization already holds is re-authorized in place (`200`) and its `needs_reconnect` assignments resume.
+         */
+        post: operations["authorizeExternalMailTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-tenants/{tenant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a tenant and every assignment of it
+         * @description Needs the `owner` organization role. Marks the tenant `revoked`, erases its credential, and in the same transaction revokes every connection of it, each recorded as `connection_revoked` with `detail.reason` `tenant_revoked`; every sync stops at once. Revoking a revoked tenant answers `204` again. The customer should also remove the application or key at the provider.
+         */
+        delete: operations["revokeExternalMailTenant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-tenants/{tenant_id}/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign mailboxes from a tenant's directory
+         * @description Needs the `owner` or `admin` organization role. Assigns 1 to 100 directory mailboxes, each to a member as a private personal connected mailbox or as a shared connected mailbox with members. Each row is checked and stored on its own and idempotently per address, so the answer is `200` with one result per row, in order, and a failed row is retried by sending it again.
+         */
+        post: operations["assignExternalMailTenantMailboxes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-tenants/{tenant_id}/directory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one page of a tenant's directory
+         * @description Needs the `owner` or `admin` organization role. Reads one page of the tenant's users from the provider, each marked as assigned (a live connection of this tenant) and as available (no live connection of the organization holds the address). Suspended and archived Google users and Microsoft users without a mail address are left out. Pass `meta.next_cursor` as `cursor` for the next page. Never cached.
+         */
+        get: operations["listExternalMailTenantDirectory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-tenants/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a Microsoft 365 admin consent
+         * @description Needs the `owner` organization role, and must be the owner who started the consent. Posts what Microsoft sent the callback after an admin consent (`admin_consent`, `tenant`, `state`). The single-use state is spent by the attempt. The consent must be given for the tenant that was started, and is proven with a client credentials token and one directory read before anything is stored.
+         */
+        post: operations["completeExternalMailTenantConsent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/health": {
         parameters: {
             query?: never;
@@ -3740,6 +3844,9 @@ export interface components {
             data: components["schemas"]["AssetUploadIntent"];
             message: string;
         };
+        AssignExternalMailTenantMailboxesRequest: {
+            assignments: components["schemas"]["ExternalMailTenantAssignmentRequest"][];
+        };
         AuditLog: {
             action: string;
             actor_id?: components["schemas"]["PositiveID"];
@@ -3870,6 +3977,20 @@ export interface components {
             data: components["schemas"]["AuthenticationUser"];
             message: string;
         };
+        /** @description Google takes `service_account_key` and `admin_subject`; Microsoft takes `tenant_id`, and `client_id` with `client_secret` for the organization's own application. */
+        AuthorizeExternalMailTenantRequest: {
+            /** @description A Workspace administrator's address; the directory is read as this user. */
+            admin_subject?: string;
+            client_id?: string;
+            client_secret?: string;
+            provider: components["schemas"]["ExternalMailConnectorID"];
+            /** @description The service account's JSON key file, as an object or as a string; at most 16 KiB. Its `token_uri` is ignored. */
+            service_account_key?: {
+                [key: string]: unknown;
+            } | string;
+            /** @description The Entra tenant id, a GUID. */
+            tenant_id?: string;
+        };
         BindExternalMailCredentialsRequest: {
             /** @description How far back the first sync reads INBOX; 14 when omitted. */
             backfill_days?: number;
@@ -3895,6 +4016,13 @@ export interface components {
         CompleteExternalMailAuthorizationRequest: {
             code: string;
             state: string;
+        };
+        CompleteExternalMailTenantConsentRequest: {
+            /** @description The `admin_consent` query parameter Microsoft returned; `True` when consent was given. */
+            admin_consent: string;
+            state: string;
+            /** @description The `tenant` query parameter Microsoft returned. */
+            tenant: string;
         };
         CreateAgentMailDraftRequest: {
             html?: string;
@@ -4017,17 +4145,19 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "needs_reconnect" | "revoked";
+            /** @description The authorized tenant the mailbox was assigned from; null for an account bound with its own grant. */
+            tenant_id: components["schemas"]["PositiveID"] | null;
         };
         /** @description One connection as an owner or admin sees it; never the token or mail. A member's own account never shows its full address or mailbox; a shared connection is the organization's team account and shows both. */
         ExternalMailConnectionDirectoryEntry: {
-            /** @description The full address of a shared connection; null for a member's own account. */
+            /** @description The full address of a shared connection or a tenant assignment; null for a member's own account. */
             account_address: string | null;
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["PositiveID"];
             /** @description When a sync last succeeded; null before the first. */
             last_synced_at: string | null;
-            /** @description The shared connected mailbox of a shared connection; null for a member's own account. */
+            /** @description The mailbox of a shared connection or a tenant assignment; null for a member's own account. */
             mailbox_id: components["schemas"]["PositiveID"] | null;
             /** @description The first two characters of the local part (one when it is that short), `***`, and the domain, such as `st***@gmail.com`. */
             masked_account_address: string;
@@ -4040,6 +4170,8 @@ export interface components {
             shared: boolean;
             /** @enum {string} */
             status: "active" | "needs_reconnect" | "revoked";
+            /** @description The authorized tenant a mailbox was assigned from; null otherwise. */
+            tenant_id: components["schemas"]["PositiveID"] | null;
         };
         ExternalMailConnectionDirectoryPageResponse: {
             /** @constant */
@@ -4069,6 +4201,8 @@ export interface components {
             capabilities: {
                 /** @description The connector syncs the account's mail into its connected mailbox. */
                 read: boolean;
+                /** @description An organization owner may authorize a whole tenant of the provider (`POST /v1/external-mail-tenants`). */
+                tenant: boolean;
             };
             id: components["schemas"]["ExternalMailConnectorID"];
         };
@@ -4127,6 +4261,88 @@ export interface components {
             /** @constant */
             code: 0;
             data: components["schemas"]["ExternalMailSyncRun"][];
+            message: string;
+        };
+        /** @description One authorized tenant; never its credential. */
+        ExternalMailTenant: {
+            /** @description Live connections of the tenant. */
+            assignments: number;
+            /** Format: date-time */
+            authorized_at: string;
+            authorized_by_user_id: components["schemas"]["PositiveID"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** @description A label such as the Workspace domain; may be empty. */
+            display_name: string;
+            id: components["schemas"]["PositiveID"];
+            /** @description `external.tenant_auth_failed` while the tenant needs reauthorization; null otherwise. */
+            last_error_code: string | null;
+            provider: components["schemas"]["ExternalMailConnectorID"];
+            revoked_at: string | null;
+            /**
+             * @description `active` mints tokens for its assignments; `needs_reauthorization` lost its credential at the provider and every assignment waits; `revoked` was revoked by the owner.
+             * @enum {string}
+             */
+            status: "active" | "needs_reauthorization" | "revoked";
+            /** @description The Workspace customer id or the Entra tenant id. */
+            tenant_identifier: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ExternalMailTenantAssignmentListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailTenantAssignmentResult"][];
+            message: string;
+        };
+        /** @description `personal` takes `user_id`, a current member; `shared` takes `members` (and optionally `display_name`) with the rules of `POST /v1/mailboxes`. */
+        ExternalMailTenantAssignmentRequest: {
+            address: string;
+            /** @enum {string} */
+            assign: "personal" | "shared";
+            display_name?: string;
+            members?: components["schemas"]["MailboxMemberRequest"][];
+            user_id?: components["schemas"]["PositiveID"];
+        };
+        ExternalMailTenantAssignmentResult: {
+            address: string;
+            connection_id: components["schemas"]["PositiveID"] | null;
+            /** @description The public error code of a failed row; null otherwise. */
+            error_code: string | null;
+            mailbox_id: components["schemas"]["PositiveID"] | null;
+            /** @enum {string} */
+            status: "created" | "restored" | "unchanged" | "failed";
+        };
+        ExternalMailTenantDirectoryEntry: {
+            address: string;
+            /** @description A live connection of this tenant assigns the mailbox. */
+            assigned: boolean;
+            assignment: ("personal" | "shared") | null;
+            /** @description False while any live connection of the organization holds the address. */
+            available: boolean;
+            connection_id: components["schemas"]["PositiveID"] | null;
+            /** @description The provider's stable id of the user. */
+            directory_id: string;
+            display_name: string;
+            mailbox_id: components["schemas"]["PositiveID"] | null;
+        };
+        ExternalMailTenantDirectoryPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailTenantDirectoryEntry"][];
+            message: string;
+            meta: components["schemas"]["CursorPageMeta"];
+        };
+        ExternalMailTenantListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailTenant"][];
+            message: string;
+        };
+        ExternalMailTenantResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailTenant"];
             message: string;
         };
         FieldErrors: {
@@ -7238,6 +7454,8 @@ export interface components {
         CSRFToken: string;
         /** @description Positive external mail connection identifier. */
         ExternalMailConnectionID: components["schemas"]["PositiveID"];
+        /** @description Positive external mail tenant identifier. */
+        ExternalMailTenantID: components["schemas"]["PositiveID"];
         /** @description Entity tag of the version the caller read; required for optimistic concurrency. */
         IfMatch: string;
         /** @description Opaque position from `meta.next_cursor`, passed back unchanged; absent requests the newest page. A malformed cursor is `400 COMMON.INVALID_INPUT`. */
@@ -8677,6 +8895,362 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listExternalMailTenants: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The organization's tenants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailTenantListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    authorizeExternalMailTenant: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthorizeExternalMailTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description The tenant was already authorized by this organization and is re-authorized. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailTenantResponse"];
+                };
+            };
+            /** @description The tenant is authorized. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailTenantResponse"];
+                };
+            };
+            /** @description Send the browser to the admin consent page; it expires after 10 minutes. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailAuthorizationResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is not the organization's `owner` (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization is not found (`ORGANIZATION.NOT_FOUND`), or no enabled connector serves tenants of the provider (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The tenant is authorized by another organization (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description The body is malformed (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`, or `COMMON.VALIDATION_FAILED`), or the provider refused the credential (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    revokeExternalMailTenant: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive external mail tenant identifier. */
+                tenant_id: components["parameters"]["ExternalMailTenantID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant and its connections are revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is not the organization's `owner` (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the tenant (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    assignExternalMailTenantMailboxes: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive external mail tenant identifier. */
+                tenant_id: components["parameters"]["ExternalMailTenantID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignExternalMailTenantMailboxesRequest"];
+            };
+        };
+        responses: {
+            /** @description One result per row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailTenantAssignmentListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the tenant (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The tenant is not `active` (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description The batch is empty or holds more than 100 rows (`MAILBOX.ACCESS_INVALID`), or the body is invalid (`COMMON.VALIDATION_FAILED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listExternalMailTenantDirectory: {
+        parameters: {
+            query?: {
+                /** @description Opaque position from `meta.next_cursor`; absent or empty starts at the first page. */
+                cursor?: string;
+                per_page?: number;
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive external mail tenant identifier. */
+                tenant_id: components["parameters"]["ExternalMailTenantID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the directory. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailTenantDirectoryPageResponse"];
+                };
+            };
+            /** @description The cursor is malformed (`COMMON.INVALID_INPUT`), or the organization header is missing or malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the tenant (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The tenant is not `active`, or the provider refused its credential now (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    completeExternalMailTenantConsent: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteExternalMailTenantConsentRequest"];
+            };
+        };
+        responses: {
+            /** @description The tenant was already authorized by this organization and is re-authorized. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailTenantResponse"];
+                };
+            };
+            /** @description The tenant is authorized. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailTenantResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is not the organization's `owner` (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The state is unknown, used, expired, or another user's (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), or the organization is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The consent was given for another tenant (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), or the tenant is authorized by another organization (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The consent was declined or the provider refused the application (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), or the body is invalid (`COMMON.VALIDATION_FAILED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };

@@ -122,14 +122,16 @@ func (s *service) bindSharedAccount(tx context.Context, viewer domain.Organizati
 	}
 	mailbox := &domain.Mailbox{
 		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: binding.address, DisplayName: displayName,
-		Type: domain.MailboxTypeShared, Origin: domain.MailboxOriginConnected,
+		Type: domain.MailboxTypeShared, Origin: domain.MailboxOriginConnected, ExternalTenantID: binding.tenantID,
 	}
 	if err := s.repo.CreateMailbox(tx, mailbox, 0); err != nil {
 		return nil, err
 	}
-	if err := s.recordAccess(tx, mailbox, domain.MailboxAccessCreated, viewer.UserID, 0, map[string]any{
-		"type": string(mailbox.Type), "members": len(binding.sharing.members),
-	}); err != nil {
+	created := map[string]any{"type": string(mailbox.Type), "members": len(binding.sharing.members)}
+	if binding.tenantID != nil {
+		created["tenant_id"] = *binding.tenantID
+	}
+	if err := s.recordAccess(tx, mailbox, domain.MailboxAccessCreated, viewer.UserID, 0, created); err != nil {
 		return nil, err
 	}
 	for _, member := range binding.sharing.members {
@@ -142,6 +144,7 @@ func (s *service) bindSharedAccount(tx context.Context, viewer domain.Organizati
 		OrganizationID: viewer.OrganizationID, MailboxID: mailbox.ID, Provider: binding.provider,
 		AccountAddress: binding.address, Shared: true, BoundByUserID: &binder, EncryptedRefreshToken: sealed,
 		BackfillDays: binding.backfillDays, NextSyncAt: s.now().UTC(),
+		TenantID: binding.tenantID, TenantDirectoryID: binding.directoryID,
 	}
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
 		return nil, err

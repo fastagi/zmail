@@ -98,6 +98,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_05_090000_add_mail_agent_grants",
 			"2026_12_06_090000_add_external_mail_sync_ops",
 			"2026_12_07_090000_add_shared_external_mail",
+			"2026_12_08_090000_add_external_mail_tenants",
 		),
 	)
 }

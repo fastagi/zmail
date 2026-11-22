@@ -122,7 +122,7 @@ func (s *service) BindExternalMailCredentials(ctx context.Context, viewer domain
 		if err != nil {
 			return nil, false, err
 		}
-		if target.Provider != input.Provider {
+		if target.Provider != input.Provider || target.TenantID != nil {
 			return nil, false, ErrExternalMailAuthorizationInvalid
 		}
 		binding.reconnectShared = target.Shared
