@@ -263,7 +263,25 @@ function MailboxView({
     []
   );
 
-  const base: MailMessageFilters = q ? { q } : viewFilters(view);
+  const folders = useMailFolders(organizationId, mailbox.id);
+  const labels = useMailLabels(organizationId, mailbox.id);
+  // A folder or label deleted while it is shown (here or elsewhere) is gone from its list: the
+  // view goes back to the inbox at once, so no request names the deleted id.
+  const viewGone =
+    (view.kind === 'folder' &&
+      folders.data !== undefined &&
+      !folders.data.some(folder => folder.id === view.id)) ||
+    (view.kind === 'label' &&
+      labels.data !== undefined &&
+      !labels.data.some(label => label.id === view.id));
+  if (viewGone) {
+    setView(inboxView);
+    setPage(1);
+    setOpen(null);
+    setSelected(new Set());
+  }
+  const shown = viewGone ? inboxView : view;
+  const base: MailMessageFilters = q ? { q } : viewFilters(shown);
   // The unread filter lists single messages: threads group only whole placement views.
   const filters: MailMessageFilters = unreadOnly
     ? { ...base, group: undefined, unread: true }
@@ -271,8 +289,6 @@ function MailboxView({
   const grouped = filters.group === 'thread';
   const messages = useMailMessageList(organizationId, mailbox.id, filters, page);
   const counts = useMailMessageCounts(organizationId, mailbox.id);
-  const folders = useMailFolders(organizationId, mailbox.id);
-  const labels = useMailLabels(organizationId, mailbox.id);
   const update = useUpdateMailMessage(organizationId, mailbox.id);
   const updateMany = useUpdateMailMessages(organizationId, mailbox.id);
   const folderList = folders.data ?? [];

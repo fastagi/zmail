@@ -235,7 +235,7 @@ func (s *service) externalCopies(connection *domain.ExternalMailConnection, fetc
 		copies = append(copies, &domain.MailMessage{
 			MailboxID: connection.MailboxID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
 			FromAddress: truncateText(external.FromAddress, 320), FromName: truncateText(external.FromName, 255),
-			To: external.To, Cc: external.Cc, Subject: truncateText(external.Subject, 998),
+			To: external.To, Cc: external.Cc, Subject: truncateRunes(external.Subject, domain.MaxMailSubjectLength),
 			TextBody: external.TextBody, HTMLBody: external.HTMLBody,
 			MessageID: truncateText(external.RFCMessageID, 998), RFCMessageID: truncateText(external.RFCMessageID, 998),
 			InReplyTo: truncateText(external.InReplyTo, 998), References: external.References,

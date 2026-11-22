@@ -28,6 +28,9 @@ export function createQueryClient(): QueryClient {
       mutations: {
         // Write retries require endpoint-specific idempotency evidence.
         retry: false,
+        // Run writes now, even offline: they fail fast with a visible network error instead of
+        // pausing and replaying on reconnect after the user dismissed the form (#107).
+        networkMode: 'always',
       },
     },
   });

@@ -357,6 +357,23 @@ describe('mailbox workspace', () => {
     expect(window.location.search).toBe('?other=1&org=4');
   });
 
+  // Issue #106: a link into an organization the user was removed from says so and opens nothing.
+  it('a link to an organization the user left says so and drops its message and mailbox ids', async () => {
+    state.organizations.data = organizations(
+      organization(4, 'Acme', 'owner'),
+      organization(5, 'Globex', 'member')
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?org=9&open=76&box=3&other=1');
+    renderWorkspace();
+
+    expect(screen.getByLabelText('Organization')).toHaveValue('4');
+    await waitFor(() => expect(window.location.search).toBe('?org=4&other=1'));
+    expect(toast.error).toHaveBeenCalledWith(
+      'The organization in this link is no longer available to you. Showing Acme instead.',
+      expect.anything()
+    );
+  });
+
   it('restores the last chosen organization from sessionStorage when navigating without ?org=', () => {
     state.organizations.data = organizations(
       organization(1, 'Acme', 'owner'),
@@ -1347,6 +1364,27 @@ describe('mailbox workspace', () => {
   describe('mailbox organize', () => {
     beforeEach(() => {
       state.organizations.data = organizations(organization(1, 'Acme', 'owner'));
+    });
+
+    // Issue #118: deleting the label or folder being shown goes back to the inbox.
+    it('deleting the label or folder being shown returns to the inbox, without its id', () => {
+      state.folders.data = [folder(4, 'Contracts')];
+      state.labels.data = [label(7, 'Urgent', 'red')];
+      const view = renderWorkspace();
+
+      fireEvent.click(screen.getByRole('button', { name: /Urgent/u }));
+      expect(state.filterCalls.at(-1)?.filters).toMatchObject({ labelId: 7 });
+      state.labels.data = [];
+      view.rerender(wrap(<MailboxWorkspace />));
+      expect(state.filterCalls.at(-1)?.filters).not.toHaveProperty('labelId');
+      expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'inbound', page: 1 });
+
+      fireEvent.click(screen.getByRole('button', { name: /Contracts/u }));
+      expect(state.filterCalls.at(-1)?.filters).toMatchObject({ folderId: 4 });
+      state.folders.data = [];
+      view.rerender(wrap(<MailboxWorkspace />));
+      expect(state.filterCalls.at(-1)?.filters).not.toHaveProperty('folderId');
+      expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'inbound', page: 1 });
     });
 
     it('view-only member sees no move or label actions', () => {

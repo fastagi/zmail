@@ -4,7 +4,8 @@ import type { ModuleName } from './module-names';
 export const CLIENT_MESSAGE_NAMESPACES = {
   global: ['common', 'errors'],
   auth: ['auth'],
-  console: ['auth', 'nav', 'console'],
+  // The first-run team setup card (organization copy) renders on the console home and inbox.
+  console: ['auth', 'nav', 'console', 'organization'],
   settings: ['settings'],
   organization: ['organization'],
   permission: ['permission'],

@@ -77,6 +77,17 @@ export const authService = {
       isLogoutResponse,
       'password-reset-confirm'
     ),
+
+  /** Changes the signed-in user's password; every session of the account ends, this one included. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    validateResponse<LogoutResponse>(
+      request.put<unknown, { currentPassword: string; newPassword: string }>('/auth/password', {
+        currentPassword,
+        newPassword,
+      }),
+      isLogoutResponse,
+      'password-change'
+    ),
 };
 
 export type AuthService = typeof authService;

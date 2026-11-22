@@ -121,7 +121,7 @@ type SendMailMessageRequest struct {
 	To []string `json:"to"`
 	Cc []string `json:"cc"`
 	// Subject, Text, and HTML are required unless Template is given; the service decides.
-	Subject   string `json:"subject" binding:"max=998"`
+	Subject   string `json:"subject"`
 	Text      string `json:"text" binding:"max=262144"`
 	HTML      string `json:"html" binding:"max=262144"`
 	InReplyTo string `json:"in_reply_to" binding:"max=900"`

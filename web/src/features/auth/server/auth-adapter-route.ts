@@ -104,6 +104,41 @@ export async function confirmPasswordResetWithGoApi(
   return privateAuthResponse(apiSuccessResponse({ success: true }));
 }
 
+/**
+ * Changes the password with the session's own credential. The API revokes every session of the
+ * account on success, so this browser's credential is dropped as well. An expired session (401
+ * `AUTH.UNAUTHORIZED`) also drops it; a wrong current password (401 `AUTH.INVALID_CREDENTIALS`)
+ * keeps it, because the session is still valid.
+ */
+export async function changePasswordWithGoApi(
+  request: Request,
+  input: { currentPassword: string; newPassword: string }
+): Promise<NextResponse> {
+  const accessToken = await getApiSessionToken();
+  if (!accessToken) {
+    return adapterErrorResponse({
+      status: 401,
+      errorCode: ApiErrorCode.AUTH_UNAUTHORIZED,
+      message: 'Authentication required',
+    });
+  }
+  const result = await configuredAdapter().changePassword(
+    accessToken,
+    input,
+    request.headers,
+    request.signal
+  );
+  if (!result.ok) {
+    if (result.error.errorCode === ApiErrorCode.AUTH_UNAUTHORIZED) {
+      await clearApiSessionCookie();
+    }
+    return adapterErrorResponse(result.error);
+  }
+  await clearApiSessionCookie();
+  await clearSessionCookie();
+  return privateAuthResponse(apiSuccessResponse({ success: true as const }));
+}
+
 export async function registerWithGoApi(
   request: Request,
   input: RegisterRequest

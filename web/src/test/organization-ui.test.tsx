@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -51,6 +51,7 @@ const state = vi.hoisted(() => ({
   revokeInvitation: mutationState(),
   transferOwnership: mutationState(),
   updateMember: mutationState(),
+  forgetOrganization: vi.fn(),
 }));
 
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
@@ -66,6 +67,7 @@ vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useTransferOrganizationOwnership: () => state.transferOwnership,
   useUpdateOrganization: () => state.update,
   useUpdateOrganizationMember: () => state.updateMember,
+  useForgetOrganization: () => state.forgetOrganization,
 }));
 
 function withMessages(children: React.ReactNode) {
@@ -267,6 +269,29 @@ describe('organization browser workflow', () => {
     expect(screen.queryByText('alex@example.com')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Change role: alex' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Actions: alex' })).toBeInTheDocument();
+  });
+
+  it('forgets the organization after the user leaves it (#114)', () => {
+    state.forgetOrganization.mockReset();
+    state.context.data = organizationContext('member');
+    state.members.data = {
+      items: [memberView({ id: 91, user_id: 17, username: 'me', role: 'member' })],
+      meta: { total: 1 },
+    };
+    renderWithMessages(<OrganizationOverview organizationId={42} />);
+    activateTab('Members');
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Actions: me' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Leave organization' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Leave organization' })
+    );
+
+    expect(state.removeMember.mutate).toHaveBeenCalledWith(91, expect.any(Object));
+    expect(state.forgetOrganization).not.toHaveBeenCalled();
+    const options = state.removeMember.mutate.mock.calls[0]?.[1] as { onSuccess: () => void };
+    act(() => options.onSuccess());
+    expect(state.forgetOrganization).toHaveBeenCalledWith(42);
   });
 
   it('shows token-free invitation history only to organization managers', () => {
