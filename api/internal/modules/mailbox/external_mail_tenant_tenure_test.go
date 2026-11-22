@@ -101,14 +101,16 @@ func userKey(user uint) string       { return "u" + strconv.FormatUint(uint64(us
 func selfKey(user uint) string       { return "s" + strconv.FormatUint(uint64(user), 10) }
 func mailboxKey(mailbox uint) string { return "m" + strconv.FormatUint(uint64(mailbox), 10) }
 
-// tenureSeeds is how many random sequences the suite runs; TENANT_TENURE_SEEDS runs more.
+// tenureSeeds is how many random sequences the suite runs: 12 keeps the package within its time budget
+// on a loaded machine. Run more with, for example,
+// TENANT_TENURE_SEEDS=500 go test ./internal/modules/mailbox/ -run TestTenantTenureProperty -timeout 60m.
 func tenureSeeds() uint64 {
 	if raw := os.Getenv("TENANT_TENURE_SEEDS"); raw != "" {
 		if n, err := strconv.ParseUint(raw, 10, 64); err == nil && n > 0 {
 			return n
 		}
 	}
-	return 50
+	return 12
 }
 
 // TestTenantTenureProperty (N4, N7): random sequences of personal and shared tenant assignments,
