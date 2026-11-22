@@ -75,3 +75,71 @@ func TestMailDraftRejectsOversizedAndControlCharacters(t *testing.T) {
 		}
 	}
 }
+
+func TestMailDraftRecipientLinesStaySeparateAddresses(t *testing.T) {
+	cases := map[string]string{
+		"a@example.com\nb@example.com":      "a@example.com, b@example.com",
+		"a@example.com,\r\n  b@example.com": "a@example.com,, b@example.com",
+		"  Ann  <a@example.com>  ":          "Ann <a@example.com>",
+		"\n\n":                              "",
+	}
+	for in, want := range cases {
+		if got := normalizeDraftLine(in); got != want {
+			t.Errorf("normalizeDraftLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMailDraftCapHoldsUnderConcurrentSaves(t *testing.T) {
+	f := newDraftFixture(t)
+	ctx := context.Background()
+	for i := 0; i < domain.MailDraftsPerMember-1; i++ {
+		if _, err := f.service.CreateMailDraft(ctx, f.b, MailDraftInput{MailboxID: f.team.ID}); err != nil {
+			t.Fatalf("seed draft %d: %v", i, err)
+		}
+	}
+	errs := make(chan error, 4)
+	for i := 0; i < cap(errs); i++ {
+		go func() {
+			_, err := f.service.CreateMailDraft(ctx, f.b, MailDraftInput{MailboxID: f.team.ID})
+			errs <- err
+		}()
+	}
+	saved := 0
+	for i := 0; i < cap(errs); i++ {
+		err := <-errs
+		switch {
+		case err == nil:
+			saved++
+		case !errors.Is(err, ErrMailDraftLimitReached):
+			t.Fatalf("concurrent save: %v", err)
+		}
+	}
+	if saved != 1 {
+		t.Fatalf("concurrent saves at 199 drafts stored %d, want 1", saved)
+	}
+}
+
+func TestMailDraftListPreviewsAndShowReadsInFull(t *testing.T) {
+	f := newDraftFixture(t)
+	ctx := context.Background()
+	body := strings.Repeat("é", domain.MailDraftListBodyLength+50)
+	saved, err := f.service.CreateMailDraft(ctx, f.b, MailDraftInput{MailboxID: f.team.ID, Body: body})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	list, err := f.service.MailDrafts(ctx, f.b)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %v, %v", list, err)
+	}
+	if got := []rune(toMailDraftSummaryResponse(list[0]).Preview); len(got) != mailDraftPreviewLength {
+		t.Fatalf("preview has %d characters, want %d", len(got), mailDraftPreviewLength)
+	}
+	full, err := f.service.MailDraft(ctx, f.b, saved.ID)
+	if err != nil || full.Body != body {
+		t.Fatalf("show = %d characters, %v", len([]rune(full.Body)), err)
+	}
+	if _, err = f.service.MailDraft(ctx, f.c, saved.ID); !errors.Is(err, ErrMailDraftNotFound) {
+		t.Fatalf("another member read the draft: %v", err)
+	}
+}

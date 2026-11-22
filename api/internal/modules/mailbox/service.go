@@ -275,6 +275,7 @@ type Service interface {
 	// MailDrafts lists the viewer's own drafts in the organization, the latest change first.
 	MailDrafts(ctx context.Context, viewer domain.OrganizationContext) ([]domain.MailDraft, error)
 	// CreateMailDraft saves a new draft from a mailbox the viewer may send from.
+	MailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) (domain.MailDraft, error)
 	CreateMailDraft(ctx context.Context, viewer domain.OrganizationContext, input MailDraftInput) (domain.MailDraft, error)
 	// UpdateMailDraft replaces what one of the viewer's drafts holds.
 	UpdateMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint, input MailDraftInput) (domain.MailDraft, error)

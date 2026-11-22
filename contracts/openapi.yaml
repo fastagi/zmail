@@ -6757,6 +6757,32 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-drafts/{draft_id}:
+    get:
+      operationId: showMailDraft
+      summary: Read one of the caller's drafts in full
+      description: The whole draft, body included. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDraftID'
+      responses:
+        '200':
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     put:
       operationId: updateMailDraft
       summary: Replace one of the caller's drafts
@@ -16576,6 +16602,44 @@ components:
         updated_at:
           type: string
           format: date-time
+    MailDraftSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - to
+        - cc
+        - subject
+        - preview
+        - in_reply_to
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        mailbox_id:
+          type: integer
+          minimum: 1
+        to:
+          type: string
+        cc:
+          type: string
+        subject:
+          type: string
+        preview:
+          type: string
+          maxLength: 200
+          description: The first characters of the body, on one line.
+        in_reply_to:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     MailDraftResponse:
       type: object
       additionalProperties: false
@@ -16606,7 +16670,7 @@ components:
           type: array
           maxItems: 200
           items:
-            $ref: '#/components/schemas/MailDraft'
+            $ref: '#/components/schemas/MailDraftSummary'
     UpdateMailSignatureRequest:
       type: object
       additionalProperties: false

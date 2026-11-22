@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -45,15 +46,21 @@ func (s *service) CreateMailDraft(ctx context.Context, viewer domain.Organizatio
 	if err != nil {
 		return domain.MailDraft{}, err
 	}
-	count, err := store.CountMailDrafts(ctx, viewer.OrganizationID, viewer.UserID)
+	draft.CreatedAt = draft.UpdatedAt
+	saved, err := store.CreateMailDraft(ctx, draft, domain.MailDraftsPerMember)
+	if errors.Is(err, domain.ErrMailDraftLimit) {
+		return domain.MailDraft{}, ErrMailDraftLimitReached
+	}
+	return saved, err
+}
+
+// MailDraft reads one of the viewer's drafts in full.
+func (s *service) MailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) (domain.MailDraft, error) {
+	store, err := s.draftStore()
 	if err != nil {
 		return domain.MailDraft{}, err
 	}
-	if count >= domain.MailDraftsPerMember {
-		return domain.MailDraft{}, ErrMailDraftLimitReached
-	}
-	draft.CreatedAt = draft.UpdatedAt
-	return store.CreateMailDraft(ctx, draft)
+	return store.FindMailDraft(ctx, viewer.OrganizationID, viewer.UserID, id)
 }
 
 // UpdateMailDraft replaces what one of the viewer's drafts holds.
@@ -107,9 +114,17 @@ func (s *service) checkedDraft(ctx context.Context, viewer domain.OrganizationCo
 	return draft, nil
 }
 
-// normalizeDraftLine keeps a one-line field on one line, as the composer writes it.
+// normalizeDraftLine keeps a recipient field on one line; a line break between addresses becomes
+// a comma, so the addresses stay apart.
 func normalizeDraftLine(value string) string {
-	return strings.Join(strings.Fields(strings.NewReplacer("\r", " ", "\n", " ").Replace(value)), " ")
+	lines := strings.FieldsFunc(value, func(r rune) bool { return r == '\r' || r == '\n' })
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.Join(strings.Fields(line), " "); line != "" {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, ", ")
 }
 
 func checkDraftField(invalid *ValidationError, field, value string, maxLength int, multiline bool) {

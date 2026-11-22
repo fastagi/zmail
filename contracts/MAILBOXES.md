@@ -2136,15 +2136,18 @@ clients place it in what is written, where the writer can still change it.
 A draft is a message a member saved without sending; only its writer sees it, and an organization
 member keeps at most 200 (`409 MAILBOX.DRAFT_LIMIT_REACHED` beyond that). `GET /v1/mail-drafts`
 lists the caller's drafts in the organization, the latest change first, as
-`{ "id", "mailbox_id", "to", "cc", "subject", "body", "in_reply_to", "created_at", "updated_at" }`.
+`{ "id", "mailbox_id", "to", "cc", "subject", "preview", "in_reply_to", "created_at", "updated_at" }`,
+where `preview` is at most the first 200 characters of the body on one line.
+`GET /v1/mail-drafts/:draft_id` returns one draft with its whole `body` in place of `preview`.
 `POST` saves a new one and `PUT /v1/mail-drafts/:draft_id` replaces all of one with
 `{ "mailbox_id", "to", "cc", "subject", "body", "in_reply_to" }`. `mailbox_id` is the sender and
 needs `send` (`403`; `404 MAILBOX.NOT_FOUND` without any access). `to` and `cc` are kept as
-written, one line each, and checked only when the message is sent; `body` line breaks become `\n`.
+written, one line each (a line break between addresses becomes `, `), and checked only when the
+message is sent; `body` line breaks become `\n`.
 Limits are 4000 characters for `to` and `cc`, 998 for `subject` and `in_reply_to`, and 100000 for
 `body`, with no control characters other than tabs and body line breaks
 (`422 COMMON.VALIDATION_FAILED`). Another member's draft, or a deleted one, is
-`404 MAILBOX.DRAFT_NOT_FOUND`. Deleting a mailbox deletes its drafts. Attachments stay in the
+`404 MAILBOX.DRAFT_NOT_FOUND`. Concurrent saves never take a member past 200. Deleting a mailbox deletes its drafts. Attachments stay in the
 browser. Responses are never cached.
 
 ### AI Triage

@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -53,7 +54,10 @@ func (r *repository) ListMailDrafts(ctx context.Context, organizationID, userID 
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailDraftPO
-	if err := r.ownDrafts(ctx, organizationID, userID).Order("updated_at DESC, id DESC").Limit(limit).Find(&rows).Error; err != nil {
+	columns := "id, organization_id, user_id, mailbox_id, to_recipients, cc_recipients, subject, " +
+		fmt.Sprintf("left(body, %d) AS body, in_reply_to, created_at, updated_at", domain.MailDraftListBodyLength)
+	if err := r.ownDrafts(ctx, organizationID, userID).Select(columns).
+		Order("updated_at DESC, id DESC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	drafts := make([]domain.MailDraft, 0, len(rows))
@@ -79,24 +83,31 @@ func (r *repository) FindMailDraft(ctx context.Context, organizationID, userID, 
 	return po.toDomain(), nil
 }
 
-// CountMailDrafts counts a member's drafts in an organization.
-func (r *repository) CountMailDrafts(ctx context.Context, organizationID, userID uint) (int64, error) {
-	if r.db == nil {
-		return 0, domain.ErrServiceUnavailable
-	}
-	var count int64
-	err := r.ownDrafts(ctx, organizationID, userID).Count(&count).Error
-	return count, err
-}
-
-// CreateMailDraft stores a new draft and returns it with its id.
-func (r *repository) CreateMailDraft(ctx context.Context, draft domain.MailDraft) (domain.MailDraft, error) {
+// CreateMailDraft stores a new draft and returns it with its id. A transaction-scoped advisory
+// lock per writer serializes the count and insert, so concurrent saves cannot pass the limit.
+func (r *repository) CreateMailDraft(ctx context.Context, draft domain.MailDraft, limit int) (domain.MailDraft, error) {
 	if r.db == nil {
 		return domain.MailDraft{}, domain.ErrServiceUnavailable
 	}
 	po := mailDraftPO(draft)
 	po.ID = 0
-	if err := r.conn(ctx).Create(&po).Error; err != nil {
+	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		owner := fmt.Sprintf("mail_drafts:%d:%d", draft.OrganizationID, draft.UserID)
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", owner).Error; err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&MailDraftPO{}).
+			Where("organization_id = ? AND user_id = ?", draft.OrganizationID, draft.UserID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= int64(limit) {
+			return domain.ErrMailDraftLimit
+		}
+		return tx.Create(&po).Error
+	})
+	if err != nil {
 		return domain.MailDraft{}, err
 	}
 	return po.toDomain(), nil

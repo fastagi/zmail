@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -44,6 +45,47 @@ func toMailDraftResponse(draft domain.MailDraft) MailDraftResponse {
 	}
 }
 
+// MailDraftSummaryResponse is one draft in the list: its body only as a short preview.
+type MailDraftSummaryResponse struct {
+	ID        uint      `json:"id"`
+	MailboxID uint      `json:"mailbox_id"`
+	To        string    `json:"to"`
+	Cc        string    `json:"cc"`
+	Subject   string    `json:"subject"`
+	Preview   string    `json:"preview"`
+	InReplyTo string    `json:"in_reply_to"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+const mailDraftPreviewLength = 200
+
+func toMailDraftSummaryResponse(draft domain.MailDraft) MailDraftSummaryResponse {
+	preview := []rune(strings.Join(strings.Fields(draft.Body), " "))
+	if len(preview) > mailDraftPreviewLength {
+		preview = preview[:mailDraftPreviewLength]
+	}
+	return MailDraftSummaryResponse{
+		ID: draft.ID, MailboxID: draft.MailboxID, To: draft.To, Cc: draft.Cc, Subject: draft.Subject,
+		Preview: string(preview), InReplyTo: draft.InReplyTo, CreatedAt: draft.CreatedAt, UpdatedAt: draft.UpdatedAt,
+	}
+}
+
+// ShowMailDraft returns one of the caller's drafts in full.
+func (h *Handler) ShowMailDraft(c *gin.Context) {
+	viewer, id, ok := viewerScope(c, "draft_id")
+	if !ok {
+		return
+	}
+	draft, err := h.service.MailDraft(c.Request.Context(), viewer, id)
+	if err != nil {
+		response.HandleError(c, "Failed to read the draft", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toMailDraftResponse(draft))
+}
+
 // ListMailDrafts lists the caller's drafts in the organization, the latest change first.
 // fastbuild:bounded-list max=200 reason=a member keeps at most domain.MailDraftsPerMember drafts per organization
 func (h *Handler) ListMailDrafts(c *gin.Context) {
@@ -56,9 +98,9 @@ func (h *Handler) ListMailDrafts(c *gin.Context) {
 		response.HandleError(c, "Failed to list drafts", err)
 		return
 	}
-	items := make([]MailDraftResponse, 0, len(drafts))
+	items := make([]MailDraftSummaryResponse, 0, len(drafts))
 	for _, draft := range drafts {
-		items = append(items, toMailDraftResponse(draft))
+		items = append(items, toMailDraftSummaryResponse(draft))
 	}
 	privateResponse(c)
 	response.Success(c, items)

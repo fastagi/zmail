@@ -167,6 +167,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.signature.update").WhereNumber("mailbox_id")
 		auth.GET("/mail-drafts", h.ListMailDrafts).Name("mail_drafts.index")
 		auth.POST("/mail-drafts", h.CreateMailDraft).Name("mail_drafts.store")
+		auth.GET("/mail-drafts/:draft_id", h.ShowMailDraft).
+			Name("mail_drafts.show").WhereNumber("draft_id")
 		auth.PUT("/mail-drafts/:draft_id", h.UpdateMailDraft).
 			Name("mail_drafts.update").WhereNumber("draft_id")
 		auth.DELETE("/mail-drafts/:draft_id", h.DeleteMailDraft).

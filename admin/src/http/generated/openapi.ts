@@ -1148,7 +1148,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Read one of the caller's drafts in full
+         * @description The whole draft, body included. Never cached.
+         */
+        get: operations["showMailDraft"];
         /**
          * Replace one of the caller's drafts
          * @description Replaces everything the draft holds; needs `send` on `mailbox_id`.
@@ -5207,7 +5211,7 @@ export interface components {
         MailDraftListResponse: {
             /** @constant */
             code: 0;
-            data: components["schemas"]["MailDraft"][];
+            data: components["schemas"]["MailDraftSummary"][];
             message: string;
         };
         MailDraftResponse: {
@@ -5215,6 +5219,20 @@ export interface components {
             code: 0;
             data: components["schemas"]["MailDraft"];
             message: string;
+        };
+        MailDraftSummary: {
+            cc: string;
+            /** Format: date-time */
+            created_at: string;
+            id: number;
+            in_reply_to: string;
+            mailbox_id: number;
+            /** @description The first characters of the body, on one line. */
+            preview: string;
+            subject: string;
+            to: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         MailEvent: {
             /** @description Short machine-readable reason such as `5.1.1 permanent_failure`; never provider free text. */
@@ -10610,6 +10628,36 @@ export interface operations {
             409: components["responses"]["Conflict"];
             413: components["responses"]["RequestTooLarge"];
             422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    showMailDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail draft identifier. */
+                draft_id: components["parameters"]["MailDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDraftResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
