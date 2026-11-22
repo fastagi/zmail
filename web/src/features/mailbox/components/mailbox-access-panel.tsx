@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { lazy, Suspense, useId, useState } from 'react';
 import { AlertCircle, RefreshCw, Trash2, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import {
   nativeSelectClassName,
@@ -52,12 +53,20 @@ import {
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
+import { canManageAgentGrants } from '@/features/mailbox/utils/agent-grant-access';
 import { useT } from '@/i18n';
+
+// The Agent tab and everything it loads arrive when it is first opened.
+const MailboxAgentsTab = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/mailbox-agents-tab')).MailboxAgentsTab,
+}));
 
 /** Whether the access panel has anything to show the caller. */
 export function hasAccessPanel(mailbox: Mailbox): boolean {
   const { access } = mailbox;
-  return access.manage_members || access.see_history || access.administer;
+  return (
+    access.manage_members || access.see_history || access.administer || canManageAgentGrants(mailbox)
+  );
 }
 
 /**
@@ -94,11 +103,51 @@ export function MailboxAccessPanel({
               <DialogTitle>{t('access.title', { address: mailbox.address })}</DialogTitle>
               <DialogDescription>{t('access.description')}</DialogDescription>
             </DialogHeader>
-            <PanelBody key={mailbox.id} mailbox={mailbox} onRefresh={onRefresh} />
+            {canManageAgentGrants(mailbox) ? (
+              <PanelTabs key={mailbox.id} mailbox={mailbox} onRefresh={onRefresh} />
+            ) : (
+              <PanelBody key={mailbox.id} mailbox={mailbox} onRefresh={onRefresh} />
+            )}
           </>
         ) : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The access sections and the Agent tab, for who may manage the mailbox's agent grants (see
+ * `canManageAgentGrants`). The Agent tab's content loads when it is first chosen.
+ */
+function PanelTabs({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => void }) {
+  const t = useT('mailbox');
+  const [tab, setTab] = useState<'access' | 'agents'>('access');
+  return (
+    <Tabs value={tab} onValueChange={value => setTab(value === 'agents' ? 'agents' : 'access')}>
+      <TabsList aria-label={t('agents.tabs.label')} className="w-full sm:w-fit">
+        <TabsTrigger value="access">{t('agents.tabs.access')}</TabsTrigger>
+        <TabsTrigger value="agents">{t('agents.tabs.agents')}</TabsTrigger>
+      </TabsList>
+      <TabsContent value="access" className="pt-4">
+        <PanelBody mailbox={mailbox} onRefresh={onRefresh} />
+      </TabsContent>
+      <TabsContent value="agents" className="pt-4">
+        {tab === 'agents' ? (
+          <Suspense fallback={<AgentsTabFallback label={t('agents.loading')} />}>
+            <MailboxAgentsTab mailbox={mailbox} />
+          </Suspense>
+        ) : null}
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function AgentsTabFallback({ label }: { label: string }) {
+  return (
+    <div role="status" aria-label={label} className="space-y-3">
+      <Skeleton className="h-12 w-full" />
+      <Skeleton className="h-24 w-full" />
+    </div>
   );
 }
 
