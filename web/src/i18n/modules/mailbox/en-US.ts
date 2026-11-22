@@ -1668,6 +1668,7 @@ const messages = {
       cancel: 'Cancel',
       disconnected: 'Disconnected {address}',
       disconnectFailed: 'The mailbox could not be disconnected. Try again.',
+      connectorOff: 'This provider is no longer enabled in your organization, so it cannot be reconnected.',
       add: 'Add external mailbox',
     },
     password: {
@@ -1700,7 +1701,13 @@ const messages = {
       hide: 'Hide app password',
       connect: 'Connect',
       connecting: 'Signing in…',
+      slow: 'Still connecting. A slow mail server can take up to a minute to answer.',
       errors: {
+        timedOut:
+          'The mail server is taking too long to answer. The account may still have connected: check your connected mailboxes before trying again.',
+        offline: 'You are offline. Connect to the internet and try again.',
+        mismatch: 'These details sign in to a different account than the one you are restoring.',
+        notFound: 'This connection no longer exists. Add the account again instead.',
         hostRequired: 'Enter the IMAP server.',
         hostFormat: 'Enter a server name such as imap.example.com, without https:// or a port.',
         usernameRequired: 'Enter the username.',
@@ -1764,6 +1771,10 @@ const messages = {
         created: 'Connected',
         actions: 'Actions',
       },
+      team: 'Organization',
+      sharedBadge: 'Team mailbox',
+      confirmShared:
+        'Syncing stops now. The shared mailbox and its members stay, and anyone who manages its members can connect the account again. This action is recorded in the audit log.',
       never: 'Never',
       formerMember: 'Former member',
       memberId: 'Member #{id}',

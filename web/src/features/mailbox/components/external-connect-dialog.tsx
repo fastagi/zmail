@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useId, useState, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Eye, KeyRound, Lock, LogOut, Mail } from 'lucide-react';
+import { ArrowLeft, Eye, KeyRound, Lock, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -25,6 +25,7 @@ import {
   type ExternalMailCompletion,
   type ExternalMailConnector,
 } from '@/features/mailbox/external-mail-schemas';
+import { ProviderMark } from '@/features/mailbox/components/provider-mark';
 import { useDialogReturnFocus } from '@/features/mailbox/hooks/use-dialog-return-focus';
 import { useBeginExternalAuthorization } from '@/features/mailbox/hooks/use-external-mail-actions';
 import { connectedMailboxHref, providerName } from '@/features/mailbox/utils/external-mail';
@@ -57,6 +58,8 @@ function isSupported(connector: ExternalMailConnector): boolean {
 export interface ExternalConnectPreset {
   provider: string;
   address: string;
+  /** The connection to restore; the server checks the login is the same account. */
+  connectionId: number;
 }
 
 /**
@@ -87,9 +90,17 @@ export function ExternalConnectDialog({
   const t = useT('mailbox');
   const returnFocus = useDialogReturnFocus(open, returnFocusRef);
   const router = useRouter();
-  const presetConnector = preset
-    ? (connectors.find(item => item.id === preset.provider && isPasswordConnector(item)) ?? null)
-    : null;
+  // A restore opens on the form even while the connector list is unknown: the connection names
+  // its own provider, and the server refuses a connector it no longer runs.
+  const [presetConnector] = useState<ExternalMailConnector | null>(() =>
+    preset
+      ? (connectors.find(item => item.id === preset.provider && isPasswordConnector(item)) ?? {
+          id: preset.provider,
+          auth_kind: EXTERNAL_MAIL_PASSWORD_AUTH_KIND,
+          capabilities: { read: true },
+        })
+      : null
+  );
   const [chosen, setChosen] = useState<ExternalMailConnector | null>(presetConnector);
   // A password connector shows its statement first, then the form.
   const [formShown, setFormShown] = useState(presetConnector !== null);
@@ -182,7 +193,11 @@ export function ExternalConnectDialog({
                 organizationId={organizationId}
                 provider={chosen.id}
                 providerLabel={name}
-                reconnectAddress={preset && presetConnector === chosen ? preset.address : null}
+                reconnect={
+                  preset && presetConnector === chosen
+                    ? { address: preset.address, connectionId: preset.connectionId }
+                    : null
+                }
                 onBack={() => setFormShown(false)}
                 onConnected={connected}
               />
@@ -322,22 +337,6 @@ function ConsentPoint({ icon, children }: { icon: React.ReactNode; children: Rea
       </span>
       <span>{children}</span>
     </li>
-  );
-}
-
-/** A neutral tile with the provider's initial; brand artwork stays out of the scaffold. */
-export function ProviderMark({ id, className }: { id: string; className?: string }) {
-  const initial = providerName(id).charAt(0);
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'grid size-6 shrink-0 place-items-center rounded-md bg-row-selected text-[11px] font-semibold text-text-muted',
-        className
-      )}
-    >
-      {initial || <Mail className="size-3.5" />}
-    </span>
   );
 }
 

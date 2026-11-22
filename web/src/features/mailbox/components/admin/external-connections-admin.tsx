@@ -5,6 +5,7 @@ import { EyeOff, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -15,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ProviderMark } from '@/features/mailbox/components/external-connect-dialog';
+import { ProviderMark } from '@/features/mailbox/components/provider-mark';
 import {
   MailOrganizationBoundary,
   MailPageHeader,
@@ -180,12 +181,16 @@ function ConnectionRow({
   const confirmRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const wasConfirming = useRef(false);
-  const address = entry.masked_account_address;
-  const owner =
-    entry.owner_display_name ??
-    (entry.owner_user_id === null
-      ? t('external.directory.formerMember')
-      : t('external.directory.memberId', { id: entry.owner_user_id }));
+  // A shared connection is the organization's team account, so its full address is shown; a
+  // member's own account only ever appears masked.
+  const shared = entry.shared === true;
+  const address = (shared ? entry.account_address : null) ?? entry.masked_account_address;
+  const owner = shared
+    ? t('external.directory.team')
+    : (entry.owner_display_name ??
+      (entry.owner_user_id === null
+        ? t('external.directory.formerMember')
+        : t('external.directory.memberId', { id: entry.owner_user_id })));
 
   useEffect(() => {
     // The confirmation takes focus when it opens; focus returns to Disconnect when it closes.
@@ -218,6 +223,11 @@ function ConnectionRow({
           <span className="inline-flex items-center gap-2">
             <ProviderMark id={entry.provider} />
             <span className="whitespace-nowrap">{address}</span>
+            {shared ? (
+              <Badge variant="outline" className="shrink-0 text-[0.6875rem]">
+                {t('external.directory.sharedBadge')}
+              </Badge>
+            ) : null}
           </span>
         </TableCell>
         <TableCell className="whitespace-nowrap">{providerName(entry.provider)}</TableCell>
@@ -275,7 +285,7 @@ function ConnectionRow({
                 {t('external.directory.confirmTitle', { address, owner })}
               </p>
               <p id={`force-disconnect-${entry.id}-detail`} className="text-xs text-text-muted">
-                {t('external.directory.confirm')}
+                {t(shared ? 'external.directory.confirmShared' : 'external.directory.confirm')}
               </p>
               {disconnect.error ? (
                 <p role="alert" className="text-xs text-error">

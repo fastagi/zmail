@@ -347,6 +347,107 @@ describe('external mail credentials, sync runs, purges, and directory routes', (
     expect(store.maskAddress('stark@gmail.com')).toBe('st***@gmail.com');
   });
 
+  it('the credentials proxy waits past the shared upstream timeout; other routes do not', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    process.env.API_UPSTREAM_TIMEOUT_MS = '100';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    // The upstream answers after 300 ms, three times the shared timeout.
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(
+            () =>
+              resolve(
+                Response.json(
+                  {
+                    code: 0,
+                    message: 'success',
+                    data: {
+                      id: 4,
+                      provider: 'imap',
+                      account_address: 'me@example.com',
+                      mailbox_id: 9,
+                      shared: false,
+                      status: 'active',
+                      last_synced_at: null,
+                      last_error_code: null,
+                      created_at: '2026-11-21T10:00:00Z',
+                    },
+                  },
+                  { status: 201 }
+                )
+              ),
+            300
+          );
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new DOMException('aborted', 'TimeoutError'));
+          });
+        })
+    );
+    const { route } = await load();
+    const bound = await bind(route, {
+      provider: 'imap',
+      host: 'imap.example.com',
+      username: 'me@example.com',
+      password: 'p',
+    });
+    expect(bound.status).toBe(201);
+    await expectError(
+      await route.listExternalMailSyncRunsRoute(
+        request('/api/external-mail-connections/4/sync-runs'),
+        '4'
+      ),
+      503,
+      'COMMON.TIMEOUT'
+    );
+  });
+
+  it('mock restore by connection_id: own account only, same login only', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    const { route } = await load();
+    const created = await bind(route, {
+      provider: 'imap',
+      host: 'imap.example.com',
+      username: 'riley',
+      password: 'p',
+    });
+    const { id } = (await created.json()).data;
+    const restored = await bind(route, {
+      provider: 'imap',
+      host: 'imap.example.com',
+      username: 'riley',
+      password: 'q',
+      connection_id: id,
+    });
+    expect(restored.status).toBe(200);
+    await expectError(
+      await bind(route, {
+        provider: 'imap',
+        host: 'imap.example.com',
+        username: 'someone-else',
+        password: 'q',
+        connection_id: id,
+      }),
+      409,
+      'MAILBOX.EXTERNAL_ACCOUNT_MISMATCH'
+    );
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    await expectError(
+      await bind(route, {
+        provider: 'imap',
+        host: 'imap.example.com',
+        username: 'riley',
+        password: 'q',
+        connection_id: id,
+      }),
+      404,
+      'MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND'
+    );
+  });
+
   it('proxy routes forward method, path, body, query, and Retry-After', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
@@ -448,18 +549,6 @@ async function load(): Promise<{ route: MailboxRoute; store: ExternalStore }> {
   const store = await import('@/features/mailbox/server/mock-external-mail-store');
   store.mockExternalMailStore.reset();
   return { route, store };
-}
-
-function start(route: MailboxRoute, body: Record<string, unknown>) {
-  return route.startExternalMailAuthorizationRoute(
-    write('POST', '/api/external-mail-authorizations', body)
-  );
-}
-
-function complete(route: MailboxRoute, body: Record<string, unknown>) {
-  return route.completeExternalMailAuthorizationRoute(
-    write('POST', '/api/external-mail-authorizations/completions', body)
-  );
 }
 
 async function expectError(response: Response, status: number, errorCode: string) {

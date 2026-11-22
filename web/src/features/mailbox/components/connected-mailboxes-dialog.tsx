@@ -14,13 +14,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  ProviderMark,
-  type ExternalConnectPreset,
-} from '@/features/mailbox/components/external-connect-dialog';
+import type { ExternalConnectPreset } from '@/features/mailbox/components/external-connect-dialog';
+import { ProviderMark } from '@/features/mailbox/components/provider-mark';
 import { useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
 import {
-  EXTERNAL_MAIL_PASSWORD_AUTH_KIND,
   type ExternalMailConnection,
   type ExternalMailConnector,
   type ExternalMailSyncRun,
@@ -34,7 +31,11 @@ import {
 } from '@/features/mailbox/hooks/use-external-mail-actions';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
-import { providerName, statusDotClassName } from '@/features/mailbox/utils/external-mail';
+import {
+  providerName,
+  reconnectKind,
+  statusDotClassName,
+} from '@/features/mailbox/utils/external-mail';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -52,7 +53,7 @@ export function ConnectedMailboxesDialog({
   onOpenChange,
   organizationId,
   connections,
-  connectors = [],
+  connectors,
   error,
   onAdd,
   onReconnectWithPassword = null,
@@ -62,7 +63,10 @@ export function ConnectedMailboxesDialog({
   onOpenChange: (open: boolean) => void;
   organizationId: number;
   connections: readonly ExternalMailConnection[] | undefined;
-  /** The instance's connectors, to tell an app password connection from an OAuth one. */
+  /**
+   * The instance's connectors, to tell an app password connection from an OAuth one and to know
+   * which still run; undefined while the list is unknown.
+   */
   connectors?: readonly ExternalMailConnector[];
   error: boolean;
   /** Opens the connect dialog; null when the instance offers no connector. */
@@ -74,11 +78,7 @@ export function ConnectedMailboxesDialog({
 }) {
   const t = useT('mailbox');
   const [confirming, setConfirming] = useState<Confirming>(null);
-  const passwordProviders = new Set(
-    connectors
-      .filter(connector => connector.auth_kind === EXTERNAL_MAIL_PASSWORD_AUTH_KIND)
-      .map(connector => connector.id)
-  );
+
   const returnFocus = useDialogReturnFocus(open, returnFocusRef);
 
   return (
@@ -116,16 +116,16 @@ export function ConnectedMailboxesDialog({
                   confirming={confirming?.id === connection.id ? confirming.kind : null}
                   onConfirm={kind => setConfirming({ id: connection.id, kind })}
                   onCancel={() => setConfirming(null)}
+                  reconnectKind={reconnectKind(connection.provider, connectors)}
                   onPasswordReconnect={
-                    passwordProviders.has(connection.provider)
-                      ? onReconnectWithPassword
-                        ? () =>
-                            onReconnectWithPassword({
-                              provider: connection.provider,
-                              address: connection.account_address,
-                            })
-                        : null
-                      : undefined
+                    onReconnectWithPassword
+                      ? () =>
+                          onReconnectWithPassword({
+                            provider: connection.provider,
+                            address: connection.account_address,
+                            connectionId: connection.id,
+                          })
+                      : null
                   }
                 />
               ))}
@@ -155,6 +155,7 @@ function ConnectionRow({
   confirming,
   onConfirm,
   onCancel,
+  reconnectKind: kind,
   onPasswordReconnect,
 }: {
   organizationId: number;
@@ -164,11 +165,10 @@ function ConnectionRow({
   confirming: 'disconnect' | 'purge' | null;
   onConfirm: (kind: 'disconnect' | 'purge') => void;
   onCancel: () => void;
-  /**
-   * An app password connection: reconnecting opens the connect form (null when it cannot be
-   * opened here). Undefined for an OAuth connection.
-   */
-  onPasswordReconnect?: (() => void) | null;
+  /** How this connection is reconnected, decided from its provider and the connector list. */
+  reconnectKind: 'oauth' | 'password' | 'unavailable';
+  /** Opens the connect form for an app password connection; null when it cannot open here. */
+  onPasswordReconnect: (() => void) | null;
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
@@ -228,14 +228,15 @@ function ConnectionRow({
           />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {connection.status !== 'active' && onPasswordReconnect !== null ? (
+          {connection.status !== 'active' &&
+          (kind === 'oauth' || (kind === 'password' && onPasswordReconnect)) ? (
             <Button
               type="button"
               size="sm"
               variant="outline"
               loading={reconnect.isPending}
               onClick={() =>
-                onPasswordReconnect
+                kind === 'password' && onPasswordReconnect
                   ? onPasswordReconnect()
                   : reconnect.begin({
                       kind: 'reconnect',
@@ -280,6 +281,9 @@ function ConnectionRow({
           {t('external.connect.failed')}
         </p>
       ) : null}
+      {connection.status !== 'active' && kind === 'unavailable' ? (
+        <p className="mt-2 text-xs text-text-muted">{t('external.manage.connectorOff')}</p>
+      ) : null}
       {purgeConflict && !confirming ? (
         <p role="alert" className="mt-2 text-xs text-error">
           {t('external.purge.notRevoked')}
@@ -321,7 +325,7 @@ function ConnectionRow({
               variant="destructive"
               loading={purge.isPending}
               onClick={() =>
-                purge.mutate(connection.id, {
+                purge.mutate({ connectionId: connection.id, mailboxId: connection.mailbox_id }, {
                   onSuccess: result => {
                     toast.success(
                       result.completed
@@ -378,7 +382,7 @@ function ConnectionRow({
               variant="destructive"
               loading={disconnect.isPending}
               onClick={() =>
-                disconnect.mutate(connection.id, {
+                disconnect.mutate({ connectionId: connection.id, mailboxId: connection.mailbox_id }, {
                   onSuccess: () => {
                     toast.success(t('external.manage.disconnected', { address }));
                     onCancel();

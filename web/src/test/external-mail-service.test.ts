@@ -92,6 +92,8 @@ describe('external mail service: app passwords, sync runs, purges, directory', (
     expect(post).toHaveBeenCalledWith('/external-mail-credentials', input, {
       headers: { 'Organization-Id': '7' },
       fastbuildResponseMode: 'response',
+      // Longer than the API's 45-second sign-in and the BFF's 60-second wait.
+      timeout: 65_000,
     });
     // The answer is all that is returned: never the request, which held the password.
     expect(JSON.stringify(result)).not.toContain('app-secret');
@@ -170,11 +172,11 @@ describe('external mail service: app passwords, sync runs, purges, directory', (
       headers: { 'Organization-Id': '7' },
       params: { per_page: 15, cursor: 'xyz' },
     });
-    // A directory row never carries the full address or message data.
+    // A directory row never carries message data.
     getEnvelope.mockResolvedValueOnce({
       code: 0,
       message: 'success',
-      data: [{ ...entry, account_address: 'stark@gmail.com' }],
+      data: [{ ...entry, message_count: 12 }],
       meta: { per_page: 15, has_more: false, next_cursor: null },
     });
     await expect(externalMailService.directory(7)).rejects.toBeInstanceOf(ApiError);

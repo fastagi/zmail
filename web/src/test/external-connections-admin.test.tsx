@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminShell } from '@/features/mailbox/components/admin/admin-shell';
 import { ExternalConnectionsAdmin } from '@/features/mailbox/components/admin/external-connections-admin';
 import type { ExternalMailDirectoryEntry } from '@/features/mailbox/external-mail-schemas';
+import { mailboxKeys } from '@/features/mailbox/hooks/mailbox-keys';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
@@ -115,6 +116,37 @@ describe('external connections admin page', () => {
     expect(screen.queryByRole('navigation', { name: 'Pages' })).not.toBeInTheDocument();
   });
 
+  it('marks a shared connection as the team’s, with its full address', async () => {
+    service.directory.mockResolvedValue(
+      page(
+        [
+          entry({
+            id: 7,
+            shared: true,
+            account_address: 'support@team.example',
+            masked_account_address: 'su***@team.example',
+            mailbox_id: 90,
+            owner_user_id: null,
+            owner_display_name: null,
+          }),
+        ],
+        null
+      )
+    );
+    service.forceDisconnect.mockResolvedValue(undefined);
+    renderWith(<ExternalConnectionsAdmin />);
+    await screen.findByRole('table');
+    const row = rowOf(7);
+    expect(row).toHaveTextContent('support@team.example');
+    expect(row).toHaveTextContent('Team mailbox');
+    expect(row).toHaveTextContent('Organization');
+    expect(row).not.toHaveTextContent('Former member');
+    fireEvent.click(within(row).getByRole('button', { name: 'Disconnect support@team.example' }));
+    expect(screen.getByRole('group')).toHaveAccessibleDescription(
+      /The shared mailbox and its members stay/u
+    );
+  });
+
   it('pages forward by cursor and back', async () => {
     service.directory.mockImplementation(async (_organizationId: number, cursor?: string) =>
       cursor === 'c2' ? page([entry({ id: 1 })], null) : page([entry({ id: 3 }), entry({ id: 2 })], 'c2')
@@ -139,6 +171,7 @@ describe('external connections admin page', () => {
   it('disconnects after an inline confirmation that says the member can connect again', async () => {
     service.directory.mockResolvedValue(page([entry({ id: 3 })], null));
     service.forceDisconnect.mockResolvedValue(undefined);
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     renderWith(<ExternalConnectionsAdmin />);
     await screen.findByRole('table');
 
@@ -159,8 +192,10 @@ describe('external connections admin page', () => {
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith('Disconnected st***@gmail.com')
     );
-    // The directory is read again.
+    // Everything cached for the organization's mail is read again: the directory, the manager's own
+    // connections and mailbox list (they may have disconnected their own account), and grants.
     await waitFor(() => expect(service.directory).toHaveBeenCalledTimes(2));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: mailboxKeys.organization(1) });
   });
 
   it('reports a failed disconnect inline and a vanished one as gone', async () => {

@@ -404,9 +404,13 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const externalReturnFocus = useRef<HTMLElement | null>(null);
   // A password connection being restored opens the connect dialog on its form.
   const [connectPreset, setConnectPreset] = useState<ExternalConnectPreset | null>(null);
+  // Every open starts the dialog afresh, so a second Reconnect of the same account opens on its
+  // form again rather than on whatever step the last one ended.
+  const [connectSession, setConnectSession] = useState(0);
   const openConnect = (preset: ExternalConnectPreset | null = null) => {
     setManageExternalOpen(false);
     setConnectPreset(preset);
+    setConnectSession(session => session + 1);
     setConnectMounted(true);
     setConnectOpen(true);
   };
@@ -561,7 +565,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       {connectMounted ? (
         <Suspense fallback={null}>
           <ExternalConnectDialog
-            key={connectPreset ? `${connectPreset.provider}:${connectPreset.address}` : 'new'}
+            key={connectSession}
             open={connectOpen}
             onOpenChange={setConnectOpen}
             organizationId={organizationId}
@@ -578,10 +582,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             onOpenChange={setManageExternalOpen}
             organizationId={organizationId}
             connections={connections.data}
-            connectors={connectorList}
+            connectors={connectors.data}
             error={!connections.data && connections.isError}
             onAdd={externalOn ? () => openConnect() : null}
-            onReconnectWithPassword={externalOn ? openConnect : null}
+            onReconnectWithPassword={openConnect}
             returnFocusRef={externalReturnFocus}
           />
         </Suspense>
@@ -988,8 +992,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             <ExternalReconnectBanner
               organizationId={organizationId}
               connections={connectionList}
-              connectors={connectorList}
-              onReconnectWithPassword={externalOn ? openConnect : null}
+              connectors={connectors.data}
+              onReconnectWithPassword={openConnect}
             />
           </Suspense>
         ) : null}

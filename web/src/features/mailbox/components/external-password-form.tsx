@@ -19,7 +19,7 @@ import {
   type ExternalMailCompletion,
 } from '@/features/mailbox/external-mail-schemas';
 import { useBindExternalMailCredentials } from '@/features/mailbox/hooks/use-external-mail-actions';
-import { ApiErrorCode } from '@/http/codes';
+import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -34,6 +34,10 @@ export type PasswordBindFailure =
   | { kind: 'taken' }
   | { kind: 'limit' }
   | { kind: 'rateLimited'; minutes: number | null }
+  | { kind: 'timedOut' }
+  | { kind: 'offline' }
+  | { kind: 'mismatch' }
+  | { kind: 'notFound' }
   | { kind: 'invalid' }
   | { kind: 'unavailable' }
   | { kind: 'generic' };
@@ -55,6 +59,16 @@ export function passwordBindFailure(error: unknown): PasswordBindFailure {
         minutes:
           error.retryAfterSeconds === undefined ? null : Math.ceil(error.retryAfterSeconds / 60),
       };
+    // The server may still finish the sign-in after the browser or the BFF stopped waiting.
+    case ApiErrorCode.COMMON_TIMEOUT:
+    case ClientErrorCode.TIMEOUT:
+      return { kind: 'timedOut' };
+    case ClientErrorCode.NETWORK_ERROR:
+      return { kind: 'offline' };
+    case ApiErrorCode.MAILBOX_EXTERNAL_ACCOUNT_MISMATCH:
+      return { kind: 'mismatch' };
+    case ApiErrorCode.MAILBOX_EXTERNAL_CONNECTION_NOT_FOUND:
+      return { kind: 'notFound' };
     case ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_INVALID:
     case ApiErrorCode.COMMON_VALIDATION_FAILED:
       return { kind: 'invalid' };
@@ -64,6 +78,9 @@ export function passwordBindFailure(error: unknown): PasswordBindFailure {
       return { kind: 'generic' };
   }
 }
+
+/** After this long a sign-in says it is still working: a slow server may take 45 seconds. */
+const SLOW_SIGN_IN_MS = 8_000;
 
 /** A server name: letters, digits, dots, and hyphens, without a scheme, path, or port. */
 const HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/iu;
@@ -77,15 +94,15 @@ export function ExternalPasswordForm({
   organizationId,
   provider,
   providerLabel,
-  reconnectAddress,
+  reconnect = null,
   onBack,
   onConnected,
 }: {
   organizationId: number;
   provider: string;
   providerLabel: string;
-  /** The address being restored, when this binds an existing connection again. */
-  reconnectAddress?: string | null;
+  /** The connection being restored, when this binds an existing account again. */
+  reconnect?: { address: string; connectionId: number } | null;
   onBack: (() => void) | null;
   onConnected: (completion: ExternalMailCompletion, backfillDays: number) => void;
 }) {
@@ -101,7 +118,17 @@ export function ExternalPasswordForm({
   const alertRef = useRef<HTMLDivElement | null>(null);
   const ids = useId();
   const backfillName = `${ids}-backfill`;
-  const failure = bind.error ? passwordBindFailure(bind.error) : null;
+  // Read from the bind's rejection, which also covers a refusal before any request (offline).
+  const [failure, setFailure] = useState<PasswordBindFailure | null>(null);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!bind.isPending) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), SLOW_SIGN_IN_MS);
+    return () => clearTimeout(timer);
+  }, [bind.isPending]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -122,8 +149,10 @@ export function ExternalPasswordForm({
     const secret = password;
     // The password leaves component state before the request starts.
     setPassword('');
+    setFailure(null);
     bind
       .bind({
+        ...(reconnect ? { connection_id: reconnect.connectionId } : {}),
         provider,
         host: trimmedHost,
         port: EXTERNAL_MAIL_IMAP_PORT,
@@ -133,7 +162,8 @@ export function ExternalPasswordForm({
       })
       .then(
         completion => onConnected(completion, days),
-        () => {
+        (error: unknown) => {
+          setFailure(passwordBindFailure(error));
           // The error is announced; focus moves to it so the reason is read first.
           requestAnimationFrame(() => alertRef.current?.focus());
         }
@@ -156,8 +186,8 @@ export function ExternalPasswordForm({
     <form noValidate onSubmit={submit} aria-describedby={`${ids}-intro`}>
       <DialogBody className="space-y-4">
         <p id={`${ids}-intro`} className="text-[13px] text-text-subtle">
-          {reconnectAddress
-            ? t('external.password.reconnectIntro', { address: reconnectAddress })
+          {reconnect
+            ? t('external.password.reconnectIntro', { address: reconnect.address })
             : t('external.password.intro', { provider: providerLabel })}
         </p>
         <div className="grid gap-3 sm:grid-cols-[1fr_6rem]">
@@ -258,7 +288,12 @@ export function ExternalPasswordForm({
             ))}
           </div>
         </fieldset>
-        {failure ? (
+        {slow ? (
+          <p role="status" className="text-xs text-text-muted">
+            {t('external.password.slow')}
+          </p>
+        ) : null}
+        {failure && !bind.isPending ? (
           <Alert variant="destructive" ref={alertRef} tabIndex={-1} className="outline-none">
             <AlertDescription data-failure={failure.kind}>
               {failure.kind === 'rateLimited'

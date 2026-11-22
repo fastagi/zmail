@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,7 +11,8 @@ import type {
   ExternalMailConnector,
   ExternalMailSyncRun,
 } from '@/features/mailbox/external-mail-schemas';
-import { ApiErrorCode } from '@/http/codes';
+import { mailboxKeys } from '@/features/mailbox/hooks/mailbox-keys';
+import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
 import enMailbox from '@/i18n/modules/mailbox/en-US';
@@ -225,6 +226,21 @@ describe('app password connect step', () => {
       'Too many attempts. Try again later.',
     ],
     [
+      'browser timeout',
+      apiError(ClientErrorCode.TIMEOUT, 0),
+      'The account may still have connected: check your connected mailboxes before trying again.',
+    ],
+    [
+      'upstream timeout',
+      apiError(ApiErrorCode.COMMON_TIMEOUT, 504),
+      'The account may still have connected: check your connected mailboxes before trying again.',
+    ],
+    [
+      'login of another account on a restore',
+      apiError(ApiErrorCode.MAILBOX_EXTERNAL_ACCOUNT_MISMATCH, 409),
+      'These details sign in to a different account than the one you are restoring.',
+    ],
+    [
       'invalid values',
       apiError(ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_INVALID, 422),
       'These details cannot be used.',
@@ -267,11 +283,77 @@ describe('app password connect step', () => {
     expect(service.bindCredentials).not.toHaveBeenCalled();
   });
 
-  it('opens straight on the form to restore an account', async () => {
-    renderWith(<ConnectDialog preset={{ provider: 'imap', address: 'me@example.com' }} />);
+  it('opens straight on the form to restore an account, and names the connection', async () => {
+    service.bindCredentials.mockResolvedValue({
+      outcome: 'restored',
+      connection: connectionOf({ id: 4, provider: 'imap', mailbox_id: 77 }),
+    });
+    renderWith(
+      <ConnectDialog preset={{ provider: 'imap', address: 'me@example.com', connectionId: 4 }} />
+    );
     const form = await screen.findByRole('dialog', { name: 'Connect with an app password' });
     await within(form).findByLabelText('IMAP server');
     expect(form).toHaveTextContent('Sign in again with the same login to restore me@example.com.');
+    fillForm(form);
+    fireEvent.click(within(form).getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(service.bindCredentials).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ connection_id: 4, provider: 'imap' })
+      )
+    );
+  });
+
+  it('opens on the form even while the connector list is unknown', async () => {
+    renderWith(
+      <ExternalConnectDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={7}
+        connectors={[]}
+        preset={{ provider: 'imap', address: 'me@example.com', connectionId: 4 }}
+      />
+    );
+    const form = await screen.findByRole('dialog', { name: 'Connect with an app password' });
+    expect(await within(form).findByLabelText('App password')).toBeInTheDocument();
+  });
+
+  it('fails at once while offline and never sends or keeps the password', async () => {
+    const online = vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      renderWith(<ConnectDialog />);
+      const form = await openForm();
+      fillForm(form);
+      fireEvent.click(within(form).getByRole('button', { name: 'Connect' }));
+      expect(await within(form).findByRole('alert')).toHaveTextContent(
+        'You are offline. Connect to the internet and try again.'
+      );
+      expect(service.bindCredentials).not.toHaveBeenCalled();
+      expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
+      expectSecretNowhere();
+    } finally {
+      online.mockRestore();
+    }
+  });
+
+  it('says it is still connecting while a slow server answers', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      service.bindCredentials.mockReturnValue(new Promise(() => {}));
+      renderWith(<ConnectDialog />);
+      const form = await openForm();
+      fillForm(form);
+      fireEvent.click(within(form).getByRole('button', { name: 'Connect' }));
+      expect(within(form).queryByText(/Still connecting/u)).toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(9_000);
+      });
+      expect(within(form).getByRole('status')).toHaveTextContent(
+        'Still connecting. A slow mail server can take up to a minute to answer.'
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders the form in Simplified Chinese', async () => {
@@ -368,8 +450,77 @@ describe('sync status in the connected mailboxes dialog', () => {
     expect(onReconnectWithPassword).toHaveBeenCalledWith({
       provider: 'imap',
       address: 'me@example.com',
+      connectionId: 3,
     });
     expect(service.start).not.toHaveBeenCalled();
+  });
+
+  it('never falls back to an OAuth redirect for a password account while the list is unknown', async () => {
+    service.syncRuns.mockResolvedValue([]);
+    const onReconnectWithPassword = vi.fn();
+    renderWith(
+      <ConnectedMailboxesDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={7}
+        connections={[
+          connectionOf({ id: 3, provider: 'imap', account_address: 'me@example.com', status: 'needs_reconnect' }),
+        ]}
+        connectors={undefined}
+        error={false}
+        onAdd={null}
+        onReconnectWithPassword={onReconnectWithPassword}
+      />
+    );
+    fireEvent.click(within(rowOf(3)).getByRole('button', { name: 'Reconnect' }));
+    expect(onReconnectWithPassword).toHaveBeenCalled();
+    expect(service.start).not.toHaveBeenCalled();
+  });
+
+  it('says a connection cannot be reconnected once its connector is off', async () => {
+    service.syncRuns.mockResolvedValue([]);
+    renderWith(
+      <ConnectedMailboxesDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={7}
+        connections={[
+          connectionOf({ id: 3, provider: 'imap', account_address: 'me@example.com', status: 'needs_reconnect' }),
+          connectionOf({ id: 4, provider: 'outlook', account_address: 'o@outlook.com', status: 'revoked' }),
+        ]}
+        connectors={[gmail]}
+        error={false}
+        onAdd={null}
+        onReconnectWithPassword={vi.fn()}
+      />
+    );
+    for (const id of [3, 4]) {
+      expect(within(rowOf(id)).queryByRole('button', { name: 'Reconnect' })).toBeNull();
+      expect(rowOf(id)).toHaveTextContent(
+        'This provider is no longer enabled in your organization, so it cannot be reconnected.'
+      );
+    }
+    expect(within(rowOf(4)).getByRole('button', { name: 'Delete synced mail now' })).toBeEnabled();
+  });
+
+  it('reads the mailbox, its agent grants, and the unified inbox again after a disconnect', async () => {
+    service.syncRuns.mockResolvedValue([]);
+    service.disconnect.mockResolvedValue(undefined);
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    renderWith(
+      <ConnectedMailboxesDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={7}
+        connections={[connectionOf({ id: 1, mailbox_id: 41 })]}
+        error={false}
+        onAdd={null}
+      />
+    );
+    fireEvent.click(within(rowOf(1)).getByRole('button', { name: 'Disconnect' }));
+    fireEvent.click(within(within(rowOf(1)).getByRole('group')).getByRole('button', { name: 'Disconnect' }));
+    await waitFor(() => expect(service.disconnect).toHaveBeenCalledWith(7, 1));
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining(connectedMailboxKeys(41))));
   });
 });
 
@@ -413,6 +564,18 @@ describe('deleting a revoked connection’s mail', () => {
     await waitFor(() => expect(service.purge).toHaveBeenCalledWith(7, 2));
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith('Deleted 120 messages synced from old@gmail.com')
+    );
+  });
+
+  it('reads the deleted mailbox, its counts, and its agent grants again after a purge', async () => {
+    service.purge.mockResolvedValue({ deleted_messages: 3, completed: true });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    renderRevoked();
+    fireEvent.click(within(rowOf(2)).getByRole('button', { name: 'Delete synced mail now' }));
+    fireEvent.click(within(rowOf(2)).getByRole('button', { name: 'Delete for good' }));
+    await waitFor(() => expect(service.purge).toHaveBeenCalledWith(7, 2));
+    await waitFor(() =>
+      expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining(connectedMailboxKeys(41)))
     );
   });
 
@@ -471,7 +634,7 @@ function ConnectDialog({
   preset = null,
 }: {
   onOpenChange?: (open: boolean) => void;
-  preset?: { provider: string; address: string } | null;
+  preset?: { provider: string; address: string; connectionId: number } | null;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -535,6 +698,22 @@ function expectSecretNowhere() {
   for (const input of Array.from(document.querySelectorAll('input'))) {
     expect(input.value).not.toBe(SECRET);
   }
+}
+
+function invalidatedKeys(spy: { mock: { calls: unknown[][] } }): string[] {
+  return spy.mock.calls.map(([filters]) =>
+    JSON.stringify((filters as { queryKey?: unknown } | undefined)?.queryKey)
+  );
+}
+
+/** The mailbox key covers its messages, counts, and agent grants (`[..., 'agent-grants']`). */
+function connectedMailboxKeys(mailboxId: number): string[] {
+  return [
+    JSON.stringify(mailboxKeys.mailbox(7, mailboxId)),
+    JSON.stringify(mailboxKeys.inboxes(7)),
+    JSON.stringify(mailboxKeys.allInboxCounts(7)),
+    JSON.stringify(mailboxKeys.list(7)),
+  ];
 }
 
 function apiError(code: string, status: number, retryAfterSeconds?: number): ApiError {

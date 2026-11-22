@@ -5,13 +5,12 @@ import { AlertTriangle, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
-import {
-  EXTERNAL_MAIL_PASSWORD_AUTH_KIND,
-  type ExternalMailConnection,
-  type ExternalMailConnector,
+import type {
+  ExternalMailConnection,
+  ExternalMailConnector,
 } from '@/features/mailbox/external-mail-schemas';
 import { useBeginExternalAuthorization } from '@/features/mailbox/hooks/use-external-mail-actions';
-import { providerName } from '@/features/mailbox/utils/external-mail';
+import { providerName, reconnectKind } from '@/features/mailbox/utils/external-mail';
 import { useT } from '@/i18n';
 
 const DISMISSED_KEY = 'zmail.externalReconnectDismissed';
@@ -49,15 +48,17 @@ const subscribeToNothing = () => () => {};
 export function ExternalReconnectBanner({
   organizationId,
   connections,
-  connectors = [],
+  connectors,
   onReconnectWithPassword = null,
 }: {
   organizationId: number;
   connections: readonly ExternalMailConnection[];
-  /** The instance's connectors, to tell an app password connection from an OAuth one. */
+  /** The instance's connectors; undefined while the list is unknown. */
   connectors?: readonly ExternalMailConnector[];
   /** Opens the connect form for an app password connection, which has no sign-in page. */
-  onReconnectWithPassword?: ((preset: { provider: string; address: string }) => void) | null;
+  onReconnectWithPassword?:
+    | ((preset: { provider: string; address: string; connectionId: number }) => void)
+    | null;
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
@@ -78,9 +79,8 @@ export function ExternalReconnectBanner({
 
   const provider = providerName(connection.provider);
   const address = connection.account_address;
-  const password = connectors.some(
-    item => item.id === connection.provider && item.auth_kind === EXTERNAL_MAIL_PASSWORD_AUTH_KIND
-  );
+  const kind = reconnectKind(connection.provider, connectors);
+  const password = kind === 'password';
   const dismiss = () => {
     const next = [...known, failureKey(connection)];
     writeDismissed(next);
@@ -108,9 +108,12 @@ export function ExternalReconnectBanner({
             {t('external.connect.failed')}
           </p>
         ) : null}
+        {kind === 'unavailable' ? (
+          <p className="mt-1 text-xs text-text-muted">{t('external.manage.connectorOff')}</p>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {password && !onReconnectWithPassword ? null : (
+        {kind === 'unavailable' || (password && !onReconnectWithPassword) ? null : (
           <Button
             type="button"
             size="sm"
@@ -118,7 +121,11 @@ export function ExternalReconnectBanner({
             loading={reconnect.isPending}
             onClick={() =>
               password && onReconnectWithPassword
-                ? onReconnectWithPassword({ provider: connection.provider, address })
+                ? onReconnectWithPassword({
+                    provider: connection.provider,
+                    address,
+                    connectionId: connection.id,
+                  })
                 : reconnect.begin({
                     kind: 'reconnect',
                     provider: connection.provider,

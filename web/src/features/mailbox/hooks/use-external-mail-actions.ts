@@ -12,6 +12,8 @@ import type {
 import { externalMailKeys } from '@/features/mailbox/hooks/use-external-mail';
 import { mailboxKeys } from '@/features/mailbox/hooks/mailbox-keys';
 import { navigateToProvider, rememberAuthorization } from '@/features/mailbox/utils/external-mail';
+import { ClientErrorCode } from '@/http/codes';
+import { ApiError } from '@/http/request';
 
 /**
  * What a member does with external mail: start or reconnect a sign-in, finish it, and unbind. Only
@@ -50,11 +52,19 @@ export type ExternalMailCredentialsRequest = Omit<BindExternalMailCredentialsInp
 /**
  * Binds an account with an app password. The password never becomes a mutation variable, so the
  * mutation cache, devtools, and a retry never hold it: it waits in a ref only until the request
- * is built, and the ref is cleared before the request is sent.
+ * is built. The ref is cleared when the request starts, on every outcome, by `forget` (the dialog
+ * closing), and on unmount. Offline, the bind fails at once instead of pausing until the network
+ * returns, so a password is never sent after the member closed the dialog.
  */
 export function useBindExternalMailCredentials(organizationId: number) {
   const queryClient = useQueryClient();
   const secret = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      secret.current = null;
+    },
+    []
+  );
   const mutation = useMutation({
     mutationFn: async (input: ExternalMailCredentialsRequest) => {
       const password = secret.current;
@@ -62,9 +72,13 @@ export function useBindExternalMailCredentials(organizationId: number) {
       if (password === null) throw new Error('missing password');
       return (await service()).bindCredentials(organizationId, { ...input, password });
     },
+    networkMode: 'always',
     gcTime: 0,
     retry: false,
     meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () => {
+      secret.current = null;
+    },
   });
   const { mutateAsync } = mutation;
   /**
@@ -74,35 +88,67 @@ export function useBindExternalMailCredentials(organizationId: number) {
    */
   const bind = async (input: BindExternalMailCredentialsInput) => {
     const { password, ...rest } = input;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new ApiError('Offline', ClientErrorCode.NETWORK_ERROR);
+    }
     secret.current = password;
-    const completion = await mutateAsync(rest);
-    queueMicrotask(() => {
-      void queryClient.invalidateQueries({
-        queryKey: externalMailKeys.connections(organizationId),
+    try {
+      const completion = await mutateAsync(rest);
+      queueMicrotask(() => {
+        void queryClient.invalidateQueries({
+          queryKey: externalMailKeys.connections(organizationId),
+        });
+        void queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) });
       });
-      void queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) });
-    });
-    return completion;
+      return completion;
+    } finally {
+      secret.current = null;
+    }
   };
-  return { ...mutation, bind };
+  const forget = () => {
+    secret.current = null;
+  };
+  return { ...mutation, bind, forget };
 }
 
-/** Deletes a revoked connection's copies at once; the connection list is read again. */
+/**
+ * Everything cached about one connected mailbox: its messages, counts, folders, and agent grants
+ * (the agent grant keys live under the mailbox key), plus the unified inbox and its counts.
+ */
+function invalidateConnectedMailbox(
+  queryClient: ReturnType<typeof useQueryClient>,
+  organizationId: number,
+  mailboxId: number
+) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: externalMailKeys.connections(organizationId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.mailbox(organizationId, mailboxId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.inboxes(organizationId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.allInboxCounts(organizationId) }),
+  ]);
+}
+
+/**
+ * Deletes a revoked connection's copies at once. The server deletes the mailbox, its mail, and its
+ * agent grants, so everything cached about that mailbox is read again.
+ */
 export function usePurgeExternalMail(organizationId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (connectionId: number) =>
+    mutationFn: async ({ connectionId }: { connectionId: number; mailboxId: number }) =>
       (await service()).purge(organizationId, connectionId),
     meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: externalMailKeys.connections(organizationId) }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
-      ]),
+    onSettled: (_result, _error, { mailboxId }) =>
+      invalidateConnectedMailbox(queryClient, organizationId, mailboxId),
   });
 }
 
-/** An owner or admin disconnects a member's account from the connection directory. */
+/**
+ * An owner or admin disconnects an account from the connection directory. It may be their own, and
+ * the server revokes the mailbox's agent grants, so everything cached for the organization's mail
+ * (the directory, their own connections and mailbox list, any mailbox's grants) is read again.
+ */
 export function useForceDisconnectExternalMail(organizationId: number) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -110,19 +156,19 @@ export function useForceDisconnectExternalMail(organizationId: number) {
       (await service()).forceDisconnect(organizationId, connectionId),
     meta: LOCAL_ERROR_HANDLING_META,
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: externalMailKeys.directories(organizationId) }),
+      queryClient.invalidateQueries({ queryKey: mailboxKeys.organization(organizationId) }),
   });
 }
 
-/** Unbinds one of the caller's accounts. */
+/** Unbinds one of the caller's accounts; the server also revokes that mailbox's agent grants. */
 export function useDisconnectExternalMail(organizationId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (connectionId: number) =>
+    mutationFn: async ({ connectionId }: { connectionId: number; mailboxId: number }) =>
       (await service()).disconnect(organizationId, connectionId),
     meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: externalMailKeys.connections(organizationId) }),
+    onSettled: (_result, _error, { mailboxId }) =>
+      invalidateConnectedMailbox(queryClient, organizationId, mailboxId),
   });
 }
 

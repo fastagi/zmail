@@ -3,6 +3,7 @@ import type { z } from 'zod/mini';
 
 import {
   EXTERNAL_MAIL_CONNECTOR_ID_PATTERN,
+  EXTERNAL_MAIL_CREDENTIALS_REQUEST_TIMEOUT_MS,
   EXTERNAL_MAIL_DIRECTORY_CURSOR_MAX_LENGTH,
   EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
   EXTERNAL_MAIL_HOST_MAX_LENGTH,
@@ -134,6 +135,7 @@ export const externalMailService = {
     const headers = organizationHeaders(organizationId);
     if (!validCredentials(input)) throw invalidRequest();
     const body: BindExternalMailCredentialsInput = {
+      ...(input.connection_id === undefined ? {} : { connection_id: input.connection_id }),
       provider: input.provider,
       host: input.host,
       port: input.port,
@@ -144,7 +146,12 @@ export const externalMailService = {
     const response = await request.post<AxiosResponse<unknown>, BindExternalMailCredentialsInput>(
       '/external-mail-credentials',
       body,
-      { headers, fastbuildResponseMode: 'response' }
+      {
+        headers,
+        fastbuildResponseMode: 'response',
+        // The server signs in to the mail server first, which may take 45 seconds.
+        timeout: EXTERNAL_MAIL_CREDENTIALS_REQUEST_TIMEOUT_MS,
+      }
     );
     return completionOf(response.status, response.data);
   },
@@ -269,6 +276,8 @@ function validCredentials(input: BindExternalMailCredentialsInput): boolean {
     boundedText(input.username, EXTERNAL_MAIL_USERNAME_MAX_LENGTH) &&
     boundedText(input.password, EXTERNAL_MAIL_PASSWORD_MAX_LENGTH) &&
     input.port === EXTERNAL_MAIL_IMAP_PORT &&
+    (input.connection_id === undefined ||
+      (Number.isSafeInteger(input.connection_id) && input.connection_id > 0)) &&
     (days === undefined || (Number.isSafeInteger(days) && days >= 1 && days <= 90))
   );
 }

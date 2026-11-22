@@ -1,6 +1,9 @@
 import { ROUTES } from '@/constants/routes';
 import { MAIL_ORGANIZATION_PARAM } from '@/features/mailbox/components/mailbox-params';
-import type { ExternalMailConnectionStatus } from '@/features/mailbox/external-mail-schemas';
+import type {
+  ExternalMailConnectionStatus,
+  ExternalMailConnector,
+} from '@/features/mailbox/external-mail-schemas';
 
 /**
  * Display names of the connectors Zmail knows. They are product names, not copy, so they are not
@@ -107,4 +110,29 @@ export function connectedMailboxHref(organizationId: number, mailboxId: number):
     box: String(mailboxId),
   });
   return `${ROUTES.CONSOLE.MAILBOXES}?${params.toString()}`;
+}
+
+/**
+ * Connectors Zmail knows bind with an app password. They are used only when the instance's
+ * connector list could not be read, so a password connection never falls back to an OAuth
+ * redirect; the list, when known, decides.
+ */
+const KNOWN_PASSWORD_CONNECTORS = new Set(['imap']);
+
+/**
+ * How a connection is reconnected: through the provider's sign-in page (`oauth`), the app password
+ * form (`password`), or not at all because the instance no longer runs its connector
+ * (`unavailable`). `connectors` is undefined while the list is unknown (loading or failed).
+ */
+export function reconnectKind(
+  provider: string,
+  connectors: readonly ExternalMailConnector[] | undefined
+): 'oauth' | 'password' | 'unavailable' {
+  if (connectors === undefined) {
+    return KNOWN_PASSWORD_CONNECTORS.has(provider) ? 'password' : 'oauth';
+  }
+  const connector = connectors.find(item => item.id === provider);
+  if (!connector) return 'unavailable';
+  if (connector.auth_kind === 'password') return 'password';
+  return connector.auth_kind === 'oauth2' ? 'oauth' : 'unavailable';
 }

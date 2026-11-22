@@ -22,6 +22,8 @@ interface AuthenticatedGoApiRequest {
   fieldMap?: Readonly<Record<string, string>>;
   responseType?: 'binary' | 'json';
   maxResponseBytes?: number;
+  /** This request's upstream timeout instead of `API_UPSTREAM_TIMEOUT_MS`; see `GoApiRequest`. */
+  timeoutMs?: number;
 }
 
 let client: GoApiClient | undefined;

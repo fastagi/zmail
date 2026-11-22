@@ -76,6 +76,8 @@ export type MockBindCredentialsResult =
         | 'provider_unavailable'
         | 'server_unreachable'
         | 'authorization_failed'
+        | 'connection_not_found'
+        | 'account_mismatch'
         | 'account_taken'
         | 'connection_limit'
         | 'invalid';
@@ -254,12 +256,24 @@ export class MockExternalMailStore {
       username: string;
       password: string;
       backfill_days?: number;
+      connection_id?: number;
     },
     mailboxes: MockExternalMailboxes
   ): MockBindCredentialsResult {
     const connector = MOCK_EXTERNAL_MAIL_CONNECTORS.find(item => item.id === input.provider);
     if (!connector || connector.auth_kind !== 'password') {
       return { ok: false, error: 'provider_unavailable' };
+    }
+    const own =
+      input.connection_id === undefined ? null : this.connections.get(input.connection_id);
+    if (
+      own === undefined ||
+      (own !== null &&
+        (own.organizationId !== organizationId ||
+          own.userId !== userId ||
+          own.provider !== input.provider))
+    ) {
+      return { ok: false, error: 'connection_not_found' };
     }
     const limited = this.recordAttempt(organizationId, userId);
     if (limited !== null) return { ok: false, error: 'rate_limited', retryAfterSeconds: limited };
@@ -272,6 +286,7 @@ export class MockExternalMailStore {
     }
     const username = input.username.trim().toLowerCase();
     const address = username.includes('@') ? username : `${username}@${host}`;
+    if (own && own.account_address !== address) return { ok: false, error: 'account_mismatch' };
     return this.bindAccount(
       organizationId,
       userId,

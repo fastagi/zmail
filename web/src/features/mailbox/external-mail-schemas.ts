@@ -79,6 +79,12 @@ export const externalMailAuthorizationEnvelopeSchema = strictObject({
 
 /** Connectors that bind with an app password (`auth_kind: "password"`) and never redirect. */
 export const EXTERNAL_MAIL_PASSWORD_AUTH_KIND = 'password';
+/**
+ * The API signs in to an IMAP server within 45 seconds before it answers, so the BFF waits longer
+ * than that for this one route, and the browser a little longer than the BFF.
+ */
+export const EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS = 60_000;
+export const EXTERNAL_MAIL_CREDENTIALS_REQUEST_TIMEOUT_MS = 65_000;
 /** Implicit-TLS IMAP; the contract accepts this port only. */
 export const EXTERNAL_MAIL_IMAP_PORT = 993;
 /** Bounds the form checks before sending; the server stays the authority. */

@@ -86,6 +86,7 @@ import {
 } from '@/features/mailbox/platform-account-schemas';
 import {
   EXTERNAL_MAIL_CONNECTOR_ID_PATTERN,
+  EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS,
   EXTERNAL_MAIL_DIRECTORY_CURSOR_MAX_LENGTH,
   EXTERNAL_MAIL_DIRECTORY_MAX_PAGE_SIZE,
   EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
@@ -4910,7 +4911,15 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
   if (!target.available) return target.response;
   const body = await jsonObject(request, maxExternalMailBodyBytes);
   if (!body.ok) return body.response;
-  const { provider, host, port, username, password, backfill_days: backfillDays } = body.value;
+  const {
+    provider,
+    host,
+    port,
+    username,
+    password,
+    backfill_days: backfillDays,
+    connection_id: connectionId,
+  } = body.value;
   const errors: Record<string, string[]> = {};
   if (typeof provider !== 'string' || !EXTERNAL_MAIL_CONNECTOR_ID_PATTERN.test(provider)) {
     errors.provider = ['must be a connector id'];
@@ -4934,8 +4943,12 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
   ) {
     errors.backfill_days = ['must be between 1 and 90'];
   }
+  if (connectionId !== undefined && !positiveId(connectionId)) {
+    errors.connection_id = ['must be a positive id'];
+  }
   if (Object.keys(errors).length > 0) return validationFailed(errors);
   const input = {
+    ...(connectionId === undefined ? {} : { connection_id: connectionId as number }),
     provider: provider as string,
     host: host as string,
     port: EXTERNAL_MAIL_IMAP_PORT,
@@ -4951,6 +4964,8 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
       accessToken: target.accessToken,
       organizationId: String(target.organizationId),
       body: input,
+      // The API's sign-in may take 45 seconds; the shared upstream timeout is far shorter.
+      timeoutMs: EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS,
       fieldMap: {
         provider: 'provider',
         host: 'host',
@@ -4958,6 +4973,7 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
         username: 'username',
         password: 'password',
         backfill_days: 'backfill_days',
+        connection_id: 'connection_id',
       },
     });
   }
@@ -4984,6 +5000,14 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
         404,
         ApiErrorCode.MAILBOX_EXTERNAL_PROVIDER_UNAVAILABLE,
         'External mail provider is unavailable'
+      );
+    case 'connection_not_found':
+      return externalConnectionNotFound();
+    case 'account_mismatch':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_ACCOUNT_MISMATCH,
+        'Signed in to another account'
       );
     case 'server_unreachable':
       return failure(
