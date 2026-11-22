@@ -1158,7 +1158,10 @@ When a notification arrives:
     tenant reads with its own credential.
   - A release is also postponed, not dropped, while the member (or, for a shared connection, anyone
     in the organization) has a sign-in pending for the provider, and everything that would make a
-    hand-back harmful is checked again right before the hand-back call.
+    hand-back harmful is checked again right before the hand-back call. The release records, when
+    it is made, whose connection it was, so the same rule applies after the copies were purged and
+    the connection is gone: another member's sign-in never postpones the release of a member's own
+    connection, and once that member's user account is deleted no sign-in postpones it.
   - A recorded release never touches an account that is in use again: binding the same account again
     in the organization deletes it; a release whose connection is active again is dropped unperformed;
     a watch is stopped only while no live connection watches the same Gmail address; and a grant is

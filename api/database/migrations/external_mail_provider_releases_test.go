@@ -18,9 +18,11 @@ func TestExternalMailProviderReleasesUpDown(t *testing.T) {
 	migrated := dumpSchema(t, db)
 	exec(releaseInsert, 10, 1, nil, "sealed", false, 0, "1 day")
 
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	assert.NotContains(t, dumpSchema(t, db), "external_mail_provider_releases")
 	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 

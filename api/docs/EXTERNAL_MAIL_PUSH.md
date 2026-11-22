@@ -172,8 +172,13 @@ requested for 70 hours and renewed after 35.
     their Google account (myaccount.google.com, Security, third-party access). A Google account bound
     by several connections, in any organization, keeps Zmail's access until its last binding goes,
     because revoking one token at Google revokes the whole grant.
-  - **Postponed.** A record waits while the member has a sign-in pending for the provider, and its
-    conditions are checked again right before the hand-back, after the slower subscription stop.
+  - **Postponed.** A record waits while the member has a sign-in pending for the provider (anyone in
+    the organization for a shared connection), and its conditions are checked again right before
+    the hand-back, after the slower subscription stop. The record keeps `owner_scope` (`member` with
+    `owner_user_id`, or `shared`) from the moment it is made, so the rule holds after the purge;
+    a deleted member (`owner_user_id` null) postpones nothing. Records made before
+    `2026_12_17_090000_add_external_mail_release_owner` whose connection was already gone stay
+    `unknown` and wait for anyone's sign-in until they expire.
     Assigning or restoring a tenant mailbox deletes the organization's stop-only records for that
     address; a record that still owes a member's own grant its hand-back is kept.
   - **Follow-up.** The connection list does not yet show a member that a hand-back was never
