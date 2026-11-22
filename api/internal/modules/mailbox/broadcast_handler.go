@@ -179,18 +179,14 @@ func (h *Handler) DeleteBroadcast(c *gin.Context) {
 	response.NoContent(c)
 }
 
-// managedBroadcast resolves a broadcast route that only owners and admins may use: starting,
-// stopping, pausing, or resuming mail to a whole list.
+// managedBroadcast resolves a route that starts, stops, pauses, or resumes mail to a whole list.
+// Owners and admins may; so may a member with the broadcast grant (the route checks it), who also
+// needs Send on the sender mailbox, which the service checks.
 func managedBroadcast(c *gin.Context) (viewer domain.OrganizationContext, id uint, ok bool) {
-	viewer, ok = managerScope(c)
-	if !ok {
-		return domain.OrganizationContext{}, 0, false
-	}
-	id, ok = httphandler.ParseID(c, "broadcast_id")
-	return viewer, id, ok
+	return viewerScope(c, "broadcast_id")
 }
 
-// SendBroadcast starts or schedules a draft. Only owners and admins may.
+// SendBroadcast starts or schedules a draft.
 func (h *Handler) SendBroadcast(c *gin.Context) {
 	viewer, id, ok := managedBroadcast(c)
 	if !ok {
@@ -207,8 +203,8 @@ func (h *Handler) SendBroadcast(c *gin.Context) {
 	respondBroadcast(c, broadcast, err, false)
 }
 
-// CancelBroadcast stops a broadcast for good. Only owners and admins may; they need no access
-// to the sender mailbox, and without View they get only the id and the new status.
+// CancelBroadcast stops a broadcast for good. Owners and admins need no access to the sender
+// mailbox, and without View they get only the id and the new status.
 func (h *Handler) CancelBroadcast(c *gin.Context) {
 	viewer, id, ok := managedBroadcast(c)
 	if !ok {
@@ -218,8 +214,8 @@ func (h *Handler) CancelBroadcast(c *gin.Context) {
 	respondStoppedBroadcast(c, broadcast, visible, err)
 }
 
-// PauseBroadcast holds a sending broadcast. Only owners and admins may; like cancel, it needs no
-// access to the sender mailbox.
+// PauseBroadcast holds a sending broadcast; like cancel, an owner or admin needs no access to the
+// sender mailbox.
 func (h *Handler) PauseBroadcast(c *gin.Context) {
 	viewer, id, ok := managedBroadcast(c)
 	if !ok {
@@ -240,7 +236,7 @@ func respondStoppedBroadcast(c *gin.Context, broadcast *domain.MailBroadcast, vi
 	response.NoContent(c)
 }
 
-// ResumeBroadcast continues a paused broadcast. Only owners and admins may.
+// ResumeBroadcast continues a paused broadcast.
 func (h *Handler) ResumeBroadcast(c *gin.Context) {
 	viewer, id, ok := managedBroadcast(c)
 	if !ok {

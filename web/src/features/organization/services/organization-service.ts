@@ -33,6 +33,7 @@ import type {
   OrganizationOwnershipTransfer,
   OrganizationPage,
   TransferOrganizationOwnershipInput,
+  UpdateOrganizationMemberFeaturesInput,
   UpdateOrganizationMemberInput,
   UpdateOrganizationInput,
 } from '@/features/organization/types';
@@ -99,6 +100,18 @@ export const organizationService = {
   ): Promise<OrganizationMember> {
     const value = await request.patch<unknown, UpdateOrganizationMemberInput>(
       `/organizations/${organizationId}/members/${memberId}`,
+      input
+    );
+    return parseOrganizationMemberResponse(value);
+  },
+
+  async updateMemberFeatures(
+    organizationId: number,
+    memberId: number,
+    input: UpdateOrganizationMemberFeaturesInput
+  ): Promise<OrganizationMember> {
+    const value = await request.patch<unknown, UpdateOrganizationMemberFeaturesInput>(
+      `/organizations/${organizationId}/members/${memberId}/features`,
       input
     );
     return parseOrganizationMemberResponse(value);

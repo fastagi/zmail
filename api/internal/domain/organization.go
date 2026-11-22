@@ -67,6 +67,7 @@ type OrganizationMembership struct {
 	OrganizationID uint             `json:"organization_id"`
 	UserID         uint             `json:"user_id"`
 	Role           OrganizationRole `json:"role"`
+	Features       MemberFeatures   `json:"-"`
 	Organization   *Organization    `json:"-"`
 	User           *User            `json:"-"`
 	CreatedAt      time.Time        `json:"created_at"`
@@ -139,6 +140,7 @@ type OrganizationRepository interface {
 	ListForUser(ctx context.Context, userID uint, page, pageSize int) ([]*OrganizationMembership, int64, error)
 	ListMembers(ctx context.Context, organizationID, userID uint, page, pageSize int) ([]*OrganizationMembership, int64, error)
 	ChangeMemberRole(ctx context.Context, organizationID, userID, memberID uint, role OrganizationRole, now time.Time) (*OrganizationMembershipRoleChange, error)
+	UpdateMemberFeatures(ctx context.Context, organizationID, userID, memberID uint, patch MemberFeaturePatch, now time.Time) (*OrganizationMembershipFeatureChange, error)
 	RemoveMember(ctx context.Context, organizationID, userID, memberID uint) (*OrganizationMembership, error)
 	TransferOwnership(ctx context.Context, organizationID, userID, newOwnerMemberID uint, now time.Time) (*OrganizationOwnershipTransfer, error)
 	Update(ctx context.Context, organization *Organization) error

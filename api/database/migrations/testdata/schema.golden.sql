@@ -658,6 +658,10 @@ TABLE organization_memberships
   COLUMN role character varying(16) NOT NULL
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN can_use_broadcasts boolean NOT NULL DEFAULT false
+  COLUMN can_use_contacts boolean NOT NULL DEFAULT true
+  COLUMN can_use_templates boolean NOT NULL DEFAULT true
+  COLUMN can_use_api_keys boolean NOT NULL DEFAULT false
 
 TABLE organizations
   COLUMN id bigint NOT NULL DEFAULT nextval('organizations_id_seq'::regclass)

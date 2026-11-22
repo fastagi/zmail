@@ -24,6 +24,7 @@ type Service interface {
 	Update(ctx context.Context, userID, organizationID uint, req *UpdateOrganizationRequest) (*domain.OrganizationMembership, error)
 	ListMembers(ctx context.Context, userID, organizationID uint, page, pageSize int) ([]*domain.OrganizationMembership, int64, error)
 	ChangeMemberRole(ctx context.Context, userID, organizationID, memberID uint, req *UpdateOrganizationMemberRequest) (*domain.OrganizationMembership, error)
+	UpdateMemberFeatures(ctx context.Context, userID, organizationID, memberID uint, req *UpdateOrganizationMemberFeaturesRequest) (*domain.OrganizationMembership, error)
 	RemoveMember(ctx context.Context, userID, organizationID, memberID uint) error
 	TransferOwnership(ctx context.Context, userID, organizationID uint, req *TransferOrganizationOwnershipRequest) (*domain.OrganizationOwnershipTransfer, error)
 	Invite(ctx context.Context, userID, organizationID uint, req *CreateOrganizationInvitationRequest) (*OrganizationInvitationResult, error)

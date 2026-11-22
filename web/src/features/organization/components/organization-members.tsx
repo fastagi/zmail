@@ -49,6 +49,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ROUTES } from '@/constants/routes';
+import { MemberFeatureToggles } from '@/features/organization/components/member-feature-toggles';
 import { RoleBadge } from '@/features/organization/components/organization-directory';
 import {
   useForgetOrganization,
@@ -56,6 +57,7 @@ import {
   useRemoveOrganizationMember,
   useTransferOrganizationOwnership,
   useUpdateOrganizationMember,
+  useUpdateOrganizationMemberFeatures,
 } from '@/features/organization/hooks/use-organizations';
 import type {
   OrganizationContext,
@@ -78,6 +80,7 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
   const router = useRouter();
   const query = useOrganizationMembers(context.organization_id);
   const roleMutation = useUpdateOrganizationMember(context.organization_id);
+  const featureMutation = useUpdateOrganizationMemberFeatures(context.organization_id);
   const removeMutation = useRemoveOrganizationMember(context.organization_id);
   const transferMutation = useTransferOrganizationOwnership(context.organization_id);
   const forgetOrganization = useForgetOrganization();
@@ -171,7 +174,8 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
               <TableRow>
                 <TableHead>{t('member')}</TableHead>
                 <TableHead>{t('role')}</TableHead>
-                <TableHead className="hidden md:table-cell">{t('joinedAt')}</TableHead>
+                <TableHead className="hidden sm:table-cell">{t('featuresColumn')}</TableHead>
+                <TableHead className="hidden lg:table-cell">{t('joinedAt')}</TableHead>
                 <TableHead className="w-14 text-right">
                   <span className="sr-only">{t('actions')}</span>
                 </TableHead>
@@ -181,7 +185,7 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
               {query.data.items.map((member) => (
                 <TableRow key={member.id}>
                   <TableCell>
-                    <div className="flex min-w-52 items-center gap-3">
+                    <div className="flex min-w-40 items-center gap-3 sm:min-w-52">
                       <Avatar>
                         {member.avatar ? (
                           <AvatarImage
@@ -207,6 +211,12 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
                         </p>
                       </div>
                     </div>
+                    <MemberFeatureToggles
+                      context={context}
+                      member={member}
+                      mutation={featureMutation}
+                      className="mt-2 sm:hidden"
+                    />
                   </TableCell>
                   <TableCell>
                     {canChangeRole(context, member) ? (
@@ -241,7 +251,15 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
                       <RoleBadge role={member.role} />
                     )}
                   </TableCell>
-                  <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                  <TableCell className="hidden sm:table-cell">
+                    <MemberFeatureToggles
+                      context={context}
+                      member={member}
+                      mutation={featureMutation}
+                      className="min-w-56"
+                    />
+                  </TableCell>
+                  <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
                     {formatOrganizationDate(member.joined_at, locale)}
                   </TableCell>
                   <TableCell className="text-right">

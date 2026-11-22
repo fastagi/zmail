@@ -137,6 +137,24 @@ const messages = {
   invitationTokenPlaceholder: 'Paste invitation token',
   invitationTokenInvalid: 'Enter a valid one-time invitation token',
   acceptInvitationSuccess: 'You joined the organization',
+  features: {
+    broadcasts: 'Broadcasts',
+    contacts: 'Contacts',
+    templates: 'Templates',
+    api_keys: 'API keys',
+  },
+  featuresColumn: 'Features',
+  featuresAllForManagers: 'Every feature',
+  featuresAllForManagersHint: 'Owners and admins always have every feature.',
+  featureToggleLabel: '{feature} for {member}',
+  featureGranted: '{feature} turned on for {member}',
+  featureRevoked: '{feature} turned off for {member}',
+  featureGate: {
+    title: '{feature} is not turned on for you',
+    description:
+      'An owner or admin of this organization decides who can use it. Ask them to turn it on for you on the Members page.',
+    backHome: 'Back to console',
+  },
   roles: {
     owner: 'Owner',
     admin: 'Administrator',
@@ -155,6 +173,7 @@ const messages = {
     rateLimited: 'This invitation was resent recently. Try again in a moment.',
     memberAlreadyExists: 'This email already belongs to an organization member.',
     memberNotFound: 'This organization member no longer exists.',
+    memberFeaturesFixed: 'Owners and admins always have every feature.',
     ownershipTransferRequired: 'The owner must transfer ownership first.',
     ownershipTransferTargetInvalid: 'Ownership cannot be transferred to this member.',
     invalidResponse: 'The organization service returned data this client cannot recognize.',

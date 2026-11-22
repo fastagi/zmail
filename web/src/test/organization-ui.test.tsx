@@ -53,6 +53,7 @@ const state = vi.hoisted(() => ({
   resendInvitation: mutationState(),
   transferOwnership: mutationState(),
   updateMember: mutationState(),
+  updateMemberFeatures: mutationState(),
   forgetOrganization: vi.fn(),
 }));
 
@@ -79,6 +80,7 @@ vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useTransferOrganizationOwnership: () => state.transferOwnership,
   useUpdateOrganization: () => state.update,
   useUpdateOrganizationMember: () => state.updateMember,
+  useUpdateOrganizationMemberFeatures: () => state.updateMemberFeatures,
   useForgetOrganization: () => state.forgetOrganization,
 }));
 
@@ -130,6 +132,7 @@ describe('organization browser workflow', () => {
       state.resendInvitation,
       state.transferOwnership,
       state.updateMember,
+      state.updateMemberFeatures,
     ]) {
       mutation.error = null;
       mutation.isPending = false;
@@ -284,6 +287,88 @@ describe('organization browser workflow', () => {
     expect(screen.queryByText('alex@example.com')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Change role: alex' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Actions: alex' })).toBeInTheDocument();
+  });
+
+  describe('member feature grants', () => {
+    const grants = { broadcasts: false, contacts: true, templates: true, api_keys: false };
+    const allGrants = { broadcasts: true, contacts: true, templates: true, api_keys: true };
+
+    function showMembers(role: 'admin' | 'member' | 'owner') {
+      state.context.data = organizationContext(role);
+      state.members.data = {
+        items: [
+          memberView({ id: 91, user_id: 17, username: 'owner', role: 'owner', features: allGrants }),
+          memberView({ id: 92, user_id: 18, username: 'alex', role: 'member', features: grants }),
+        ],
+        meta: { total: 2 },
+      };
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Members');
+    }
+
+    it.each(['owner', 'admin'] as const)('lets an %s switch each feature of a member', role => {
+      showMembers(role);
+
+      const broadcasts = screen.getAllByRole('button', { name: 'Broadcasts for Alex' })[0]!;
+      expect(broadcasts).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getAllByRole('button', { name: 'Contacts for Alex' })[0]).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      fireEvent.click(broadcasts);
+
+      expect(state.updateMemberFeatures.mutate).toHaveBeenCalledWith(
+        { memberId: 92, input: { broadcasts: true } },
+        expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) })
+      );
+      // Owners and admins always have everything, so their row has no switches.
+      expect(screen.queryByRole('button', { name: /for owner$/ })).not.toBeInTheDocument();
+      expect(screen.getAllByText('Every feature').length).toBeGreaterThan(0);
+    });
+
+    it('confirms a saved change and reports a refused one', () => {
+      showMembers('owner');
+      fireEvent.click(screen.getAllByRole('button', { name: 'API keys for Alex' })[0]!);
+      const options = state.updateMemberFeatures.mutate.mock.calls[0]![1] as {
+        onError: (error: unknown) => void;
+      };
+      options.onError(new ApiError('denied', ApiErrorCode.PERMISSION_DENIED, 403));
+      expect(toastError).toHaveBeenCalledWith(
+        'You do not have permission to perform this operation.'
+      );
+    });
+
+    it('shows a member the grants read-only', () => {
+      showMembers('member');
+
+      expect(screen.queryByRole('button', { name: /for Alex$/ })).not.toBeInTheDocument();
+      expect(screen.getAllByText('Contacts').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Broadcasts')).not.toBeInTheDocument();
+    });
+
+    it('marks a saving switch busy', () => {
+      state.updateMemberFeatures.isPending = true;
+      state.updateMemberFeatures.variables = { memberId: 92, input: { templates: false } };
+      showMembers('owner');
+
+      for (const button of screen.getAllByRole('button', { name: 'Templates for Alex' })) {
+        expect(button).toBeDisabled();
+      }
+      for (const button of screen.getAllByRole('button', { name: 'Contacts for Alex' })) {
+        expect(button).toBeEnabled();
+      }
+    });
+
+    it('speaks zh-Hans', () => {
+      state.context.data = organizationContext('owner');
+      state.members.data = {
+        items: [memberView({ id: 92, features: grants })],
+        meta: { total: 1 },
+      };
+      renderWithMessages(<OrganizationOverview organizationId={42} />, 'zh-Hans');
+      activateTab('成员');
+      expect(screen.getAllByRole('button', { name: 'Alex 的群发' }).length).toBeGreaterThan(0);
+    });
   });
 
   it('forgets the organization after the user leaves it (#114)', () => {

@@ -16,6 +16,10 @@ type organizationContextRow struct {
 	MembershipID     uint   `gorm:"column:membership_id"`
 	UserID           uint   `gorm:"column:user_id"`
 	Role             string `gorm:"column:role"`
+	CanUseBroadcasts bool   `gorm:"column:can_use_broadcasts"`
+	CanUseContacts   bool   `gorm:"column:can_use_contacts"`
+	CanUseTemplates  bool   `gorm:"column:can_use_templates"`
+	CanUseAPIKeys    bool   `gorm:"column:can_use_api_keys"`
 }
 
 func (r *repository) ResolveContext(
@@ -39,7 +43,11 @@ func (r *repository) ResolveContext(
 			organizations.slug AS organization_slug,
 			memberships.id AS membership_id,
 			memberships.user_id,
-			memberships.role
+			memberships.role,
+			memberships.can_use_broadcasts,
+			memberships.can_use_contacts,
+			memberships.can_use_templates,
+			memberships.can_use_api_keys
 		`).
 		Joins("JOIN organizations ON organizations.id = memberships.organization_id").
 		Where("memberships.organization_id = ? AND memberships.user_id = ?", organizationID, userID).
@@ -58,6 +66,12 @@ func (r *repository) ResolveContext(
 		MembershipID:     row.MembershipID,
 		UserID:           row.UserID,
 		Role:             domain.OrganizationRole(row.Role),
+		Features: domain.MemberFeatures{
+			Broadcasts: row.CanUseBroadcasts,
+			Contacts:   row.CanUseContacts,
+			Templates:  row.CanUseTemplates,
+			APIKeys:    row.CanUseAPIKeys,
+		},
 	}
 	if !resolved.IsValid() {
 		return nil, domain.ErrServiceUnavailable

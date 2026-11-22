@@ -5,6 +5,7 @@ import type {
   AcceptOrganizationInvitationInput,
   CreateOrganizationInput,
   CreateOrganizationInvitationInput,
+  MemberFeatures,
   Organization,
   OrganizationContext,
   OrganizationInvitation,
@@ -18,12 +19,25 @@ import type {
   OrganizationRole,
   TransferOrganizationOwnershipInput,
   UpdateOrganizationInput,
+  UpdateOrganizationMemberFeaturesInput,
   UpdateOrganizationMemberInput,
 } from '@/features/organization/types';
+import {
+  MEMBER_FEATURES,
+  effectiveMemberFeatures,
+} from '@/features/organization/utils/member-features';
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Resend quotas, matching the API: per invitation one per minute and five per 24 hours, and 30 per
 // organization per hour.
+// A new member starts with contacts and templates; broadcasts and API keys wait for a manager.
+const NEW_MEMBER_FEATURES: MemberFeatures = {
+  broadcasts: false,
+  contacts: true,
+  templates: true,
+  api_keys: false,
+};
+
 const RESEND_COOLDOWN_MS = 60 * 1000;
 const RESEND_DAY_MS = 24 * 60 * 60 * 1000;
 const RESENDS_PER_DAY = 5;
@@ -38,6 +52,7 @@ export type MockOrganizationStoreError =
   | 'invitation_not_found'
   | 'invitation_resend_rate_limited'
   | 'member_already_exists'
+  | 'member_features_fixed'
   | 'member_not_found'
   | 'organization_not_found'
   | 'ownership_transfer_required'
@@ -73,6 +88,8 @@ interface MockMembershipRecord {
   organizationId: number;
   userKey: string;
   role: OrganizationRole;
+  /** Stored grants; they take effect only for the member role, as in the API. */
+  features: MemberFeatures;
   joinedAt: string;
   updatedAt: string;
 }
@@ -132,7 +149,7 @@ export class MockOrganizationStore {
     );
     const items = memberships.flatMap((membership) => {
       const organization = this.organizationRecord(membership.organizationId);
-      return organization ? [this.organizationView(organization, membership.role)] : [];
+      return organization ? [this.organizationView(organization, membership.role, membership.features)] : [];
     });
     return paginated(items, page, perPage, '/api/organizations');
   }
@@ -141,7 +158,7 @@ export class MockOrganizationStore {
     const membership = this.membershipForActor(actor, organizationId);
     const organization = this.organizationRecord(organizationId);
     return membership && organization
-      ? this.organizationView(organization, membership.role)
+      ? this.organizationView(organization, membership.role, membership.features)
       : null;
   }
 
@@ -174,7 +191,7 @@ export class MockOrganizationStore {
         timestamp
       ),
     ];
-    return this.organizationView(organization, 'owner');
+    return this.organizationView(organization, 'owner', NEW_MEMBER_FEATURES);
   }
 
   update(
@@ -189,7 +206,7 @@ export class MockOrganizationStore {
 
     organization.name = input.name;
     organization.updatedAt = this.dependencies.now().toISOString();
-    return this.organizationView(organization, membership.role);
+    return this.organizationView(organization, membership.role, membership.features);
   }
 
   resolveContext(
@@ -208,6 +225,7 @@ export class MockOrganizationStore {
       membership_id: membership.id,
       user_id: user.id,
       role: membership.role,
+      features: effectiveMemberFeatures(membership.role, membership.features),
     };
   }
 
@@ -297,6 +315,32 @@ export class MockOrganizationStore {
     if (!user) return 'member_not_found';
 
     target.role = input.role;
+    target.updatedAt = this.dependencies.now().toISOString();
+    return memberView(target, user);
+  }
+
+  updateMemberFeatures(
+    actor: AuthUser,
+    organizationId: number,
+    memberId: number,
+    input: UpdateOrganizationMemberFeaturesInput
+  ): OrganizationMember | MockOrganizationStoreError {
+    const actingMembership = this.membershipForActor(actor, organizationId);
+    if (!actingMembership) return 'organization_not_found';
+    if (!canManageOrganization(actingMembership.role)) return 'permission_denied';
+
+    const target = this.membershipRecord(organizationId, memberId);
+    if (!target) return 'member_not_found';
+    if (target.role !== 'member') return 'member_features_fixed';
+    const user = this.userRecord(target.userKey);
+    if (!user) return 'member_not_found';
+
+    const next = { ...target.features };
+    for (const feature of MEMBER_FEATURES) {
+      const granted = input[feature];
+      if (granted !== undefined) next[feature] = granted;
+    }
+    target.features = next;
     target.updatedAt = this.dependencies.now().toISOString();
     return memberView(target, user);
   }
@@ -549,7 +593,7 @@ export class MockOrganizationStore {
         timestamp
       ),
     ];
-    return this.organizationView(organization, invitation.role);
+    return this.organizationView(organization, invitation.role, NEW_MEMBER_FEATURES);
   }
 
   private managerError(
@@ -606,13 +650,15 @@ export class MockOrganizationStore {
 
   private organizationView(
     organization: MockOrganizationRecord,
-    role: OrganizationRole
+    role: OrganizationRole,
+    features: MemberFeatures
   ): Organization {
     return {
       id: organization.id,
       name: organization.name,
       slug: organization.slug,
       role,
+      features: effectiveMemberFeatures(role, features),
       created_at: organization.createdAt,
       updated_at: organization.updatedAt,
     };
@@ -651,6 +697,7 @@ function mockMembership(
     organizationId,
     userKey,
     role,
+    features: { ...NEW_MEMBER_FEATURES },
     joinedAt: timestamp,
     updatedAt: timestamp,
   };
@@ -667,6 +714,7 @@ function memberView(
     nickname: user.nickname,
     ...(user.avatar ? { avatar: user.avatar } : {}),
     role: membership.role,
+    features: effectiveMemberFeatures(membership.role, membership.features),
     joined_at: membership.joinedAt,
     updated_at: membership.updatedAt,
   };

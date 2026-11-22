@@ -290,8 +290,12 @@ func (s *service) checkBroadcastVariables(ctx context.Context, broadcast *domain
 }
 
 // CancelBroadcast stops a broadcast for good. Stopping mail needs no access to the sender
-// mailbox, so an admin can always stop a broadcast; without View it only learns the new status.
+// mailbox, so an owner or admin can always stop a broadcast; without View it only learns the new
+// status. A member with the broadcast grant stops only broadcasts it could send.
 func (s *service) CancelBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, bool, error) {
+	if err := s.authorizeStop(ctx, viewer, id); err != nil {
+		return nil, false, err
+	}
 	if err := s.broadcasts.CancelBroadcast(ctx, viewer.OrganizationID, id); err != nil {
 		return nil, false, err
 	}
@@ -300,12 +304,24 @@ func (s *service) CancelBroadcast(ctx context.Context, viewer domain.Organizatio
 
 // PauseBroadcast stops a sending broadcast until an owner resumes it. Pending recipients stay
 // pending; a message the worker is sending right now still finishes. Like cancel, it needs no
-// access to the sender mailbox.
+// access to the sender mailbox for an owner or admin.
 func (s *service) PauseBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, bool, error) {
+	if err := s.authorizeStop(ctx, viewer, id); err != nil {
+		return nil, false, err
+	}
 	if err := s.broadcasts.PauseBroadcast(ctx, viewer.OrganizationID, id, stopReasonOwner); err != nil {
 		return nil, false, err
 	}
 	return s.stoppedBroadcast(ctx, viewer, id)
+}
+
+// authorizeStop lets owners and admins stop any broadcast and a member only one it could send.
+func (s *service) authorizeStop(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
+	if viewer.Role.CanManageOrganization() {
+		return nil
+	}
+	_, err := s.authorizeBroadcast(ctx, viewer, id, canSend)
+	return err
 }
 
 // stoppedBroadcast reloads a broadcast after a stop and reports whether the viewer may read its
