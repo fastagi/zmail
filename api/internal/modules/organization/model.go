@@ -40,6 +40,8 @@ type OrganizationMembershipPO struct {
 	UpdatedAt         time.Time
 	Organization      OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	User              user.UserPO    `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	// DeveloperGrant is loaded only where a query preloads it; nil means no grant.
+	DeveloperGrant *MemberDeveloperGrantPO `gorm:"foreignKey:MembershipID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (po *OrganizationMembershipPO) features() domain.MemberFeatures {
@@ -49,6 +51,7 @@ func (po *OrganizationMembershipPO) features() domain.MemberFeatures {
 		Templates:   po.CanUseTemplates,
 		APIKeys:     po.CanUseAPIKeys,
 		MailClients: po.CanUseMailClients,
+		Developer:   po.DeveloperGrant != nil,
 	}
 }
 
@@ -195,6 +198,7 @@ func (po *OrganizationMembershipPO) toDomain() *domain.OrganizationMembership {
 		UserID:         po.UserID,
 		Role:           domain.OrganizationRole(po.Role),
 		Features:       po.features(),
+		DeveloperGrant: po.DeveloperGrant.toDomain(),
 		Organization:   po.Organization.toDomain(),
 		CreatedAt:      po.CreatedAt,
 		UpdatedAt:      po.UpdatedAt,

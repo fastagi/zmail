@@ -47,16 +47,29 @@ type UpdateOrganizationMemberFeaturesRequest struct {
 	Templates   *bool `json:"templates"`
 	APIKeys     *bool `json:"api_keys"`
 	MailClients *bool `json:"mail_clients"`
+	Developer   *bool `json:"developer"`
+	// DeveloperAllDomains and DeveloperDomains set the developer grant's sending scope: every
+	// verified domain of the organization, or the listed ones. A new grant needs one of them.
+	DeveloperAllDomains *bool    `json:"developer_all_domains"`
+	DeveloperDomains    []string `json:"developer_domains" binding:"omitempty,max=50,dive,required,max=253"`
 }
 
 func (r *UpdateOrganizationMemberFeaturesRequest) patch() domain.MemberFeaturePatch {
 	if r == nil {
 		return domain.MemberFeaturePatch{}
 	}
-	return domain.MemberFeaturePatch{
+	patch := domain.MemberFeaturePatch{
 		Broadcasts: r.Broadcasts, Contacts: r.Contacts, Templates: r.Templates, APIKeys: r.APIKeys,
-		MailClients: r.MailClients,
+		MailClients: r.MailClients, Developer: r.Developer,
 	}
+	if r.DeveloperAllDomains != nil || r.DeveloperDomains != nil {
+		grant := domain.DeveloperGrant{Domains: r.DeveloperDomains}
+		if r.DeveloperAllDomains != nil {
+			grant.AllDomains = *r.DeveloperAllDomains
+		}
+		patch.DeveloperGrant = &grant
+	}
+	return patch
 }
 
 func (r *UpdateOrganizationMemberFeaturesRequest) validationErrors() map[string][]string {
@@ -64,7 +77,7 @@ func (r *UpdateOrganizationMemberFeaturesRequest) validationErrors() map[string]
 		return nil
 	}
 	return map[string][]string{
-		"features": {"name at least one of broadcasts, contacts, templates, api_keys, or mail_clients"},
+		"features": {"name at least one of broadcasts, contacts, templates, api_keys, mail_clients, or developer"},
 	}
 }
 
@@ -75,6 +88,8 @@ type MemberFeaturesResponse struct {
 	Templates   bool `json:"templates"`
 	APIKeys     bool `json:"api_keys"`
 	MailClients bool `json:"mail_clients"`
+	// Developer includes API keys: api_keys reports true whenever developer does.
+	Developer bool `json:"developer"`
 }
 
 func toMemberFeaturesResponse(role domain.OrganizationRole, stored domain.MemberFeatures) MemberFeaturesResponse {
@@ -83,9 +98,26 @@ func toMemberFeaturesResponse(role domain.OrganizationRole, stored domain.Member
 		Broadcasts:  effective.Broadcasts,
 		Contacts:    effective.Contacts,
 		Templates:   effective.Templates,
-		APIKeys:     effective.APIKeys,
+		APIKeys:     effective.Has(domain.MemberFeatureAPIKeys),
 		MailClients: effective.MailClients,
+		Developer:   effective.Developer,
 	}
+}
+
+// DeveloperScopeResponse is the sending scope of a member's developer grant.
+type DeveloperScopeResponse struct {
+	AllDomains bool     `json:"all_domains"`
+	Domains    []string `json:"domains"`
+}
+
+// toDeveloperScopeResponse is nil for owners and admins, who are unrestricted, and for a member
+// without the grant.
+func toDeveloperScopeResponse(role domain.OrganizationRole, grant *domain.DeveloperGrant) *DeveloperScopeResponse {
+	if role.CanManageOrganization() || grant == nil {
+		return nil
+	}
+	domains := append([]string{}, grant.Domains...)
+	return &DeveloperScopeResponse{AllDomains: grant.AllDomains, Domains: domains}
 }
 
 // TransferOrganizationOwnershipRequest selects an existing member as the new owner.
@@ -95,13 +127,15 @@ type TransferOrganizationOwnershipRequest struct {
 
 // OrganizationResponse is a membership-scoped organization view.
 type OrganizationResponse struct {
-	ID        uint                    `json:"id"`
-	Name      string                  `json:"name"`
-	Slug      string                  `json:"slug"`
-	Role      domain.OrganizationRole `json:"role"`
-	Features  MemberFeaturesResponse  `json:"features"`
-	CreatedAt time.Time               `json:"created_at"`
-	UpdatedAt time.Time               `json:"updated_at"`
+	ID       uint                    `json:"id"`
+	Name     string                  `json:"name"`
+	Slug     string                  `json:"slug"`
+	Role     domain.OrganizationRole `json:"role"`
+	Features MemberFeaturesResponse  `json:"features"`
+	// DeveloperScope is null unless the member holds a developer grant.
+	DeveloperScope *DeveloperScopeResponse `json:"developer_scope"`
+	CreatedAt      time.Time               `json:"created_at"`
+	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
 // OrganizationContextResponse is the verified request-scoped tenant identity.
@@ -113,19 +147,21 @@ type OrganizationContextResponse struct {
 	UserID           uint                    `json:"user_id"`
 	Role             domain.OrganizationRole `json:"role"`
 	Features         MemberFeaturesResponse  `json:"features"`
+	DeveloperScope   *DeveloperScopeResponse `json:"developer_scope"`
 }
 
 // OrganizationMemberResponse is the PII-minimized public member view.
 type OrganizationMemberResponse struct {
-	ID        uint                    `json:"id"`
-	UserID    uint                    `json:"user_id"`
-	Username  string                  `json:"username"`
-	Nickname  string                  `json:"nickname,omitempty"`
-	Avatar    string                  `json:"avatar,omitempty"`
-	Role      domain.OrganizationRole `json:"role"`
-	Features  MemberFeaturesResponse  `json:"features"`
-	JoinedAt  time.Time               `json:"joined_at"`
-	UpdatedAt time.Time               `json:"updated_at"`
+	ID             uint                    `json:"id"`
+	UserID         uint                    `json:"user_id"`
+	Username       string                  `json:"username"`
+	Nickname       string                  `json:"nickname,omitempty"`
+	Avatar         string                  `json:"avatar,omitempty"`
+	Role           domain.OrganizationRole `json:"role"`
+	Features       MemberFeaturesResponse  `json:"features"`
+	DeveloperScope *DeveloperScopeResponse `json:"developer_scope"`
+	JoinedAt       time.Time               `json:"joined_at"`
+	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
 // OrganizationOwnershipTransferResponse exposes both post-transfer roles.
@@ -261,13 +297,14 @@ func toResponse(membership *domain.OrganizationMembership) *OrganizationResponse
 	}
 	organization := membership.Organization
 	return &OrganizationResponse{
-		ID:        organization.ID,
-		Name:      organization.Name,
-		Slug:      organization.Slug,
-		Role:      membership.Role,
-		Features:  toMemberFeaturesResponse(membership.Role, membership.Features),
-		CreatedAt: organization.CreatedAt,
-		UpdatedAt: organization.UpdatedAt,
+		ID:             organization.ID,
+		Name:           organization.Name,
+		Slug:           organization.Slug,
+		Role:           membership.Role,
+		Features:       toMemberFeaturesResponse(membership.Role, membership.Features),
+		DeveloperScope: toDeveloperScopeResponse(membership.Role, membership.DeveloperGrant),
+		CreatedAt:      organization.CreatedAt,
+		UpdatedAt:      organization.UpdatedAt,
 	}
 }
 
@@ -280,6 +317,7 @@ func toContextResponse(resolved domain.OrganizationContext) *OrganizationContext
 		UserID:           resolved.UserID,
 		Role:             resolved.Role,
 		Features:         toMemberFeaturesResponse(resolved.Role, resolved.Features),
+		DeveloperScope:   toDeveloperScopeResponse(resolved.Role, resolved.DeveloperGrant),
 	}
 }
 
@@ -288,12 +326,13 @@ func toMemberResponse(membership *domain.OrganizationMembership) *OrganizationMe
 		return nil
 	}
 	response := &OrganizationMemberResponse{
-		ID:        membership.ID,
-		UserID:    membership.UserID,
-		Role:      membership.Role,
-		Features:  toMemberFeaturesResponse(membership.Role, membership.Features),
-		JoinedAt:  membership.CreatedAt,
-		UpdatedAt: membership.UpdatedAt,
+		ID:             membership.ID,
+		UserID:         membership.UserID,
+		Role:           membership.Role,
+		Features:       toMemberFeaturesResponse(membership.Role, membership.Features),
+		DeveloperScope: toDeveloperScopeResponse(membership.Role, membership.DeveloperGrant),
+		JoinedAt:       membership.CreatedAt,
+		UpdatedAt:      membership.UpdatedAt,
 	}
 	if membership.User != nil {
 		response.Username = membership.User.Username

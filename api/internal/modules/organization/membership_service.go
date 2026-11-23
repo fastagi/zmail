@@ -3,6 +3,7 @@ package organization
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -71,15 +72,9 @@ func (s *service) UpdateMemberFeatures(
 	if change == nil || change.Membership == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	after := change.Membership.Features
-	if after != change.Before {
-		changes := make(map[string]domain.AuditValueChange)
-		for _, feature := range domain.MemberFeatureCatalog() {
-			if change.Before.Has(feature) != after.Has(feature) {
-				changes[string(feature)] = domain.AuditValueChange{Before: change.Before.Has(feature), After: after.Has(feature)}
-			}
-		}
-		auditstarter.RecordChange(ctx, auditstarter.Change{
+	changes := memberFeatureAuditChanges(change)
+	if len(changes) > 0 {
+		s.recordAudit(ctx, auditstarter.Change{
 			Action:     "change_features",
 			Resource:   "organization_members",
 			TargetType: "organization_membership",
@@ -174,4 +169,36 @@ func (s *service) TransferOwnership(
 		},
 	})
 	return transfer, nil
+}
+
+// memberFeatureAuditChanges lists the stored grants a change altered, comparing stored values so a
+// grant implied by another (API keys by developer) is not reported, plus the developer scope.
+func memberFeatureAuditChanges(change *domain.OrganizationMembershipFeatureChange) map[string]domain.AuditValueChange {
+	before, after := change.Before, change.Membership.Features
+	stored := map[domain.MemberFeature][2]bool{
+		domain.MemberFeatureBroadcasts:  {before.Broadcasts, after.Broadcasts},
+		domain.MemberFeatureContacts:    {before.Contacts, after.Contacts},
+		domain.MemberFeatureTemplates:   {before.Templates, after.Templates},
+		domain.MemberFeatureAPIKeys:     {before.APIKeys, after.APIKeys},
+		domain.MemberFeatureMailClients: {before.MailClients, after.MailClients},
+		domain.MemberFeatureDeveloper:   {before.Developer, after.Developer},
+	}
+	changes := make(map[string]domain.AuditValueChange)
+	for _, feature := range domain.MemberFeatureCatalog() {
+		if values := stored[feature]; values[0] != values[1] {
+			changes[string(feature)] = domain.AuditValueChange{Before: values[0], After: values[1]}
+		}
+	}
+	beforeScope, afterScope := developerScopeAudit(change.BeforeGrant), developerScopeAudit(change.Membership.DeveloperGrant)
+	if !reflect.DeepEqual(beforeScope, afterScope) {
+		changes["developer_scope"] = domain.AuditValueChange{Before: beforeScope, After: afterScope}
+	}
+	return changes
+}
+
+func developerScopeAudit(grant *domain.DeveloperGrant) any {
+	if grant == nil {
+		return nil
+	}
+	return map[string]any{"all_domains": grant.AllDomains, "domains": append([]string{}, grant.Domains...)}
 }

@@ -21,6 +21,10 @@ type organizationContextRow struct {
 	CanUseTemplates   bool   `gorm:"column:can_use_templates"`
 	CanUseAPIKeys     bool   `gorm:"column:can_use_api_keys"`
 	CanUseMailClients bool   `gorm:"column:can_use_mail_clients"`
+	// DeveloperGrantID is the membership id of the developer grant, or nil without one.
+	DeveloperGrantID      *uint   `gorm:"column:developer_grant_id"`
+	DeveloperAllDomains   *bool   `gorm:"column:developer_all_domains"`
+	DeveloperSendingNames *string `gorm:"column:developer_sending_domains"`
 }
 
 func (r *repository) ResolveContext(
@@ -49,9 +53,13 @@ func (r *repository) ResolveContext(
 			memberships.can_use_contacts,
 			memberships.can_use_templates,
 			memberships.can_use_api_keys,
-			memberships.can_use_mail_clients
+			memberships.can_use_mail_clients,
+			grants.membership_id AS developer_grant_id,
+			grants.all_domains AS developer_all_domains,
+			grants.sending_domains AS developer_sending_domains
 		`).
 		Joins("JOIN organizations ON organizations.id = memberships.organization_id").
+		Joins("LEFT JOIN member_developer_grants AS grants ON grants.membership_id = memberships.id").
 		Where("memberships.organization_id = ? AND memberships.user_id = ?", organizationID, userID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -74,7 +82,18 @@ func (r *repository) ResolveContext(
 			Templates:   row.CanUseTemplates,
 			APIKeys:     row.CanUseAPIKeys,
 			MailClients: row.CanUseMailClients,
+			Developer:   row.DeveloperGrantID != nil,
 		},
+	}
+	if row.DeveloperGrantID != nil {
+		allDomains, names := false, "[]"
+		if row.DeveloperAllDomains != nil {
+			allDomains = *row.DeveloperAllDomains
+		}
+		if row.DeveloperSendingNames != nil {
+			names = *row.DeveloperSendingNames
+		}
+		resolved.DeveloperGrant = developerGrantFromColumns(allDomains, names)
 	}
 	if !resolved.IsValid() {
 		return nil, domain.ErrServiceUnavailable

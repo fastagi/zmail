@@ -47,6 +47,7 @@ func (r *repository) ListMembers(
 	var memberships []*OrganizationMembershipPO
 	if err := query.
 		Preload("User").
+		Preload("DeveloperGrant").
 		Order("organization_memberships.user_id ASC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
@@ -288,6 +289,7 @@ func findMembershipByIDUpdate(tx *gorm.DB, organizationID, memberID uint) (*Orga
 	var membership OrganizationMembershipPO
 	err := forUpdate(tx).
 		Preload("User").
+		Preload("DeveloperGrant").
 		Where("organization_id = ? AND id = ?", organizationID, memberID).
 		First(&membership).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

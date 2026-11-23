@@ -119,7 +119,7 @@ func TestOrganizationViewsReportEffectiveFeatures(t *testing.T) {
 	assert.Equal(t, MemberFeaturesResponse{Contacts: true}, toMemberResponse(member).Features)
 
 	member.Role = domain.OrganizationRoleAdmin
-	all := MemberFeaturesResponse{Broadcasts: true, Contacts: true, Templates: true, APIKeys: true, MailClients: true}
+	all := MemberFeaturesResponse{Broadcasts: true, Contacts: true, Templates: true, APIKeys: true, MailClients: true, Developer: true}
 	assert.Equal(t, all, toResponse(member).Features)
 	assert.Equal(t, all, toContextResponse(domain.OrganizationContext{Role: domain.OrganizationRoleOwner}).Features)
 }
