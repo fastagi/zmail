@@ -57,14 +57,15 @@ import { cn } from '@/utils';
 /** Lets spreadsheet programs read the file as UTF-8. */
 const BYTE_ORDER_MARK = '﻿';
 
-/** New members get contacts and templates, as an ordinary invitation does. */
+/** New members get contacts, templates, and mail apps, as an ordinary invitation does. */
 const DEFAULT_FEATURES: MemberImportFeatures = {
   broadcasts: false,
   contacts: true,
   templates: true,
   api_keys: false,
+  mail_clients: true,
 };
-const FEATURE_KEYS = ['broadcasts', 'contacts', 'templates', 'api_keys'] as const;
+const FEATURE_KEYS = ['broadcasts', 'contacts', 'templates', 'api_keys', 'mail_clients'] as const;
 
 type Step =
   | { kind: 'choose' }

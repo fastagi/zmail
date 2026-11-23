@@ -143,6 +143,7 @@ export async function updateOrganizationMemberFeaturesRoute(
         contacts: 'contacts',
         templates: 'templates',
         api_keys: 'api_keys',
+        mail_clients: 'mail_clients',
       },
     });
   }

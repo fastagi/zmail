@@ -28,6 +28,19 @@ var (
 	// ErrMailboxAccessConflict rejects an access change the mailbox's current type does not allow.
 	ErrMailboxAccessConflict = errors.New("mailbox access conflicts with its type")
 	ErrMailMessageNotFound   = errors.New("mail message not found")
+	// ErrMailMessageSourceNotFound is a message stored without its raw source; mail apps get a
+	// rebuilt message instead.
+	ErrMailMessageSourceNotFound = errors.New("mail message source not found")
+	// ErrMailAppPasswordNotFound is a mail client password outside the caller's reach or already revoked.
+	ErrMailAppPasswordNotFound = errors.New("mail client password not found")
+	// ErrMailAppPasswordLimitReached means the member already holds the most mail client passwords.
+	ErrMailAppPasswordLimitReached = errors.New("mail client password limit reached")
+	// ErrMailClientAccessDisabled means the organization switched mail app sign-in off.
+	ErrMailClientAccessDisabled = errors.New("mail client access is disabled for this organization")
+	// ErrMailAppPasswordPepperMissing means the instance has no MAIL_APP_PASSWORD_PEPPER.
+	ErrMailAppPasswordPepperMissing = errors.New("mail client passwords are not configured")
+	// ErrMailAppPasswordAttemptsLimited means too many failed credential checks in the window.
+	ErrMailAppPasswordAttemptsLimited = errors.New("too many mail client password attempts")
 	// ErrTransactionalMessageNotFound means no transactional message matched the lookup.
 	ErrTransactionalMessageNotFound    = errors.New("transactional message not found")
 	ErrMailMessageInvalid              = errors.New("mail message is invalid")

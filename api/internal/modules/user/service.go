@@ -114,7 +114,8 @@ var (
 	_ ProfileService   = (*service)(nil)
 	_ UserQueryService = (*service)(nil)
 
-	_ domain.CredentialSignIn = (*service)(nil)
+	_ domain.CredentialSignIn     = (*service)(nil)
+	_ domain.CredentialReverifier = (*service)(nil)
 )
 
 // NewService creates a new service instance

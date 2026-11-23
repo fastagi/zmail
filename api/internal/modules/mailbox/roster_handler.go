@@ -22,6 +22,8 @@ type MemberImportFeaturesRequest struct {
 	Contacts   bool `json:"contacts"`
 	Templates  bool `json:"templates"`
 	APIKeys    bool `json:"api_keys"`
+	// MailClients is granted when absent, so a client that predates the feature keeps the default.
+	MailClients *bool `json:"mail_clients"`
 }
 
 // CreateMemberImportRequest is the body of POST /v1/member-imports. Features defaults to the
@@ -38,7 +40,10 @@ func (r CreateMemberImportRequest) input() MemberImportInput {
 	if r.Features != nil {
 		features = domain.MemberFeatures{
 			Broadcasts: r.Features.Broadcasts, Contacts: r.Features.Contacts,
-			Templates: r.Features.Templates, APIKeys: r.Features.APIKeys,
+			Templates: r.Features.Templates, APIKeys: r.Features.APIKeys, MailClients: true,
+		}
+		if r.Features.MailClients != nil {
+			features.MailClients = *r.Features.MailClients
 		}
 	}
 	rows := make([]MemberImportRow, 0, len(r.Rows))

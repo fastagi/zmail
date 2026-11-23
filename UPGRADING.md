@@ -11,6 +11,61 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail client access, part 1
+
+### High — Deploy the Web before the API
+
+Member features gain `mail_clients`: the organization context, the member list, member feature
+updates, and invitations report it beside `broadcasts`, `contacts`, `templates`, and `api_keys`. A Web
+console from before this change validates member features strictly and fails against the new API,
+so roll the Web forward first. Existing memberships and pending invitations are granted
+`mail_clients`; owners and admins always have it.
+
+### Medium — Mail client passwords
+
+- New routes `GET/POST /v1/mail-app-passwords`, `DELETE /v1/mail-app-passwords/:password_id`,
+  `GET /v1/mail-app-password-directory`, `DELETE /v1/mail-app-password-directory/:password_id`, and
+  `GET/PUT /v1/mail-client-settings`; see "Mail Client Access" in `contracts/MAILBOXES.md`.
+- `MAIL_APP_PASSWORD_PEPPER` (at least 32 characters) keys the stored hash of every mail client
+  password. It has no default in any environment: without it creating a password answers
+  `503 COMMON.SERVICE_UNAVAILABLE` and the list reports `access.reason` `unavailable`. Generate it
+  once with a secret manager and never rotate it casually: a new pepper invalidates every existing
+  mail client password.
+- `MAIL_GATEWAY_PUBLIC_IMAP_HOST` and `MAIL_GATEWAY_PUBLIC_IMAP_PORT` name the IMAP server the
+  console shows (default `imap.zmail.im:993`).
+- `mailbox.ProvideService` takes a trailing `domain.CredentialReverifier`, bound to the user
+  service in the user starter's provider set; a fork that calls it by hand passes the user service
+  or nil (which refuses creating mail client passwords). Run `make wire`.
+- `mail:broadcast:work` now also deletes mail client passwords revoked more than 90 days ago, as its
+  last step.
+
+### Medium — Migrations `2026_12_24_090000` to `2026_12_24_120000`
+
+- `2026_12_24_090000_add_mail_message_sources` (mailbox starter) creates `mail_message_sources`; no
+  existing table is locked.
+- `2026_12_24_100000_add_mail_imap_uids` (mailbox starter) creates `mail_imap_folders` and
+  `mail_imap_uids`, numbers every existing message in one `INSERT … SELECT` over all of
+  `mail_messages`, and adds an `AFTER INSERT OR UPDATE OF placement, folder_id, status, mailbox_id`
+  trigger on `mail_messages` and an `AFTER DELETE` trigger on `mail_folders`. The migration first takes a
+  `SHARE ROW EXCLUSIVE` lock on `mail_messages` (and `CREATE TRIGGER` the same lock on `mail_folders`)
+  for the rest of its transaction, so no message is written between the backfill and the trigger; this blocks
+  inbound delivery, sending, and organizing while the backfill scans the table, so run it outside
+  peak mail traffic on large mail stores. Afterwards every insert and every placement or status
+  change of a message also writes one row to each UID table; two writers filing mail into the same
+  folder wait for each other's commit.
+- `2026_12_24_110000_add_mail_client_feature_grants` (organization starter) adds
+  `can_use_mail_clients boolean NOT NULL DEFAULT true` to `organization_memberships` and
+  `organization_invitations`. A constant default does not rewrite either table; each `ALTER TABLE`
+  takes a brief `ACCESS EXCLUSIVE` lock.
+- `2026_12_24_120000_add_mail_app_passwords` (mailbox starter) creates `mail_app_passwords` and
+  `mail_client_settings`.
+
+The golden schema now also pins functions (by signature and body digest) and triggers; a fork that
+adds its own functions or triggers regenerates `testdata/schema.golden.sql` with
+`FASTBUILD_UPDATE_GOLDEN_SCHEMA=1`. A fork test that rolls back `2026_11_21_090000_add_mail_organize`
+must first roll back `2026_12_24_100000_add_mail_imap_uids`, whose trigger depends on
+`mail_messages.placement` and `folder_id`.
+
 ## Unreleased — Web push and new-mail notifications
 
 ### High — Deploy the Web before the API

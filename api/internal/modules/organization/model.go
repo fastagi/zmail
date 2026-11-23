@@ -31,32 +31,35 @@ type OrganizationMembershipPO struct {
 	Role           string `gorm:"size:16;not null;index:idx_organization_memberships_user_role,priority:2;check:organization_memberships_role_check,role IN ('owner','admin','member')"`
 	// Feature grants matter only for the member role. The column defaults are the grants a new
 	// member starts with; updates always write explicit values.
-	CanUseBroadcasts bool      `gorm:"not null;default:false"`
-	CanUseContacts   bool      `gorm:"not null;default:true"`
-	CanUseTemplates  bool      `gorm:"not null;default:true"`
-	CanUseAPIKeys    bool      `gorm:"column:can_use_api_keys;not null;default:false"`
-	CreatedAt        time.Time `gorm:"index:idx_organization_memberships_user_created,priority:2"`
-	UpdatedAt        time.Time
-	Organization     OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	User             user.UserPO    `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	CanUseBroadcasts  bool      `gorm:"not null;default:false"`
+	CanUseContacts    bool      `gorm:"not null;default:true"`
+	CanUseTemplates   bool      `gorm:"not null;default:true"`
+	CanUseAPIKeys     bool      `gorm:"column:can_use_api_keys;not null;default:false"`
+	CanUseMailClients bool      `gorm:"not null;default:true"`
+	CreatedAt         time.Time `gorm:"index:idx_organization_memberships_user_created,priority:2"`
+	UpdatedAt         time.Time
+	Organization      OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	User              user.UserPO    `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
 }
 
 func (po *OrganizationMembershipPO) features() domain.MemberFeatures {
 	return domain.MemberFeatures{
-		Broadcasts: po.CanUseBroadcasts,
-		Contacts:   po.CanUseContacts,
-		Templates:  po.CanUseTemplates,
-		APIKeys:    po.CanUseAPIKeys,
+		Broadcasts:  po.CanUseBroadcasts,
+		Contacts:    po.CanUseContacts,
+		Templates:   po.CanUseTemplates,
+		APIKeys:     po.CanUseAPIKeys,
+		MailClients: po.CanUseMailClients,
 	}
 }
 
 // memberFeatureColumns maps features onto their columns for an explicit update.
 func memberFeatureColumns(features domain.MemberFeatures) map[string]any {
 	return map[string]any{
-		"can_use_broadcasts": features.Broadcasts,
-		"can_use_contacts":   features.Contacts,
-		"can_use_templates":  features.Templates,
-		"can_use_api_keys":   features.APIKeys,
+		"can_use_broadcasts":   features.Broadcasts,
+		"can_use_contacts":     features.Contacts,
+		"can_use_templates":    features.Templates,
+		"can_use_api_keys":     features.APIKeys,
+		"can_use_mail_clients": features.MailClients,
 	}
 }
 
@@ -93,10 +96,11 @@ type OrganizationInvitationPO struct {
 	EmailAttemptedAt *time.Time
 
 	// Grants the membership starts with when the invitation is accepted.
-	CanUseBroadcasts bool `gorm:"not null;default:false"`
-	CanUseContacts   bool `gorm:"not null;default:true"`
-	CanUseTemplates  bool `gorm:"not null;default:true"`
-	CanUseAPIKeys    bool `gorm:"column:can_use_api_keys;not null;default:false"`
+	CanUseBroadcasts  bool `gorm:"not null;default:false"`
+	CanUseContacts    bool `gorm:"not null;default:true"`
+	CanUseTemplates   bool `gorm:"not null;default:true"`
+	CanUseAPIKeys     bool `gorm:"column:can_use_api_keys;not null;default:false"`
+	CanUseMailClients bool `gorm:"not null;default:true"`
 }
 
 // TableName returns the stable organization invitation table name.
@@ -137,25 +141,26 @@ func newInvitationPO(invitation *domain.OrganizationInvitation) *OrganizationInv
 		return nil
 	}
 	return &OrganizationInvitationPO{
-		ID:               invitation.ID,
-		OrganizationID:   invitation.OrganizationID,
-		InvitedBy:        invitation.InvitedBy,
-		Email:            invitation.Email,
-		Role:             string(invitation.Role),
-		TokenHash:        invitation.TokenHash,
-		ExpiresAt:        invitation.ExpiresAt,
-		AcceptedAt:       invitation.AcceptedAt,
-		AcceptedBy:       invitation.AcceptedBy,
-		RevokedAt:        invitation.RevokedAt,
-		RevokedBy:        invitation.RevokedBy,
-		EmailSendStatus:  optionalString(invitation.EmailSendStatus),
-		EmailAttemptedAt: invitation.EmailAttemptedAt,
-		CanUseBroadcasts: invitation.Features.Broadcasts,
-		CanUseContacts:   invitation.Features.Contacts,
-		CanUseTemplates:  invitation.Features.Templates,
-		CanUseAPIKeys:    invitation.Features.APIKeys,
-		CreatedAt:        invitation.CreatedAt,
-		UpdatedAt:        invitation.UpdatedAt,
+		ID:                invitation.ID,
+		OrganizationID:    invitation.OrganizationID,
+		InvitedBy:         invitation.InvitedBy,
+		Email:             invitation.Email,
+		Role:              string(invitation.Role),
+		TokenHash:         invitation.TokenHash,
+		ExpiresAt:         invitation.ExpiresAt,
+		AcceptedAt:        invitation.AcceptedAt,
+		AcceptedBy:        invitation.AcceptedBy,
+		RevokedAt:         invitation.RevokedAt,
+		RevokedBy:         invitation.RevokedBy,
+		EmailSendStatus:   optionalString(invitation.EmailSendStatus),
+		EmailAttemptedAt:  invitation.EmailAttemptedAt,
+		CanUseBroadcasts:  invitation.Features.Broadcasts,
+		CanUseContacts:    invitation.Features.Contacts,
+		CanUseTemplates:   invitation.Features.Templates,
+		CanUseAPIKeys:     invitation.Features.APIKeys,
+		CanUseMailClients: invitation.Features.MailClients,
+		CreatedAt:         invitation.CreatedAt,
+		UpdatedAt:         invitation.UpdatedAt,
 	}
 }
 
@@ -224,10 +229,11 @@ func (po *OrganizationInvitationPO) toDomain() *domain.OrganizationInvitation {
 		EmailSendStatus:  derefString(po.EmailSendStatus),
 		EmailAttemptedAt: po.EmailAttemptedAt,
 		Features: domain.MemberFeatures{
-			Broadcasts: po.CanUseBroadcasts,
-			Contacts:   po.CanUseContacts,
-			Templates:  po.CanUseTemplates,
-			APIKeys:    po.CanUseAPIKeys,
+			Broadcasts:  po.CanUseBroadcasts,
+			Contacts:    po.CanUseContacts,
+			Templates:   po.CanUseTemplates,
+			APIKeys:     po.CanUseAPIKeys,
+			MailClients: po.CanUseMailClients,
 		},
 		CreatedAt: po.CreatedAt,
 		UpdatedAt: po.UpdatedAt,

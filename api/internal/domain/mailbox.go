@@ -407,8 +407,11 @@ type MailMessage struct {
 	// Attachments carries content when a message is being stored and metadata only when the
 	// detail lookup fills it.
 	Attachments []MailAttachment
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// RawSource is the RFC 5322 message as delivered. Only inbound delivery sets it, to store the
+	// source with the message; no lookup fills it.
+	RawSource []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // MailAttachment is one file attached to a message.

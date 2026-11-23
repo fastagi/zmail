@@ -147,7 +147,7 @@ func InitApplication() (*app.Application, error) {
 	settings := mailbox.SettingsFromConfig(configConfig)
 	accountDirectory := mailbox.NewAccountDirectory(userRepository)
 	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -318,7 +318,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	settings := mailbox.SettingsFromConfig(cfg)
 	accountDirectory := mailbox.NewAccountDirectory(userRepository)
 	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,

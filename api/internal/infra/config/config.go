@@ -500,6 +500,12 @@ const (
 	DefaultMailboxTransactionalKeyPerSecond = 20
 	// MinMailboxSecretEncryptionKeyLength is the shortest MAILBOX_SECRET_ENCRYPTION_KEY accepted.
 	MinMailboxSecretEncryptionKeyLength = 32
+	// MinMailAppPasswordPepperLength is the shortest MAIL_APP_PASSWORD_PEPPER accepted.
+	MinMailAppPasswordPepperLength = 32
+	// DefaultMailClientIMAPHost and DefaultMailClientIMAPPort are the IMAP server the console tells
+	// members to configure in their mail apps.
+	DefaultMailClientIMAPHost = "imap.zmail.im"
+	DefaultMailClientIMAPPort = 993
 )
 
 // MailboxConfig holds optional mailbox starter policy and its mail transport.
@@ -550,6 +556,12 @@ type MailboxConfig struct {
 	// TransactionalRecipientPerMinute and TransactionalKeyPerSecond are the transactional rate limits.
 	TransactionalRecipientPerMinute int
 	TransactionalKeyPerSecond       int
+	// AppPasswordPepper keys the hash of every mail client password. Empty turns creating mail
+	// client passwords off; it has no default, and changing it invalidates every password.
+	AppPasswordPepper string
+	// ClientIMAPHost and ClientIMAPPort are the public IMAP server shown to members.
+	ClientIMAPHost string
+	ClientIMAPPort int
 }
 
 // Resolved fills the development defaults: outside production an unset domain is
@@ -563,6 +575,14 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 	m.PublicURL = strings.TrimRight(strings.TrimSpace(m.PublicURL), "/")
 	m.CloudflareEmailWorker = strings.TrimSpace(m.CloudflareEmailWorker)
 	m.SecretEncryptionKey = strings.TrimSpace(m.SecretEncryptionKey)
+	m.AppPasswordPepper = strings.TrimSpace(m.AppPasswordPepper)
+	m.ClientIMAPHost = strings.ToLower(strings.TrimSpace(m.ClientIMAPHost))
+	if m.ClientIMAPHost == "" {
+		m.ClientIMAPHost = DefaultMailClientIMAPHost
+	}
+	if m.ClientIMAPPort == 0 {
+		m.ClientIMAPPort = DefaultMailClientIMAPPort
+	}
 	m.SimulatorDomain = strings.ToLower(strings.TrimSpace(m.SimulatorDomain))
 	if m.SimulatorDomain == "" {
 		m.SimulatorDomain = DefaultMailboxSimulatorDomain
@@ -845,6 +865,10 @@ func Load() (*Config, error) {
 			SimulatorDomain:                 env.Get("MAILBOX_SIMULATOR_DOMAIN", DefaultMailboxSimulatorDomain),
 			TransactionalRecipientPerMinute: env.GetInt("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE", DefaultMailboxTransactionalRecipientPerMinute),
 			TransactionalKeyPerSecond:       env.GetInt("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND", DefaultMailboxTransactionalKeyPerSecond),
+
+			AppPasswordPepper: env.Get("MAIL_APP_PASSWORD_PEPPER", ""),
+			ClientIMAPHost:    env.Get("MAIL_GATEWAY_PUBLIC_IMAP_HOST", DefaultMailClientIMAPHost),
+			ClientIMAPPort:    env.GetInt("MAIL_GATEWAY_PUBLIC_IMAP_PORT", DefaultMailClientIMAPPort),
 		},
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
@@ -1504,6 +1528,15 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	}
 	if resolved.InboundSecret != "" && len(resolved.InboundSecret) < 32 {
 		return fmt.Errorf("MAILBOX_INBOUND_SECRET must be at least 32 characters when set")
+	}
+	if resolved.AppPasswordPepper != "" && len(resolved.AppPasswordPepper) < MinMailAppPasswordPepperLength {
+		return fmt.Errorf("MAIL_APP_PASSWORD_PEPPER must be at least %d characters when set", MinMailAppPasswordPepperLength)
+	}
+	if strings.ContainsAny(resolved.ClientIMAPHost, " /:@") || len(resolved.ClientIMAPHost) > 253 {
+		return fmt.Errorf("MAIL_GATEWAY_PUBLIC_IMAP_HOST must be a host name")
+	}
+	if resolved.ClientIMAPPort < 1 || resolved.ClientIMAPPort > 65535 {
+		return fmt.Errorf("MAIL_GATEWAY_PUBLIC_IMAP_PORT must be between 1 and 65535")
 	}
 	if resolved.DailySendLimit <= 0 || resolved.DailySendLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_SEND_LIMIT must be between 1 and 100000")

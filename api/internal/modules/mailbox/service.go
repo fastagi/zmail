@@ -83,6 +83,11 @@ type Settings struct {
 	ExternalMail config.ExternalMailConfig
 	// MailAgent bounds agent feed retention and agent reads; the zero value takes the defaults.
 	MailAgent config.MailAgentConfig
+	// AppPasswordPepper keys the hash of mail client passwords; empty refuses creating them.
+	AppPasswordPepper string
+	// ClientIMAPHost and ClientIMAPPort are the public IMAP server the console shows members.
+	ClientIMAPHost string
+	ClientIMAPPort int
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -272,6 +277,20 @@ type Service interface {
 	PlatformAccountService
 	// TriageService serves the AI triage switches, overrides, and reply drafts.
 	TriageService
+	// ListAppPasswords lists the viewer's own mail client passwords with access and server details.
+	ListAppPasswords(ctx context.Context, viewer domain.OrganizationContext) (*AppPasswordList, error)
+	// CreateAppPassword creates a mail client password and returns its secret, this once.
+	CreateAppPassword(ctx context.Context, viewer domain.OrganizationContext, input CreateAppPasswordInput) (*domain.MailAppPassword, string, error)
+	// RevokeAppPassword revokes one of the viewer's own mail client passwords.
+	RevokeAppPassword(ctx context.Context, viewer domain.OrganizationContext, id uint) error
+	// AppPasswordDirectory pages the organization's mail client passwords for owners and admins.
+	AppPasswordDirectory(ctx context.Context, viewer domain.OrganizationContext, page, perPage int) ([]*domain.MailAppPassword, int64, error)
+	// ForceRevokeAppPassword revokes any member's mail client password; owners and admins only.
+	ForceRevokeAppPassword(ctx context.Context, viewer domain.OrganizationContext, id uint) error
+	// MailClientSettings reads the organization's mail app sign-in switch.
+	MailClientSettings(ctx context.Context, viewer domain.OrganizationContext) (MailClientSettings, error)
+	// UpdateMailClientSettings sets the organization's mail app sign-in switch; owners and admins only.
+	UpdateMailClientSettings(ctx context.Context, viewer domain.OrganizationContext, enabled bool) (MailClientSettings, error)
 	// MailSignature reads the viewer's own signature for a mailbox they may send from.
 	MailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailSignature, error)
 	// SaveMailSignature replaces the viewer's own signature for a mailbox they may send from; an
@@ -448,6 +467,14 @@ type service struct {
 	pushReconcile pushReconcileClock
 	// pushRefusalLog samples the log lines of refused notification requests.
 	pushRefusalLog *pushRefusalLog
+	// appPasswords stores mail client passwords and the organization switch; nil when repo does not
+	// implement it.
+	appPasswords appPasswordStore
+	// reverifier confirms the account credentials before a mail client password is created; nil
+	// refuses creating one.
+	reverifier domain.CredentialReverifier
+	// appPasswordAttempts bounds the credential checks of creating mail client passwords per user.
+	appPasswordAttempts ratelimit.Store
 }
 
 var _ Service = (*service)(nil)
@@ -527,6 +554,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailboxRosterRepository); ok {
 		roster = seam
 	}
+	var appPasswords appPasswordStore
+	if seam, ok := repo.(appPasswordStore); ok {
+		appPasswords = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -553,7 +584,8 @@ func NewService(
 		pushLimits:   newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
 		pushRefusals: newExternalMailPushRefusals(), pushHandshakes: newExternalMailPushHandshakes(),
 		pushRefusalLog: &pushRefusalLog{}, releases: releases,
-		roster: roster,
+		roster:       roster,
+		appPasswords: appPasswords, appPasswordAttempts: newAppPasswordAttempts(limits),
 	}
 }
 
@@ -628,6 +660,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.Triage = cfg.AITriage
 	settings.ExternalMail = cfg.ExternalMail
 	settings.MailAgent = cfg.MailAgent
+	settings.AppPasswordPepper = resolved.AppPasswordPepper
+	settings.ClientIMAPHost = resolved.ClientIMAPHost
+	settings.ClientIMAPPort = resolved.ClientIMAPPort
 	return settings
 }
 
@@ -1475,6 +1510,7 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		RFCMessageID: parsed.MessageID,
 		DedupeKey:    inboundDedupeKey(parsed.MessageID, delivery.Raw),
 		Attachments:  parsed.Attachments,
+		RawSource:    delivery.Raw,
 	}
 	created := false
 	err = s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {

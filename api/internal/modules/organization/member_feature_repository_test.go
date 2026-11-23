@@ -30,7 +30,7 @@ func TestRepositoryResolvesStoredFeaturesWithTheContext(t *testing.T) {
 
 	resolved, err := repo.ResolveContext(context.Background(), organizationID, memberships["member"].UserID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.MemberFeatures{Broadcasts: true, Templates: true}, resolved.Features)
+	assert.Equal(t, domain.MemberFeatures{Broadcasts: true, Templates: true, MailClients: true}, resolved.Features)
 	assert.True(t, resolved.CanUse(domain.MemberFeatureBroadcasts))
 	assert.False(t, resolved.CanUse(domain.MemberFeatureContacts))
 	assert.False(t, resolved.CanUse(domain.MemberFeatureAPIKeys))
@@ -44,7 +44,7 @@ func TestManagersChangeOnlyTheFeaturesTheyName(t *testing.T) {
 
 			change, err := repo.UpdateMemberFeatures(context.Background(), organizationID,
 				memberships[actor].UserID, memberships["member"].ID,
-				domain.MemberFeaturePatch{Broadcasts: boolPointer(true), Templates: boolPointer(false)}, now)
+				domain.MemberFeaturePatch{Broadcasts: boolPointer(true), Templates: boolPointer(false), MailClients: boolPointer(false)}, now)
 			require.NoError(t, err)
 			assert.Equal(t, domain.DefaultMemberFeatures(), change.Before)
 			assert.Equal(t, domain.MemberFeatures{Broadcasts: true, Contacts: true}, change.Membership.Features)
@@ -105,7 +105,7 @@ func TestListedMembersCarryTheirFeatures(t *testing.T) {
 	for _, item := range items {
 		byID[item.ID] = item
 	}
-	assert.Equal(t, domain.MemberFeatures{Contacts: true, Templates: true, APIKeys: true},
+	assert.Equal(t, domain.MemberFeatures{Contacts: true, Templates: true, APIKeys: true, MailClients: true},
 		byID[memberships["member"].ID].Features)
 }
 
@@ -119,7 +119,7 @@ func TestOrganizationViewsReportEffectiveFeatures(t *testing.T) {
 	assert.Equal(t, MemberFeaturesResponse{Contacts: true}, toMemberResponse(member).Features)
 
 	member.Role = domain.OrganizationRoleAdmin
-	all := MemberFeaturesResponse{Broadcasts: true, Contacts: true, Templates: true, APIKeys: true}
+	all := MemberFeaturesResponse{Broadcasts: true, Contacts: true, Templates: true, APIKeys: true, MailClients: true}
 	assert.Equal(t, all, toResponse(member).Features)
 	assert.Equal(t, all, toContextResponse(domain.OrganizationContext{Role: domain.OrganizationRoleOwner}).Features)
 }

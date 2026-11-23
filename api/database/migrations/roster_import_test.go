@@ -48,7 +48,8 @@ func TestRosterImportColumns(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT count(*) FROM information_schema.columns
 		WHERE table_schema = current_schema()
 		  AND ((table_name = 'mailboxes' AND column_name = 'pending_owner_email')
-		    OR (table_name = 'organization_invitations' AND column_name LIKE 'can_use_%'))`).Scan(&columns).Error)
+		    OR (table_name = 'organization_invitations' AND column_name LIKE 'can_use_%'
+		        AND column_name <> 'can_use_mail_clients'))`).Scan(&columns).Error)
 	require.Zero(t, columns)
 	require.NoError(t, invitationStep.Up(db))
 	require.NoError(t, mailboxStep.Up(db))

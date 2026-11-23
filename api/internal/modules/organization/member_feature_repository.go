@@ -62,6 +62,7 @@ func (r *repository) UpdateMemberFeatures(
 			}
 			target.CanUseBroadcasts, target.CanUseContacts = after.Broadcasts, after.Contacts
 			target.CanUseTemplates, target.CanUseAPIKeys = after.Templates, after.APIKeys
+			target.CanUseMailClients = after.MailClients
 			target.UpdatedAt = now
 		}
 		change = &domain.OrganizationMembershipFeatureChange{Membership: target.toDomain(), Before: before}
