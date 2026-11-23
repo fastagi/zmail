@@ -164,7 +164,7 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
       </div>
 
       <Tabs defaultValue={initialTab} className="pt-5">
-        <TabsList className="max-w-full overflow-x-auto">
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="profile">
             <Settings2 aria-hidden="true" />
             {t('tabs.profile')}

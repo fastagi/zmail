@@ -114,6 +114,21 @@ const messages = {
     createDescription: 'Name the key and choose what it can do. The key is shown only once.',
     name: 'Name',
     namePlaceholder: 'For example: deployment automation',
+    purpose: 'What is this key for?',
+    purposes: {
+      send: {
+        label: 'Send mail',
+        description: 'The usual first key: send email from mailboxes you may send from.',
+      },
+      sendRead: {
+        label: 'Send mail and check status',
+        description: 'Also look up sent messages and whether they were delivered.',
+      },
+      custom: {
+        label: 'Custom',
+        description: 'Choose the permissions one by one.',
+      },
+    },
     scopes: 'Permissions',
     scopesHint: 'Give each key only what it needs. You can create more keys later.',
     scopeOptions: {
@@ -134,8 +149,20 @@ const messages = {
         description: 'Read new mail and draft replies in mailboxes that grant this key agent access.',
       },
     },
-    scopeRequired: 'Choose at least one permission.',
-    expiresAt: 'Expiry (optional)',
+    expiresAt: 'Expiry',
+    expiry: {
+      d30: '30 days',
+      d90: '90 days',
+      never: 'Never',
+      custom: 'Custom date',
+      date: 'Expiry date',
+    },
+    errors: {
+      nameRequired: 'Enter a name of up to 100 characters.',
+      scopeRequired: 'Choose at least one permission.',
+      expiryRequired: 'Choose an expiry date.',
+      expiryPast: 'Choose a time in the future.',
+    },
     invalidForm: 'Check the name and expiry.',
     createError: 'The API key could not be created. Try again.',
     createdSuccess: 'API key created',
@@ -147,10 +174,14 @@ const messages = {
     copy: 'Copy key',
     copied: 'API key copied',
     copyError: 'Copy failed. Select the key manually.',
+    secretSaved: 'I have stored this key safely',
+    secretCloseBlocked: 'Copy the key, or confirm you have stored it, before closing.',
     done: 'Done',
     cancel: 'Cancel',
+    revokeLabel: 'Revoke {name}',
     revokeTitle: 'Revoke API key',
-    revokeDescription: 'Revocation cannot be undone. Create a new key first when rotating.',
+    revokeDescription:
+      'Revoke {name} ({prefix})? Code using it stops working at once, and this cannot be undone. Create a new key first when rotating.',
     revokedSuccess: 'API key revoked',
     revokeError: 'The API key could not be revoked. Try again.',
     quickStart: {

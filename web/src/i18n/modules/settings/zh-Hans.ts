@@ -115,6 +115,21 @@ const messages = {
     createDescription: '为密钥命名并选择它能做什么。密钥只显示一次。',
     name: '名称',
     namePlaceholder: '例如：部署自动化',
+    purpose: '这把密钥用来做什么？',
+    purposes: {
+      send: {
+        label: '发信',
+        description: '最常用的第一把密钥：以你有发信权限的邮箱发出邮件。',
+      },
+      sendRead: {
+        label: '发信并查询状态',
+        description: '另外可以查询已发邮件及其是否送达。',
+      },
+      custom: {
+        label: '自定义',
+        description: '逐项选择权限。',
+      },
+    },
     scopes: '权限',
     scopesHint: '只给每把密钥它需要的权限，之后可以再创建其他密钥。',
     scopeOptions: {
@@ -135,8 +150,20 @@ const messages = {
         description: '在授权了此密钥的邮箱中读取新邮件、起草回复。',
       },
     },
-    scopeRequired: '请至少选择一项权限。',
-    expiresAt: '过期时间（可选）',
+    expiresAt: '有效期',
+    expiry: {
+      d30: '30 天',
+      d90: '90 天',
+      never: '不过期',
+      custom: '自定义日期',
+      date: '过期时间',
+    },
+    errors: {
+      nameRequired: '请输入名称，最多 100 个字符。',
+      scopeRequired: '请至少选择一项权限。',
+      expiryRequired: '请选择过期时间。',
+      expiryPast: '请选择一个未来的时间。',
+    },
     invalidForm: '请检查名称和过期时间。',
     createError: 'API 密钥创建失败，请稍后重试。',
     createdSuccess: 'API 密钥已创建',
@@ -148,10 +175,14 @@ const messages = {
     copy: '复制密钥',
     copied: 'API 密钥已复制',
     copyError: '无法复制，请手动选择密钥。',
+    secretSaved: '我已妥善保存这把密钥',
+    secretCloseBlocked: '关闭前请先复制密钥，或确认你已妥善保存。',
     done: '完成',
     cancel: '取消',
+    revokeLabel: '撤销 {name}',
     revokeTitle: '撤销 API 密钥',
-    revokeDescription: '撤销后无法恢复。需要轮换时，请先创建新密钥。',
+    revokeDescription:
+      '确定撤销 {name}（{prefix}）吗？使用它的代码会立即失效，且无法恢复。需要轮换时，请先创建新密钥。',
     revokedSuccess: 'API 密钥已撤销',
     revokeError: 'API 密钥撤销失败，请稍后重试。',
     quickStart: {
