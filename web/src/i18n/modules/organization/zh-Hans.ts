@@ -30,9 +30,8 @@ const messages = {
     invited: '收到了邀请？点邀请邮件里的链接，或在「组织」页用“接受邀请”加入。',
   },
   back: '返回组织列表',
-  contextVerified: '上下文已验证',
   profile: '组织资料',
-  profileDescription: '组织标识不可修改；所有者和管理员可以更新显示名称。',
+  profileDescription: '所有者和管理员可以修改组织名称；组织标识创建后不能更改。',
   tabs: {
     profile: '资料',
     members: '成员',

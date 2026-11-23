@@ -7,7 +7,6 @@ import {
   AlertCircle,
   ArrowLeft,
   Building2,
-  CheckCircle2,
   Mail,
   Gauge,
   RefreshCw,
@@ -161,10 +160,6 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
         </div>
         <div className="flex items-center gap-2">
           <RoleBadge role={context.role} />
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
-            <CheckCircle2 className="size-3.5" aria-hidden="true" />
-            {t('contextVerified')}
-          </span>
         </div>
       </div>
 

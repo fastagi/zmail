@@ -29,10 +29,9 @@ const messages = {
     invited: 'Were you invited? Open the link in your invitation email, or use Accept invitation on the Organizations page.',
   },
   back: 'Back to organizations',
-  contextVerified: 'Context verified',
   profile: 'Organization profile',
   profileDescription:
-    'The slug is immutable. Owners and administrators can update the display name.',
+    'Owners and administrators can rename the organization. Its slug cannot change after creation.',
   tabs: {
     profile: 'Profile',
     members: 'Members',

@@ -49,6 +49,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ROUTES } from '@/constants/routes';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { MemberFeatureToggles } from '@/features/organization/components/member-feature-toggles';
 import { RoleBadge } from '@/features/organization/components/organization-directory';
 import {
@@ -87,6 +88,39 @@ export function OrganizationMembers({
   const router = useRouter();
   const query = useOrganizationMembers(context.organization_id);
   const roleMutation = useUpdateOrganizationMember(context.organization_id);
+  const isMobile = useIsMobile();
+  const roleControl = (member: OrganizationMember) =>
+    canChangeRole(context, member) ? (
+      <Select
+        value={member.role}
+        disabled={
+          roleMutation.isPending &&
+          roleMutation.variables?.memberId === member.id
+        }
+        onValueChange={(role) => {
+          roleMutation.reset();
+          roleMutation.mutate({
+            memberId: member.id,
+            input: { role: role as OrganizationInvitationRole },
+          }, {
+            onSuccess: () => toast.success(t('roleUpdateSuccess')),
+          });
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          aria-label={`${t('changeRole')}: ${member.username}`}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="member">{t('roles.member')}</SelectItem>
+          <SelectItem value="admin">{t('roles.admin')}</SelectItem>
+        </SelectContent>
+      </Select>
+    ) : (
+      <RoleBadge role={member.role} />
+    );
   const featureMutation = useUpdateOrganizationMemberFeatures(context.organization_id);
   const removeMutation = useRemoveOrganizationMember(context.organization_id);
   const transferMutation = useTransferOrganizationOwnership(context.organization_id);
@@ -183,7 +217,7 @@ export function OrganizationMembers({
             <TableHeader>
               <TableRow>
                 <TableHead>{t('member')}</TableHead>
-                <TableHead>{t('role')}</TableHead>
+                {isMobile ? null : <TableHead>{t('role')}</TableHead>}
                 <TableHead className="hidden sm:table-cell">{t('featuresColumn')}</TableHead>
                 <TableHead className="hidden 2xl:table-cell">{t('joinedAt')}</TableHead>
                 <TableHead className="w-14 text-right">
@@ -216,11 +250,14 @@ export function OrganizationMembers({
                             <span className="text-xs text-muted-foreground">{t('you')}</span>
                           ) : null}
                         </div>
-                        <p className="truncate text-xs text-muted-foreground">
-                          @{member.username}
-                        </p>
+                        {isGeneratedUsername(member.username) ? null : (
+                          <p className="truncate text-xs text-muted-foreground">
+                            @{member.username}
+                          </p>
+                        )}
                       </div>
                     </div>
+                    {isMobile ? <div className="mt-2">{roleControl(member)}</div> : null}
                     <MemberFeatureToggles
                       context={context}
                       member={member}
@@ -228,39 +265,7 @@ export function OrganizationMembers({
                       className="mt-2 sm:hidden"
                     />
                   </TableCell>
-                  <TableCell>
-                    {canChangeRole(context, member) ? (
-                      <Select
-                        value={member.role}
-                        disabled={
-                          roleMutation.isPending &&
-                          roleMutation.variables?.memberId === member.id
-                        }
-                        onValueChange={(role) => {
-                          roleMutation.reset();
-                          roleMutation.mutate({
-                            memberId: member.id,
-                            input: { role: role as OrganizationInvitationRole },
-                          }, {
-                            onSuccess: () => toast.success(t('roleUpdateSuccess')),
-                          });
-                        }}
-                      >
-                        <SelectTrigger
-                          size="sm"
-                          aria-label={`${t('changeRole')}: ${member.username}`}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="member">{t('roles.member')}</SelectItem>
-                          <SelectItem value="admin">{t('roles.admin')}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <RoleBadge role={member.role} />
-                    )}
-                  </TableCell>
+                  {isMobile ? null : <TableCell>{roleControl(member)}</TableCell>}
                   <TableCell className="hidden sm:table-cell">
                     <MemberFeatureToggles
                       context={context}
@@ -463,4 +468,10 @@ function MemberTableSkeleton() {
       <Skeleton className="h-12 w-full" />
     </div>
   );
+}
+
+// Accounts created without a chosen username get a generated one such as user_0b9c…; showing it
+// tells a colleague nothing.
+function isGeneratedUsername(username: string): boolean {
+  return /^user_[0-9a-f]{16,}$/u.test(username);
 }
