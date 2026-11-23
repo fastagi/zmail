@@ -11,7 +11,7 @@ selected; optional starters are enabled with `OPTIONAL_STARTERS`.
 | Starter | Mode | Requires | Migrations | Summary |
 |---|---|---|---:|---|
 | `audit` | default | - | 4 | Write-request audit logging, history reads, and bounded retention. |
-| `apikey` | default | - | 2 | Personal API keys with one-time secrets, revocation, and request authentication. |
+| `apikey` | default | - | 3 | Personal API keys with one-time secrets, revocation, and request authentication. |
 | `user` | default | - | 8 | Registration with email codes, sign-in, revocable sessions, profile, and password reset. |
 | `organization` | optional | - | 6 | Organization ownership, membership, invitations, active context, and ownership transfer. |
 | `permission` | optional | `organization` | 1 | Organization-scoped access roles, exact permission keys, member assignments, and fail-closed checks. |
