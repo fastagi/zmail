@@ -31,7 +31,14 @@ and one noisy sender would use up the per-sender budgets (120 refused requests a
 Graph validation handshakes a minute) that everyone else shares.
 
 Run the worker with a short idle wait so a due connection is picked up quickly, for example
-`/app/fastbuild mail:external:sync --batch=20 --poll=5s`. The worker also subscribes and renews:
+`/app/fastbuild mail:external:sync --batch=20`: while `EXTERNAL_MAIL_PUSH_ENABLED=true` and no
+`--poll` is given, the worker waits two seconds between idle passes (30 seconds otherwise). The
+notification route only records a notification; the worker's next pass makes the connection due, so
+the delay from notification to sync start is at most the idle wait plus the coalescing window (about
+12 seconds by default), well inside the 30-second target. A longer `--poll` lengthens it one for one.
+The route never waits for a database lock: when a sync is saving the subscription at that moment it
+answers `503` with `Retry-After: 1` at once and the provider delivers the notification again. The
+worker also subscribes and renews:
 
 - A subscription is created after a connection's first complete sync.
 - It is renewed when half its life has passed.
@@ -158,10 +165,24 @@ requested for 70 hours and renewed after 35.
   - **Accounts in use again.** A record is dropped unperformed when the account is in use again:
     bound again, a connection active again, a shared Gmail watch, or the same account bound with its
     own grant anywhere else.
-  - **Lifetime.** Records survive the purge of copies and go with the organization. A record still
-    undone after 24 hours is deleted with its sealed grant by the mail worker's purge pass
-    (`external_mail.provider_release_expired`), even with every connector off, and the grant then
-    lapses at the provider.
+  - **Lifetime.** Records survive the purge of copies; deleting the organization deletes them undone.
+    A record still undone after 24 hours is deleted with its sealed grant by the mail worker's purge
+    pass (`external_mail.provider_release_expired`), even with every connector off. A Gmail grant
+    that was never handed back does not lapse on its own: the member should remove Zmail's access in
+    their Google account (myaccount.google.com, Security, third-party access). A Google account bound
+    by several connections, in any organization, keeps Zmail's access until its last binding goes,
+    because revoking one token at Google revokes the whole grant.
+  - **Postponed.** A record waits while the member has a sign-in pending for the provider (anyone in
+    the organization for a shared connection), and its conditions are checked again right before
+    the hand-back, after the slower subscription stop. The record keeps `owner_scope` (`member` with
+    `owner_user_id`, or `shared`) from the moment it is made, so the rule holds after the purge;
+    a deleted member (`owner_user_id` null) postpones nothing. Records made before
+    `2026_12_17_090000_add_external_mail_release_owner` whose connection was already gone stay
+    `unknown` and wait for anyone's sign-in until they expire.
+    Assigning or restoring a tenant mailbox deletes the organization's stop-only records for that
+    address; a record that still owes a member's own grant its hand-back is kept.
+  - **Follow-up.** The connection list does not yet show a member that a hand-back was never
+    delivered; there is no existing field for it.
 - **Revoking.**
   - Every revocation stops the subscription in Zmail in its own transaction.
   - Unbinding by the member, a forced disconnect, a member's departure, and deleting the mailbox also

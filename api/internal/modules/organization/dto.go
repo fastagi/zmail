@@ -39,6 +39,51 @@ type UpdateOrganizationMemberRequest struct {
 	Role domain.OrganizationRole `json:"role" binding:"required"`
 }
 
+// UpdateOrganizationMemberFeaturesRequest changes the named feature grants of one member; a
+// feature left out keeps its value.
+type UpdateOrganizationMemberFeaturesRequest struct {
+	Broadcasts *bool `json:"broadcasts"`
+	Contacts   *bool `json:"contacts"`
+	Templates  *bool `json:"templates"`
+	APIKeys    *bool `json:"api_keys"`
+}
+
+func (r *UpdateOrganizationMemberFeaturesRequest) patch() domain.MemberFeaturePatch {
+	if r == nil {
+		return domain.MemberFeaturePatch{}
+	}
+	return domain.MemberFeaturePatch{
+		Broadcasts: r.Broadcasts, Contacts: r.Contacts, Templates: r.Templates, APIKeys: r.APIKeys,
+	}
+}
+
+func (r *UpdateOrganizationMemberFeaturesRequest) validationErrors() map[string][]string {
+	if !r.patch().IsEmpty() {
+		return nil
+	}
+	return map[string][]string{
+		"features": {"name at least one of broadcasts, contacts, templates, or api_keys"},
+	}
+}
+
+// MemberFeaturesResponse is what a membership may use. Owners and admins report every feature.
+type MemberFeaturesResponse struct {
+	Broadcasts bool `json:"broadcasts"`
+	Contacts   bool `json:"contacts"`
+	Templates  bool `json:"templates"`
+	APIKeys    bool `json:"api_keys"`
+}
+
+func toMemberFeaturesResponse(role domain.OrganizationRole, stored domain.MemberFeatures) MemberFeaturesResponse {
+	effective := role.EffectiveFeatures(stored)
+	return MemberFeaturesResponse{
+		Broadcasts: effective.Broadcasts,
+		Contacts:   effective.Contacts,
+		Templates:  effective.Templates,
+		APIKeys:    effective.APIKeys,
+	}
+}
+
 // TransferOrganizationOwnershipRequest selects an existing member as the new owner.
 type TransferOrganizationOwnershipRequest struct {
 	NewOwnerMemberID uint `json:"new_owner_member_id" binding:"required"`
@@ -50,6 +95,7 @@ type OrganizationResponse struct {
 	Name      string                  `json:"name"`
 	Slug      string                  `json:"slug"`
 	Role      domain.OrganizationRole `json:"role"`
+	Features  MemberFeaturesResponse  `json:"features"`
 	CreatedAt time.Time               `json:"created_at"`
 	UpdatedAt time.Time               `json:"updated_at"`
 }
@@ -62,6 +108,7 @@ type OrganizationContextResponse struct {
 	MembershipID     uint                    `json:"membership_id"`
 	UserID           uint                    `json:"user_id"`
 	Role             domain.OrganizationRole `json:"role"`
+	Features         MemberFeaturesResponse  `json:"features"`
 }
 
 // OrganizationMemberResponse is the PII-minimized public member view.
@@ -72,6 +119,7 @@ type OrganizationMemberResponse struct {
 	Nickname  string                  `json:"nickname,omitempty"`
 	Avatar    string                  `json:"avatar,omitempty"`
 	Role      domain.OrganizationRole `json:"role"`
+	Features  MemberFeaturesResponse  `json:"features"`
 	JoinedAt  time.Time               `json:"joined_at"`
 	UpdatedAt time.Time               `json:"updated_at"`
 }
@@ -110,12 +158,17 @@ type OrganizationInvitationResponse struct {
 type CreateOrganizationInvitationResponse struct {
 	Invitation      *OrganizationInvitationResponse `json:"invitation"`
 	EmailSendStatus InvitationEmailSendStatus       `json:"email_send_status"`
+	// InvitationURL is shown once, to the manager whose call minted its token; omitted otherwise.
+	InvitationURL string `json:"invitation_url,omitempty"`
 }
 
 // OrganizationInvitationResult is the service result before transport mapping.
 type OrganizationInvitationResult struct {
 	Invitation      *domain.OrganizationInvitation
 	EmailSendStatus InvitationEmailSendStatus
+	// InvitationURL is the accept link for a token minted by this call; empty when no token was
+	// minted or no console origin is configured. It is a bearer secret: never log or store it.
+	InvitationURL string
 }
 
 func (r *CreateOrganizationRequest) validationErrors() map[string][]string {
@@ -208,6 +261,7 @@ func toResponse(membership *domain.OrganizationMembership) *OrganizationResponse
 		Name:      organization.Name,
 		Slug:      organization.Slug,
 		Role:      membership.Role,
+		Features:  toMemberFeaturesResponse(membership.Role, membership.Features),
 		CreatedAt: organization.CreatedAt,
 		UpdatedAt: organization.UpdatedAt,
 	}
@@ -221,6 +275,7 @@ func toContextResponse(resolved domain.OrganizationContext) *OrganizationContext
 		MembershipID:     resolved.MembershipID,
 		UserID:           resolved.UserID,
 		Role:             resolved.Role,
+		Features:         toMemberFeaturesResponse(resolved.Role, resolved.Features),
 	}
 }
 
@@ -232,6 +287,7 @@ func toMemberResponse(membership *domain.OrganizationMembership) *OrganizationMe
 		ID:        membership.ID,
 		UserID:    membership.UserID,
 		Role:      membership.Role,
+		Features:  toMemberFeaturesResponse(membership.Role, membership.Features),
 		JoinedAt:  membership.CreatedAt,
 		UpdatedAt: membership.UpdatedAt,
 	}
@@ -258,6 +314,14 @@ func toInvitationResponse(invitation *domain.OrganizationInvitation, now time.Ti
 		EmailAttemptedAt: invitation.EmailAttemptedAt,
 		CreatedAt:        invitation.CreatedAt,
 		UpdatedAt:        invitation.UpdatedAt,
+	}
+}
+
+func toCreateInvitationResponse(result *OrganizationInvitationResult) *CreateOrganizationInvitationResponse {
+	return &CreateOrganizationInvitationResponse{
+		Invitation:      toInvitationResponse(result.Invitation, time.Now().UTC()),
+		EmailSendStatus: result.EmailSendStatus,
+		InvitationURL:   result.InvitationURL,
 	}
 }
 

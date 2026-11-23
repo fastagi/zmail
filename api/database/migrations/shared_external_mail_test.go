@@ -15,6 +15,7 @@ func TestSharedExternalMailUpDown(t *testing.T) {
 	db, exec := externalMailFixture(t)
 	migrated := dumpSchema(t, db)
 
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
@@ -31,6 +32,7 @@ func TestSharedExternalMailUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	require.NoError(t, (&addExternalMailPush{}).Up(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
+	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 	var row struct {
 		Shared        bool

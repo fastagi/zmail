@@ -5,7 +5,8 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
-import type { Organization } from '@/features/organization/types';
+import type { MemberFeatures, Organization } from '@/features/organization/types';
+import { effectiveMemberFeatures } from '@/features/organization/utils/member-features';
 import { useT } from '@/i18n';
 
 import {
@@ -25,6 +26,8 @@ export interface MailOrganization {
   name: string;
   /** Owners and admins create and delete mailboxes; the API remains the authority. */
   canManage: boolean;
+  /** The features this member may use here; owners and admins have every one. */
+  features: MemberFeatures;
 }
 
 export type MailOrganizationScope =
@@ -77,9 +80,9 @@ function useHydrated(): boolean {
 }
 
 /** Which organization the `org` parameter, or else the session's last choice, names. */
-function useOrganizationChoice() {
+function useOrganizationChoice(enabled = true) {
   const searchParams = useSearchParams();
-  const organizations = useOrganizations();
+  const organizations = useOrganizations(enabled);
   const hydrated = useHydrated();
 
   const items = organizations.data?.items;
@@ -97,9 +100,18 @@ function useOrganizationChoice() {
  * never changes the URL or the stored choice, so pages outside the mail area can use it. Undefined
  * while loading or when the user belongs to no organization.
  */
-export function useChosenMailOrganization(): Organization | undefined {
-  const { hydrated, selected } = useOrganizationChoice();
-  return hydrated ? selected : undefined;
+export function useChosenMailOrganization(enabled = true): Organization | undefined {
+  const { hydrated, selected } = useOrganizationChoice(enabled);
+  return hydrated && enabled ? selected : undefined;
+}
+
+/**
+ * The features the member may use in the organization the console acts in, or undefined while
+ * that is not known yet (loading, or no organization). Used to hide navigation entries.
+ */
+export function useChosenMemberFeatures(enabled = true): MemberFeatures | undefined {
+  const organization = useChosenMailOrganization(enabled);
+  return organization ? effectiveMemberFeatures(organization.role, organization.features) : undefined;
 }
 
 /**
@@ -147,6 +159,7 @@ export function useMailOrganization(): MailOrganizationScope {
       id: selected.id,
       name: selected.name,
       canManage: selected.role === 'owner' || selected.role === 'admin',
+      features: effectiveMemberFeatures(selected.role, selected.features),
     },
     organizations: items,
     select: organizationId => {

@@ -612,3 +612,28 @@ func bindValidatedQuery(c *gin.Context, obj any) bool {
 	}
 	return true
 }
+
+// requireFeature lets a request through when the verified membership may use at least one of the
+// features: owners and admins always may, a member needs the grant. It runs after the
+// organization_context middleware.
+func requireFeature(features ...domain.MemberFeature) gin.HandlerFunc {
+	if len(features) == 0 {
+		panic("mailbox: requireFeature needs at least one feature")
+	}
+	return func(c *gin.Context) {
+		viewer, ok := domain.OrganizationContextFromContext(c.Request.Context())
+		if !ok {
+			response.AbortWithCode(c, http.StatusBadRequest, domain.CodeOrganizationContextRequired,
+				"Organization context required")
+			return
+		}
+		for _, feature := range features {
+			if viewer.CanUse(feature) {
+				c.Next()
+				return
+			}
+		}
+		response.AbortWithCode(c, http.StatusForbidden, domain.CodeOrganizationFeatureNotGranted,
+			"An organization owner or admin has not granted you this feature")
+	}
+}

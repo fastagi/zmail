@@ -59,6 +59,8 @@ var (
 	ErrOrganizationInvitationEmailMismatch        = errors.New("organization invitation belongs to another account")
 	ErrOrganizationInvitationAlreadyPending       = errors.New("organization invitation is already pending")
 	ErrOrganizationMemberAlreadyExists            = errors.New("organization member already exists")
+	ErrOrganizationFeatureNotGranted              = errors.New("organization feature is not granted to this member")
+	ErrOrganizationMemberFeaturesFixed            = errors.New("owners and admins always have every feature")
 
 	// Notification errors
 	ErrNotificationNotFound            = errors.New("notification not found")

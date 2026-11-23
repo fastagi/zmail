@@ -47,6 +47,7 @@ import { useMailOrganizationId } from '@/features/mailbox/components/mail-organi
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
+import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
 import {
   MAIL_ATTACHMENTS_MAX_BYTES,
@@ -141,7 +142,12 @@ export function ComposeDialog({
   const send = useSendMailMessage(organizationId, from.id);
   // Replies and forwards quote an existing message, so they are always written by hand.
   const isReplyOrForward = draft.reply || draft.mode === 'reply' || draft.mode === 'forward';
-  const templates = useMailTemplates(isReplyOrForward ? 0 : organizationId, 'standard');
+  // Writing from a template needs the templates grant; without it the picker stays hidden.
+  const canUseTemplates = useChosenMemberFeatures()?.templates ?? false;
+  const templates = useMailTemplates(
+    isReplyOrForward || !canUseTemplates ? 0 : organizationId,
+    'standard'
+  );
   // New messages are also kept by the API as drafts, so they show in the list on every device.
   const saveDraft = useSaveMailDraft(organizationId);
   const removeDraft = useDeleteMailDraft(organizationId).mutateAsync;

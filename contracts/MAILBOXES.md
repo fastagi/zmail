@@ -1099,6 +1099,13 @@ backfill keeps its pace), and the per-provider budget. Polling stays the safety 
 
 When a notification arrives:
 
+- The route records it on the subscription only, without waiting for any lock and without touching
+  the connection. The `mail:external:sync` worker's next pass then makes the connection due, so the
+  delay from a notification to the start of its sync is at most the worker's idle wait (two seconds
+  by default while push is on) plus the coalescing window.
+- If a sync is saving the subscription at that very moment, the route records the notification on
+  the other subscriptions it names and answers `503 COMMON.SERVICE_UNAVAILABLE` with `Retry-After: 1`
+  at once, rather than waiting or dropping it: Pub/Sub and Graph deliver it again a moment later.
 - If a worker is fetching the connection, the connection syncs again once that fetch ends. This
   holds even when the fetch was itself answering an earlier notification.
 - If the connection is backing off, the notification waits for the backoff.
@@ -1142,15 +1149,28 @@ When a notification arrives:
     revokes a provider grant (Gmail), never for a tenant mailbox, an app password, or a release that
     only stops a push subscription. The copy is never readable through the API and never logged, and
     is kept only until the release succeeds or for at most 24 hours; the mail worker's purge pass,
-    which runs whether or not a connector is enabled, deletes it then, and the grant lapses at the
-    provider.
+    which runs whether or not a connector is enabled, deletes it then. A Gmail grant that could not be
+    handed back by then is not revoked by Zmail and does not lapse on its own: the member removes
+    Zmail's access in their Google account to end it.
+  - Deleting an organization deletes its pending releases undone. Binding an account again deletes
+    the organization's pending releases of that address. Assigning or restoring a tenant mailbox
+    deletes only those that stop a subscription: a member's own grant is still handed back, since the
+    tenant reads with its own credential.
+  - A release is also postponed, not dropped, while the member (or, for a shared connection, anyone
+    in the organization) has a sign-in pending for the provider, and everything that would make a
+    hand-back harmful is checked again right before the hand-back call. The release records, when
+    it is made, whose connection it was, so the same rule applies after the copies were purged and
+    the connection is gone: another member's sign-in never postpones the release of a member's own
+    connection, and once that member's user account is deleted no sign-in postpones it.
   - A recorded release never touches an account that is in use again: binding the same account again
     in the organization deletes it; a release whose connection is active again is dropped unperformed;
     a watch is stopped only while no live connection watches the same Gmail address; and a grant is
     handed back only while no live connection, in any organization, reads the same account with a
-    grant of its own, since at Google revoking one token revokes the user's whole grant.
+    grant of its own, since at Google revoking one token revokes the user's whole grant. A Google
+    account bound by several connections therefore keeps Zmail's access until its last binding goes.
   - A revoked tenant, a connection that needs reconnecting, and the retention purge stop it in Zmail
-    only. Their provider subscription lapses at its expiry: at most 7 days for Gmail, 70 hours for
+    only (the worker does so at most once a minute; the connection's notifications are ignored from
+    the moment it stops being `active`). Their provider subscription lapses at its expiry: at most 7 days for Gmail, 70 hours for
     Outlook.
   - A subscription a sync created while the connection was being revoked is stopped again at the
     provider, unless another live connection of the same account (by Gmail's primary address)
@@ -2147,9 +2167,11 @@ their metadata; they cannot download files.
 ### Templates
 
 A template is reusable content of an organization: a `name`, a `subject`, and an `html` and `text`
-body, at least one of which is not empty. Every member reads the organization's templates and
-edits its standard ones (transactional templates below need an owner or admin); an organization
-keeps at most 200, and names are unique within it.
+body, at least one of which is not empty. A member with the `templates` grant edits the
+organization's standard templates (transactional templates below need an owner or admin); reading
+templates needs the `templates`, `broadcasts`, or `api_keys` grant (see
+[Member Feature Grants](#member-feature-grants)). An organization keeps at most 200, and names are
+unique within it.
 
 Placeholders may appear in the subject and both bodies:
 
@@ -2233,7 +2255,8 @@ kept and sends from it are refused.
 
 A contact is one address an organization sends broadcasts to: `email`, `first_name`, `last_name`,
 up to 50 string `properties`, a `status`, and the lists it belongs to. An organization keeps at most
-100000 contacts, one per address. Every member reads and edits them.
+100000 contacts, one per address. A member with the `contacts` grant reads and edits them; the
+`broadcasts` grant alone reads only the list names (`GET /v1/mail-contact-lists`).
 
 | Field | Rule |
 |---|---|
@@ -2305,12 +2328,15 @@ message per contact. Access follows the sender mailbox:
   `404 MAILBOX.BROADCAST_NOT_FOUND`, and with some access but not `view` it is `403`.
 - Creating, editing, and deleting need `send` on the sender mailbox; editing needs it on the stored
   and on the new sender. A new sender without any access is `404 MAILBOX.NOT_FOUND`.
-- Only owners and admins send, cancel, pause, and resume broadcasts; a member who tries is
-  `403 PERMISSION.DENIED`. Sending and resuming also need `send` on the sender mailbox at that
-  call; the worker does not check access again, so a broadcast already sending keeps sending when
-  that access is later removed. Cancelling and pausing need no access to the sender mailbox, so an
-  admin can always stop mail; without `view` on it (or for a sealed broadcast) the answer is
-  `204` with no body, so nothing about the broadcast is revealed.
+- Every broadcast route needs the `broadcasts` grant (owners and admins always have it); without it
+  the answer is `403 ORGANIZATION.FEATURE_NOT_GRANTED`.
+- Owners, admins, and members with the grant send, cancel, pause, and resume broadcasts. Sending
+  and resuming also need `send` on the sender mailbox at that call; the worker does not check
+  access again, so a broadcast already sending keeps sending when that access is later removed.
+  A member cancels or pauses only a broadcast it could send. Owners and admins need no access to
+  the sender mailbox to cancel or pause, so an admin can always stop mail; without `view` on it
+  (or for a sealed broadcast) the answer is `204` with no body, so nothing about the broadcast is
+  revealed.
 
 Broadcasts need unsubscribe links, so they are available only when the API has
 `MAILBOX_INBOUND_SECRET` (the links are signed with a key derived from it) and `MAILBOX_PUBLIC_URL`
@@ -2692,14 +2718,32 @@ message, returns it with nothing masked and `secrets_masked` `false`, answers
 mailbox, and message ids. API keys cannot call it. Anything that hands inbound mail to an AI
 model must use the masked form.
 
+### Member Feature Grants
+
+An organization grants each `member` four features (see
+[`ORGANIZATIONS.md`](ORGANIZATIONS.md#member-feature-grants)); owners and admins always have all of
+them. A route that needs a feature the active membership lacks returns
+`403 ORGANIZATION.FEATURE_NOT_GRANTED` before anything else is checked.
+
+| Feature | Routes |
+|---|---|
+| `broadcasts` | Every `/v1/mail-broadcasts` route |
+| `contacts` | Every `/v1/mail-contacts` route, `POST /v1/mail-contact-imports`, and writes to `/v1/mail-contact-lists` |
+| `contacts` or `broadcasts` | `GET /v1/mail-contact-lists` |
+| `templates` | `POST`, `PUT`, and `DELETE` on `/v1/mail-templates`, and `POST /v1/mail-templates/:template_id/tests` |
+| `templates`, `broadcasts`, or `api_keys` | `GET /v1/mail-templates`, `GET /v1/mail-templates/:template_id`, `POST /v1/mail-template-previews` |
+| `api_keys` | Every route authenticated by `X-API-Key` under [Programmatic Sending](#programmatic-sending), [Agent Grants](#agent-grants), and [Transactional Mail](#transactional-mail) |
+
 ## Programmatic Sending
 
 Backend services send with an API key instead of a browser session. Create the key with
 `POST /v1/api-keys` (see [`API_KEYS.md`](API_KEYS.md)) and pass it as `X-API-Key`, together with
 the `Organization-Id` header. A key belongs to a user, and it acts with that user's current
 membership of the named organization: the same header errors apply, and removing the user from the
-organization stops the key from working there on the next request. Keys owned by an organization
-are not defined.
+organization stops the key from working there on the next request. Every route below also needs
+the membership's `api_keys` grant (owners and admins always have it): a member's key without it is
+`403 ORGANIZATION.FEATURE_NOT_GRANTED` in that organization, though the key itself stays valid.
+Keys owned by an organization are not defined.
 
 | Route | Required scope |
 |---|---|

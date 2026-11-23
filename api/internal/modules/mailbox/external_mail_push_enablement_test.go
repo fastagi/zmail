@@ -37,6 +37,7 @@ func (f *externalFixture) notifyAddress(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("notify: %v", err)
 	}
+	f.promote(t)
 }
 
 // TestExternalMailPushHandshakesSurviveJunk: a sender that used up its junk budget still completes

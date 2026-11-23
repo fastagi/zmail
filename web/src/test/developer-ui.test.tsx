@@ -416,6 +416,11 @@ describe('developer quick start and send log', () => {
     state.domains.data = [domain({ transactional_enabled: false })];
     const view = renderConsole();
     expect(screen.getByText('Transactional mail is not enabled')).toBeInTheDocument();
+    // Plain sending with an API key still works, so the empty state points there.
+    expect(screen.getByRole('link', { name: 'Send with an API key' })).toHaveAttribute(
+      'href',
+      '/console/settings?tab=api'
+    );
     expect(screen.queryByRole('tablist')).toBeNull();
     expect(developer.log).not.toHaveBeenCalled();
     view.unmount();

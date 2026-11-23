@@ -170,6 +170,8 @@ describe('developer limits and protection tab', () => {
   });
 });
 
+const allFeatures = { broadcasts: true, contacts: true, templates: true, api_keys: true };
+
 function renderTab({ canManage }: { canManage: boolean }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -178,7 +180,7 @@ function renderTab({ canManage }: { canManage: boolean }) {
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
         <LimitsTab
-          organization={{ id: 1, name: 'Acme', canManage }}
+          organization={{ id: 1, name: 'Acme', canManage, features: allFeatures }}
           domains={[domain({ domain: 'mail.example.com', kind: 'shared' })]}
         />
       </NextIntlClientProvider>

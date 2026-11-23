@@ -24,6 +24,7 @@ type Service interface {
 	Update(ctx context.Context, userID, organizationID uint, req *UpdateOrganizationRequest) (*domain.OrganizationMembership, error)
 	ListMembers(ctx context.Context, userID, organizationID uint, page, pageSize int) ([]*domain.OrganizationMembership, int64, error)
 	ChangeMemberRole(ctx context.Context, userID, organizationID, memberID uint, req *UpdateOrganizationMemberRequest) (*domain.OrganizationMembership, error)
+	UpdateMemberFeatures(ctx context.Context, userID, organizationID, memberID uint, req *UpdateOrganizationMemberFeaturesRequest) (*domain.OrganizationMembership, error)
 	RemoveMember(ctx context.Context, userID, organizationID, memberID uint) error
 	TransferOwnership(ctx context.Context, userID, organizationID uint, req *TransferOrganizationOwnershipRequest) (*domain.OrganizationOwnershipTransfer, error)
 	Invite(ctx context.Context, userID, organizationID uint, req *CreateOrganizationInvitationRequest) (*OrganizationInvitationResult, error)
@@ -48,7 +49,9 @@ type service struct {
 	events MembershipEventPublisher
 	// administration serves operator tooling; nil when repo does not implement it.
 	administration administrationStore
-	now            func() time.Time
+	// recordAudit enriches the request's audit entry; tests replace it to inspect the metadata.
+	recordAudit func(context.Context, auditstarter.Change)
+	now         func() time.Time
 }
 
 var (
@@ -70,6 +73,7 @@ func NewService(
 		if invitationPolicy.TTL > 0 {
 			fallback.TTL = invitationPolicy.TTL
 		}
+		fallback.PublicURL = invitationPolicy.PublicURL
 		invitationPolicy = fallback
 	}
 	var administration administrationStore
@@ -83,6 +87,7 @@ func NewService(
 		invitationMailer: invitationMailer,
 		invitationPolicy: invitationPolicy,
 		events:           events,
+		recordAudit:      auditstarter.RecordChange,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},

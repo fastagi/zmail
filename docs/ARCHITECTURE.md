@@ -113,8 +113,10 @@ do not replace the allowlist with a catch-all proxy. The optional organization f
 with `NEXT_PUBLIC_OPTIONAL_FEATURES=organization`, derives the active organization from
 `/console/organizations/:id`, and forwards `Organization-Id` to context-scoped operations. Explicit
 member, invitation, ownership-transfer, and token-acceptance handlers map to fixed upstream paths;
-the invitation token exists only in a same-origin POST body. The feature does not add selected
-organization or invitation-secret state to Zustand, browser storage, cookies, or URLs.
+the invitation token exists only in a same-origin POST body, and the one-time invitation link a
+create or resend returns to its manager lives only in that confirmation's component state. The
+feature does not add selected organization or invitation-secret state to Zustand, browser storage,
+cookies, or URLs.
 
 The dependent `permission` starter is selected with `organization,permission` in the API and
 Next.js Web shell. Its

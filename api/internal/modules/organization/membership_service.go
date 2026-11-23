@@ -55,6 +55,46 @@ func (s *service) ChangeMemberRole(
 	return change.Membership, nil
 }
 
+func (s *service) UpdateMemberFeatures(
+	ctx context.Context,
+	userID, organizationID, memberID uint,
+	req *UpdateOrganizationMemberFeaturesRequest,
+) (*domain.OrganizationMembership, error) {
+	if userID == 0 || organizationID == 0 || memberID == 0 || req == nil || len(req.validationErrors()) > 0 {
+		return nil, domain.ErrInvalidInput
+	}
+
+	change, err := s.repo.UpdateMemberFeatures(ctx, organizationID, userID, memberID, req.patch(), s.now())
+	if err != nil {
+		return nil, fmt.Errorf("update organization member features: %w", err)
+	}
+	if change == nil || change.Membership == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	after := change.Membership.Features
+	if after != change.Before {
+		changes := make(map[string]domain.AuditValueChange)
+		for _, feature := range domain.MemberFeatureCatalog() {
+			if change.Before.Has(feature) != after.Has(feature) {
+				changes[string(feature)] = domain.AuditValueChange{Before: change.Before.Has(feature), After: after.Has(feature)}
+			}
+		}
+		auditstarter.RecordChange(ctx, auditstarter.Change{
+			Action:     "change_features",
+			Resource:   "organization_members",
+			TargetType: "organization_membership",
+			TargetID:   strconv.FormatUint(uint64(change.Membership.ID), 10),
+			Result:     domain.AuditResultSuccess,
+			Changes:    changes,
+			Metadata: map[string]any{
+				"organization_id": organizationID,
+				"user_id":         change.Membership.UserID,
+			},
+		})
+	}
+	return change.Membership, nil
+}
+
 func (s *service) RemoveMember(ctx context.Context, userID, organizationID, memberID uint) error {
 	if userID == 0 || organizationID == 0 || memberID == 0 {
 		return domain.ErrInvalidInput

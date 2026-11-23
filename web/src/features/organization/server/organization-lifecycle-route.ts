@@ -17,6 +17,7 @@ import {
   acceptOrganizationInvitationSchema,
   createOrganizationInvitationSchema,
   transferOrganizationOwnershipSchema,
+  updateOrganizationMemberFeaturesSchema,
   updateOrganizationMemberSchema,
 } from '@/features/organization/schemas';
 import { mockOrganizationStore } from './mock-organization-store';
@@ -97,6 +98,56 @@ export async function updateOrganizationMemberRoute(
   }
 
   const result = mockOrganizationStore.changeMemberRole(
+    authentication.user,
+    ids.organizationId,
+    ids.memberId,
+    parsed.data
+  );
+  return typeof result === 'string'
+    ? mockOrganizationErrorResponse(result)
+    : apiSuccessResponse(result, { headers: noStoreHeaders() });
+}
+
+export async function updateOrganizationMemberFeaturesRoute(
+  request: Request,
+  rawOrganizationId: string,
+  rawMemberId: string
+): Promise<NextResponse> {
+  const resolution = resolveOrganizationRoute();
+  if (!resolution.available) return resolution.response;
+  const guard = guardSameOriginMutation(request);
+  if (guard) return guard;
+  const authentication = await authenticateOrganizationBackend(resolution.backend);
+  if (!authentication.authenticated) return authentication.response;
+  const ids = memberRouteIds(rawOrganizationId, rawMemberId);
+  if (!ids) return mockOrganizationErrorResponse('member_not_found');
+
+  const payload = await readJsonBody(request);
+  if (!payload.ok) return apiJsonBodyErrorResponse(payload.error);
+  const parsed = updateOrganizationMemberFeaturesSchema.safeParse(payload.data);
+  if (!parsed.success) {
+    return apiValidationErrorResponse(
+      'Invalid organization member features payload',
+      parsed.error
+    );
+  }
+
+  if (authentication.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PATCH',
+      path: `organizations/${ids.organizationId}/members/${ids.memberId}/features`,
+      accessToken: authentication.accessToken,
+      body: parsed.data,
+      fieldMap: {
+        broadcasts: 'broadcasts',
+        contacts: 'contacts',
+        templates: 'templates',
+        api_keys: 'api_keys',
+      },
+    });
+  }
+
+  const result = mockOrganizationStore.updateMemberFeatures(
     authentication.user,
     ids.organizationId,
     ids.memberId,
@@ -250,7 +301,8 @@ export async function createOrganizationInvitationRoute(
   const result = mockOrganizationStore.invite(
     authentication.user,
     organizationId,
-    parsed.data
+    parsed.data,
+    new URL(request.url).origin
   );
   return typeof result === 'string'
     ? mockOrganizationErrorResponse(result)

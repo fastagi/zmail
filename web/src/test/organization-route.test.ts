@@ -244,7 +244,7 @@ describe('organization browser route boundary', () => {
   it('creates a token-free mock invitation after same-origin and auth guards', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockOwner());
-    const { createOrganizationInvitationRoute } = await import(
+    const { createOrganizationInvitationRoute, listOrganizationInvitationsRoute } = await import(
       '@/features/organization/server/organization-lifecycle-route'
     );
 
@@ -264,7 +264,19 @@ describe('organization browser route boundary', () => {
         email_send_status: 'not_configured',
       },
     });
-    expect(JSON.stringify(body)).not.toContain('oinv_');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    // The one-time link is the only place the new token appears.
+    expect(body.data.invitation_url).toMatch(/^https:\/\/app\.example\.com\/invite#oinv_mock\./);
+    expect(JSON.stringify(body.data.invitation)).not.toContain('oinv_');
+
+    const listed = await listOrganizationInvitationsRoute(
+      request('/api/organizations/1/invitations'),
+      '1'
+    );
+    const listedText = JSON.stringify(await listed.json());
+    expect(listedText).toContain('route.member@example.com');
+    expect(listedText).not.toContain('oinv_');
+    expect(listedText).not.toContain('invitation_url');
   });
 
   it('rejects cross-origin invitation acceptance before reading the bearer token', async () => {
@@ -349,6 +361,83 @@ describe('organization browser route boundary', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ new_owner_member_id: 3 });
   });
 
+  it('changes mock member features after same-origin and auth guards', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockOwner());
+    const { updateOrganizationMemberFeaturesRoute } = await import(
+      '@/features/organization/server/organization-lifecycle-route'
+    );
+
+    const crossOrigin = await updateOrganizationMemberFeaturesRoute(
+      request('/api/organizations/1/members/3/features', {
+        method: 'PATCH',
+        origin: 'https://attacker.example',
+        body: JSON.stringify({ broadcasts: true }),
+      }),
+      '1',
+      '3'
+    );
+    expect(crossOrigin.status).toBe(403);
+    expect(getSessionUser).not.toHaveBeenCalled();
+
+    const empty = await updateOrganizationMemberFeaturesRoute(
+      request('/api/organizations/1/members/3/features', { method: 'PATCH', body: '{}' }),
+      '1',
+      '3'
+    );
+    expect(empty.status).toBe(422);
+
+    const response = await updateOrganizationMemberFeaturesRoute(
+      request('/api/organizations/1/members/3/features', {
+        method: 'PATCH',
+        body: JSON.stringify({ broadcasts: true }),
+      }),
+      '1',
+      '3'
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(await response.json()).toMatchObject({ data: { id: 3, features: { broadcasts: true } } });
+
+    const fixed = await updateOrganizationMemberFeaturesRoute(
+      request('/api/organizations/1/members/2/features', {
+        method: 'PATCH',
+        body: JSON.stringify({ broadcasts: false }),
+      }),
+      '1',
+      '2'
+    );
+    expect(fixed.status).toBe(409);
+    expect(await fixed.json()).toMatchObject({ error_code: 'ORGANIZATION.MEMBER_FEATURES_FIXED' });
+  });
+
+  it('forwards member feature changes through one fixed production path', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: opaqueCredential() });
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ code: 0, message: 'success', data: memberView(3, 'member') })
+    );
+    const { updateOrganizationMemberFeaturesRoute } = await import(
+      '@/features/organization/server/organization-lifecycle-route'
+    );
+
+    const response = await updateOrganizationMemberFeaturesRoute(
+      request('/api/organizations/1/members/3/features', {
+        method: 'PATCH',
+        body: JSON.stringify({ api_keys: true, contacts: false }),
+      }),
+      '1',
+      '3'
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://api.example.com/v1/organizations/1/members/3/features');
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(String(init?.body))).toEqual({ api_keys: true, contacts: false });
+  });
+
   it('resends a mock invitation without rotating it and enforces the cooldown', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockOwner());
@@ -378,6 +467,8 @@ describe('organization browser route boundary', () => {
       invitation: { expires_at: invitation.expires_at, email_send_status: 'not_configured' },
       email_send_status: 'not_configured',
     });
+    // Without a mailer a resend mints no token, so there is no new link to return.
+    expect(firstBody.data).not.toHaveProperty('invitation_url');
     expect(JSON.stringify(firstBody)).not.toContain('oinv_');
 
     const second = await resend();
@@ -477,7 +568,7 @@ function mockOwner() {
   };
 }
 
-function memberView(id: number, role: 'admin' | 'owner') {
+function memberView(id: number, role: 'admin' | 'member' | 'owner') {
   return {
     id,
     user_id: id,

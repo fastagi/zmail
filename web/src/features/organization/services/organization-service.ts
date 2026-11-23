@@ -11,6 +11,7 @@ import request, { ApiError } from '@/http/request';
 import { ClientErrorCode } from '@/http/codes';
 import {
   organizationContextSchema,
+  invitationUrlSchema,
   organizationInvitationCreateResultSchema,
   organizationInvitationPageEnvelopeSchema,
   organizationMemberPageEnvelopeSchema,
@@ -32,6 +33,7 @@ import type {
   OrganizationOwnershipTransfer,
   OrganizationPage,
   TransferOrganizationOwnershipInput,
+  UpdateOrganizationMemberFeaturesInput,
   UpdateOrganizationMemberInput,
   UpdateOrganizationInput,
 } from '@/features/organization/types';
@@ -98,6 +100,18 @@ export const organizationService = {
   ): Promise<OrganizationMember> {
     const value = await request.patch<unknown, UpdateOrganizationMemberInput>(
       `/organizations/${organizationId}/members/${memberId}`,
+      input
+    );
+    return parseOrganizationMemberResponse(value);
+  },
+
+  async updateMemberFeatures(
+    organizationId: number,
+    memberId: number,
+    input: UpdateOrganizationMemberFeaturesInput
+  ): Promise<OrganizationMember> {
+    const value = await request.patch<unknown, UpdateOrganizationMemberFeaturesInput>(
+      `/organizations/${organizationId}/members/${memberId}/features`,
       input
     );
     return parseOrganizationMemberResponse(value);
@@ -243,7 +257,10 @@ export function parseOrganizationInvitationCreateResponse(
   if (!parsed.success) {
     throw invalidResponse();
   }
-  return parsed.data;
+  // The invitation is saved either way: a missing or unusable link only drops the copy action.
+  const { invitation_url: rawUrl, ...result } = parsed.data;
+  const url = invitationUrlSchema.safeParse(rawUrl);
+  return url.success ? { ...result, invitation_url: url.data } : result;
 }
 
 export function parseOrganizationOwnershipTransferResponse(

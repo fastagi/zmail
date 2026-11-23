@@ -165,7 +165,7 @@ describe('organization mail domains', () => {
     const card = screen.getByRole('article', { name: 'news.example.org' });
     expect(within(card).getByTestId('mail-domain-status')).toHaveTextContent('Setting up');
     expect(within(card).getByRole('status')).toHaveTextContent(
-      /setting up receiving, sending, and DMARC/u
+      /writing the records for receiving, sending and DMARC/u
     );
     expect(within(card).queryByRole('table')).toBeNull();
     expect(within(card).getByRole('button', { name: 'Check DNS' })).toBeDisabled();
@@ -191,19 +191,61 @@ describe('organization mail domains', () => {
     ).toHaveAttribute('role', 'alert');
   });
 
-  it('explains when to use each way of connecting a domain (#130)', async () => {
+  it('puts the token-free way first and folds the own-Cloudflare-account way (#130)', async () => {
     renderPage();
 
+    const connect = await screen.findByRole('heading', { name: 'Connect your domain' });
+    expect(screen.getByText(/Works for most domains and needs no token/u)).toBeInTheDocument();
+    const folded = screen
+      .getByText(/DNS already in your own Cloudflare account\? Connect with your account/u, {
+        selector: 'summary',
+      })
+      .closest('details');
+    expect(folded).not.toHaveAttribute('open');
+    // The token-free form comes first in the page.
     expect(
-      await screen.findByRole('heading', { name: 'Option 1: Use your own Cloudflare account' })
-    ).toBeInTheDocument();
+      connect.compareDocumentPosition(folded!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('explains in plain words what each record does', () => {
+    renderPage();
+
+    const card = screen.getByRole('article', { name: 'news.example.org' });
+    const help = within(card).getByRole('list', { name: 'What these records do' });
     expect(
-      screen.getByRole('heading', { name: 'Option 2: Let Zmail set up DNS (no token needed)' })
+      within(help).getByText('Receiving (MX): mail sent to @news.example.org arrives in Zmail.')
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Most domains use option 2, which needs no token/u)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/DNS is already in your own Cloudflare account/u)).toBeInTheDocument();
+    expect(within(help).getByText(/proves mail really comes from your domain/u)).toBeVisible();
+    // Only the purposes this domain has records for: it has no DMARC record.
+    expect(within(help).queryByText(/pretends to be from your domain/u)).toBeNull();
+  });
+
+  it('announces when the name servers go live and when the domain is ready', () => {
+    state.mailDomains.data = [zonePendingDomain()];
+    const view = renderPage();
+    expect(toast.success).not.toHaveBeenCalled();
+
+    state.mailDomains.data = [
+      { ...zonePendingDomain(), zone: { ...pendingZone(), status: 'active' }, setting_up: true },
+    ];
+    view.rerender(pageTree());
+    expect(toast.message).toHaveBeenCalledWith(
+      'The name servers of example.org are live. Zmail is setting up mail now.'
+    );
+
+    state.mailDomains.data = [
+      {
+        ...zonePendingDomain(),
+        zone: { ...pendingZone(), status: 'active' },
+        status: 'verified',
+      },
+    ];
+    view.rerender(pageTree());
+    expect(toast.success).toHaveBeenCalledWith(
+      'example.org is ready. You can create mailboxes on it.',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Create mailbox' }) })
+    );
   });
 
   it("names the server's Cloudflare account, not a token, when a tokenless connect is refused (#130)", async () => {
@@ -489,9 +531,19 @@ describe('organization mail domains', () => {
     const guide = (name: string) =>
       within(card).getByText(name, { selector: 'summary' }).closest('details');
     expect(guide('Alibaba Cloud')).toHaveAttribute('open');
-    for (const name of ['Tencent Cloud DNSPod', 'Huawei Cloud', 'GoDaddy', 'Namecheap']) {
+    for (const name of [
+      'Tencent Cloud DNSPod',
+      'Huawei Cloud',
+      'GoDaddy',
+      'Namecheap',
+      'Cloudflare',
+      'Other registrars',
+    ]) {
       expect(guide(name)).not.toHaveAttribute('open');
     }
+    const next = within(card).getByRole('list', { name: 'What happens next' });
+    expect(within(next).getByText(/at most 48/u)).toBeInTheDocument();
+    expect(within(next).getByText(/checks every 10 minutes/u)).toBeInTheDocument();
 
     const imported = within(card).getByRole('table', { name: 'Imported records' });
     expect(within(imported).getByText('192.0.2.10')).toBeInTheDocument();
@@ -784,22 +836,29 @@ describe('organization mail domains', () => {
     state.domains.data = [sharedDomain(false)];
     renderPage();
 
-    expect(screen.getByText(/MAILBOX_CUSTOM_DOMAINS_ENABLED/u)).toBeInTheDocument();
+    expect(screen.getByText(/Own domains are not available on this service yet/u)).toBeVisible();
+    // Server settings are the operator's business, never the customer's.
+    expect(screen.queryByText(/MAILBOX_/u)).toBeNull();
     expect(screen.queryByRole('article')).toBeNull();
     expect(state.mailDomainsEnabled.every(enabled => !enabled)).toBe(true);
   });
 });
 
-function renderPage() {
-  return render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+function pageTree() {
+  return (
+    <QueryClientProvider client={queryClient}>
       <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
         <MailDomainStatus />
       </NextIntlClientProvider>
     </QueryClientProvider>
   );
+}
+
+function renderPage() {
+  queryClient.clear();
+  return render(pageTree());
 }
 
 function renderDnsPage() {

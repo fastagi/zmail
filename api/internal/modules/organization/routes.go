@@ -25,6 +25,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("organization-members.update").
 			WhereNumber("id").
 			WhereNumber("member_id")
+		auth.PATCH("/organizations/:id/members/:member_id/features", h.UpdateMemberFeatures).
+			Name("organization-members.features.update").
+			WhereNumber("id").
+			WhereNumber("member_id")
 		auth.DELETE("/organizations/:id/members/:member_id", h.RemoveMember).
 			Name("organization-members.destroy").
 			WhereNumber("id").

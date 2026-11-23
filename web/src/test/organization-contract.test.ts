@@ -7,7 +7,9 @@ import {
   acceptOrganizationInvitationSchema,
   createOrganizationInvitationSchema,
   createOrganizationSchema,
+  updateOrganizationMemberFeaturesSchema,
 } from '@/features/organization/schemas';
+import { effectiveMemberFeatures } from '@/features/organization/utils/member-features';
 import {
   parseOrganizationInvitationCreateResponse,
   parseOrganizationInvitationPageResponse,
@@ -164,6 +166,87 @@ describe('organization network contract validation', () => {
     );
   });
 
+  it('keeps a well-formed invitation_url and drops any other without failing the response', () => {
+    const invitation = {
+      id: 73,
+      organization_id: 42,
+      email: 'member@example.com',
+      role: 'member',
+      status: 'pending',
+      expires_at: timestamp,
+      email_send_status: 'accepted_by_provider',
+      email_attempted_at: timestamp,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    const parse = (invitationUrl: unknown) =>
+      parseOrganizationInvitationCreateResponse({
+        invitation,
+        email_send_status: 'accepted_by_provider',
+        invitation_url: invitationUrl,
+      });
+
+    for (const accepted of [
+      'https://app.example.com/invite#oinv_abc.0123456789abcdef',
+      // MAILBOX_PUBLIC_URL may carry a path; emails use the same link.
+      'https://example.com/console/invite#oinv_abc.0123456789abcdef',
+      'http://localhost:3000/invite#oinv_abc.01',
+      'http://127.0.0.1:3000/invite#oinv_abc.01',
+    ]) {
+      expect(parse(accepted)).toEqual({
+        invitation,
+        email_send_status: 'accepted_by_provider',
+        invitation_url: accepted,
+      });
+    }
+
+    for (const malformed of [
+      null,
+      '',
+      42,
+      'javascript:alert(1)//invite#x',
+      'http://app.example.com/invite#oinv_abc.01',
+      'https://app.example.com/invite',
+      'https://app.example.com/invite#',
+      'https://app.example.com/other#oinv_abc.01',
+      'https://app.example.com/uninvite#oinv_abc.01',
+      'https://app.example.com/invite?token=oinv_abc.01#oinv_abc.01',
+      'https://user:pass@app.example.com/invite#oinv_abc.01',
+      `https://app.example.com/invite#${'a'.repeat(2048)}`,
+    ]) {
+      // The invitation was saved: an unusable link is dropped, never turned into an error.
+      expect(parse(malformed)).toEqual({ invitation, email_send_status: 'accepted_by_provider' });
+    }
+  });
+
+  it('tolerates new result fields but keeps the invitation view strict', () => {
+    const invitation = {
+      id: 73,
+      organization_id: 42,
+      email: 'member@example.com',
+      role: 'member',
+      status: 'pending',
+      expires_at: timestamp,
+      email_send_status: 'accepted_by_provider',
+      email_attempted_at: timestamp,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    expect(
+      parseOrganizationInvitationCreateResponse({
+        invitation,
+        email_send_status: 'accepted_by_provider',
+        future_field: { anything: true },
+      })
+    ).toEqual({ invitation, email_send_status: 'accepted_by_provider' });
+    expectInvalidResponse(() =>
+      parseOrganizationInvitationCreateResponse({
+        invitation: { ...invitation, token: 'must-not-cross-the-contract' },
+        email_send_status: 'accepted_by_provider',
+      })
+    );
+  });
+
   it('validates ownership transfer and normalizes invitation inputs', () => {
     const previousOwner = memberView({ id: 91, user_id: 17, role: 'admin' });
     const newOwner = memberView({ id: 92, user_id: 18, role: 'owner' });
@@ -184,6 +267,57 @@ describe('organization network contract validation', () => {
     expect(acceptOrganizationInvitationSchema.parse({ token: '  one-time-token  ' })).toEqual({
       token: 'one-time-token',
     });
+  });
+});
+
+describe('member feature grants', () => {
+  const grants = { broadcasts: false, contacts: true, templates: false, api_keys: true };
+
+  it('reads grants from organization, context, and member views', () => {
+    expect(parseOrganizationResponse({ ...organization, role: 'member', features: grants })).toMatchObject({
+      features: grants,
+    });
+    // An API from before grants sends none; the view still parses.
+    expect(parseOrganizationResponse(organization).features).toBeUndefined();
+    expect(() =>
+      parseOrganizationResponse({ ...organization, features: { ...grants, extra: true } })
+    ).toThrow(ApiError);
+  });
+
+  it('gives owners, admins, and pre-grant views every feature', () => {
+    const all = { broadcasts: true, contacts: true, templates: true, api_keys: true };
+    expect(effectiveMemberFeatures('member', grants)).toEqual(grants);
+    expect(effectiveMemberFeatures('admin', grants)).toEqual(all);
+    expect(effectiveMemberFeatures('owner', grants)).toEqual(all);
+    expect(effectiveMemberFeatures('member', undefined)).toEqual(all);
+  });
+
+  it('accepts a change that names at least one known feature', () => {
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({ broadcasts: true }).success).toBe(true);
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({}).success).toBe(false);
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({ billing: true }).success).toBe(false);
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({ contacts: 'yes' }).success).toBe(false);
+  });
+
+  it('lets mock managers change a member and nobody change a manager', () => {
+    const store = new MockOrganizationStore({ now: () => new Date(timestamp) });
+
+    expect(store.listMembers(owner, 1, 1, 15)).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: 3,
+          features: { broadcasts: false, contacts: true, templates: true, api_keys: false },
+        }),
+      ]),
+    });
+    expect(store.updateMemberFeatures(owner, 1, 3, { broadcasts: true })).toMatchObject({
+      id: 3,
+      features: { broadcasts: true, contacts: true, templates: true, api_keys: false },
+    });
+    expect(store.resolveContext(member, 1)?.features).toMatchObject({ broadcasts: true });
+    expect(store.updateMemberFeatures(member, 1, 3, { api_keys: true })).toBe('permission_denied');
+    expect(store.updateMemberFeatures(owner, 1, 2, { api_keys: false })).toBe('member_features_fixed');
+    expect(store.updateMemberFeatures(owner, 1, 99, { api_keys: true })).toBe('member_not_found');
   });
 });
 

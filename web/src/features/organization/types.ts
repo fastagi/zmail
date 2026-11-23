@@ -5,6 +5,8 @@ import type {
   createOrganizationInvitationSchema,
   createOrganizationSchema,
   invitationEmailSendStatusSchema,
+  memberFeatureSchema,
+  memberFeaturesSchema,
   organizationContextSchema,
   organizationInvitationRoleSchema,
   organizationInvitationSchema,
@@ -17,11 +19,17 @@ import type {
   paginationLinksSchema,
   paginationMetaSchema,
   transferOrganizationOwnershipSchema,
+  updateOrganizationMemberFeaturesSchema,
   updateOrganizationMemberSchema,
   updateOrganizationSchema,
 } from './schemas';
 
 export type OrganizationRole = Infer<typeof organizationRoleSchema>;
+export type MemberFeature = Infer<typeof memberFeatureSchema>;
+export type MemberFeatures = Infer<typeof memberFeaturesSchema>;
+export type UpdateOrganizationMemberFeaturesInput = Infer<
+  typeof updateOrganizationMemberFeaturesSchema
+>;
 export type Organization = Infer<typeof organizationSchema>;
 export type OrganizationContext = Infer<typeof organizationContextSchema>;
 export type PaginationMeta = Infer<typeof paginationMetaSchema>;
@@ -33,9 +41,13 @@ export type OrganizationInvitationRole = Infer<typeof organizationInvitationRole
 export type OrganizationInvitationStatus = Infer<typeof organizationInvitationStatusSchema>;
 export type OrganizationInvitation = Infer<typeof organizationInvitationSchema>;
 export type InvitationEmailSendStatus = Infer<typeof invitationEmailSendStatusSchema>;
-export type OrganizationInvitationCreateResult = Infer<
-  typeof organizationInvitationCreateResultSchema
->;
+export type OrganizationInvitationCreateResult = Omit<
+  Infer<typeof organizationInvitationCreateResultSchema>,
+  'invitation_url'
+> & {
+  /** One-time accept link; present only when the call minted a token and the link is usable. */
+  invitation_url?: string;
+};
 export type OrganizationOwnershipTransfer = Infer<
   typeof organizationOwnershipTransferSchema
 >;

@@ -63,6 +63,8 @@ const (
 	CodeOrganizationInvitationEmailMismatch        = "ORGANIZATION.INVITATION.EMAIL_MISMATCH"
 	CodeOrganizationInvitationAlreadyPending       = "ORGANIZATION.INVITATION.ALREADY_PENDING"
 	CodeOrganizationMemberAlreadyExists            = "ORGANIZATION.MEMBER_ALREADY_EXISTS"
+	CodeOrganizationFeatureNotGranted              = "ORGANIZATION.FEATURE_NOT_GRANTED"
+	CodeOrganizationMemberFeaturesFixed            = "ORGANIZATION.MEMBER_FEATURES_FIXED"
 
 	CodeNotificationNotFound            = "NOTIFICATION.NOT_FOUND"
 	CodeNotificationIdempotencyConflict = "NOTIFICATION.IDEMPOTENCY_CONFLICT"

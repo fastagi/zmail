@@ -15,7 +15,7 @@ const apiKey = {
   name: 'Deployment',
   key_prefix: 'fastbuild_ab-cd_123456',
   mode: 'live',
-  scopes: ['models:invoke', 'models:read'],
+  scopes: ['mail:read', 'mail:send'],
   created_at: timestamp,
   updated_at: timestamp,
 };
@@ -60,16 +60,16 @@ describe('API key browser contract', () => {
     const actor = { id: 'user-1', email: 'user@example.com', name: 'User' };
     const created = store.create(actor, {
       name: 'Deployment',
-      scopes: ['models:read'],
+      scopes: ['mail:read'],
     });
 
-    expect(created.plaintext_key).toMatch(/^fastbuild_[a-f0-9]+\.[a-f0-9]+$/);
+    expect(created.plaintext_key).toMatch(/^zmail_[a-f0-9]+\.[a-f0-9]+$/);
     expect(JSON.stringify(store)).not.toContain(created.plaintext_key);
     expect(JSON.stringify(store.list(actor, 1, 15))).not.toContain(created.plaintext_key);
     expect(JSON.stringify(store.list(actor, 1, 15))).not.toContain('key_hash');
   });
 
-  it('issues live keys by default and test keys with the fastbuild_test_ prefix', () => {
+  it('issues live keys by default and test keys with the zmail_test_ prefix', () => {
     const store = new MockApiKeyStore({
       now: () => new Date(timestamp),
       randomHex: bytes => 'c'.repeat(bytes * 2),
@@ -82,9 +82,9 @@ describe('API key browser contract', () => {
       mode: 'test',
     });
 
-    expect(live.api_key).toMatchObject({ mode: 'live', key_prefix: 'fastbuild_cccccccccccc' });
-    expect(test.api_key).toMatchObject({ mode: 'test', key_prefix: 'fastbuild_test_cccccccccccc' });
-    expect(test.plaintext_key).toMatch(/^fastbuild_test_c+\.c+$/);
+    expect(live.api_key).toMatchObject({ mode: 'live', key_prefix: 'zmail_cccccccccccc' });
+    expect(test.api_key).toMatchObject({ mode: 'test', key_prefix: 'zmail_test_cccccccccccc' });
+    expect(test.plaintext_key).toMatch(/^zmail_test_c+\.c+$/);
     expect(
       parseApiKeyPageResponse(pageEnvelope(store.list(actor, 1, 15).items)).items
     ).toHaveLength(2);

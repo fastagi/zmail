@@ -235,7 +235,8 @@ const messages = {
   },
   disabled: {
     title: '事务邮件未启用',
-    description: '需要运维在本实例开启。开启前，你的后端无法发送事务邮件。',
+    description: '需要运维在本实例开启。开启前，你的后端无法发送事务邮件，但仍可以用 API 密钥从你的邮箱发信。',
+    apiKeyAction: '用 API 密钥发信',
   },
   templates: {
     list: '事务模板',

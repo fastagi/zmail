@@ -49,10 +49,10 @@ type lockedProvider struct {
 	*fakeZones
 }
 
-func (z lockedProvider) EnableRouting(ctx context.Context, zoneID, name string) error {
+func (z lockedProvider) EnableRouting(ctx context.Context, zoneID, zoneName, name string) error {
 	z.mu.Lock()
 	defer z.mu.Unlock()
-	return z.fakeZones.EnableRouting(ctx, zoneID, name)
+	return z.fakeZones.EnableRouting(ctx, zoneID, zoneName, name)
 }
 
 func (z lockedProvider) EnsureSending(ctx context.Context, zoneID, name string) (string, error) {

@@ -11,6 +11,7 @@ export type OrganizationErrorKey =
   | 'errors.invitationNotFound'
   | 'errors.invalidResponse'
   | 'errors.memberAlreadyExists'
+  | 'errors.memberFeaturesFixed'
   | 'errors.memberNotFound'
   | 'errors.notFound'
   | 'errors.ownershipTransferRequired'
@@ -72,10 +73,18 @@ export function resolveOrganizationErrorKey(error: unknown): OrganizationErrorKe
   if (error.errorCode === ApiErrorCode.ORGANIZATION_MEMBER_NOT_FOUND) {
     return 'errors.memberNotFound';
   }
-  if (error.errorCode === ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_REQUIRED) {
+  if (error.errorCode === ApiErrorCode.ORGANIZATION_MEMBER_FEATURES_FIXED) {
+    return 'errors.memberFeaturesFixed';
+  }
+  if (
+    error.errorCode === ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_REQUIRED
+  ) {
     return 'errors.ownershipTransferRequired';
   }
-  if (error.errorCode === ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_TARGET_INVALID) {
+  if (
+    error.errorCode ===
+    ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_TARGET_INVALID
+  ) {
     return 'errors.ownershipTransferTargetInvalid';
   }
   return 'errors.generic';

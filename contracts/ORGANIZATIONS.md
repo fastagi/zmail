@@ -37,6 +37,7 @@ An organization membership view contains:
   "name": "Acme Europe",
   "slug": "acme-europe",
   "role": "owner",
+  "features": { "broadcasts": true, "contacts": true, "templates": true, "api_keys": true },
   "created_at": "2026-07-14T20:00:00Z",
   "updated_at": "2026-07-14T20:00:00Z"
 }
@@ -81,9 +82,12 @@ The optional starter exposes one verification endpoint:
   "organization_slug": "acme-europe",
   "membership_id": 91,
   "user_id": 17,
-  "role": "admin"
+  "role": "admin",
+  "features": { "broadcasts": true, "contacts": true, "templates": true, "api_keys": true }
 }
 ```
+
+`features` is what this membership may use; see [Member Feature Grants](#member-feature-grants).
 
 - Authentication establishes the user; the header only selects among that user's current
   memberships. A syntactically valid ID for an absent organization or non-member returns the same
@@ -126,6 +130,7 @@ The browser feature owns these fixed same-origin paths:
 | Verify active context | `GET /api/organization-context` plus `Organization-Id` | `GET /v1/organization-context` plus `Organization-Id` |
 | List members | `GET /api/organizations/:id/members` | `GET /v1/organizations/:id/members` |
 | Change member role | `PATCH /api/organizations/:id/members/:member_id` | `PATCH /v1/organizations/:id/members/:member_id` |
+| Change member features | `PATCH /api/organizations/:id/members/:member_id/features` | `PATCH /v1/organizations/:id/members/:member_id/features` |
 | Remove member or leave | `DELETE /api/organizations/:id/members/:member_id` | `DELETE /v1/organizations/:id/members/:member_id` |
 | Transfer ownership | `POST /api/organizations/:id/ownership-transfer` | `POST /v1/organizations/:id/ownership-transfer` |
 | List invitations | `GET /api/organizations/:id/invitations` | `GET /v1/organizations/:id/invitations` |
@@ -139,7 +144,11 @@ The browser feature owns these fixed same-origin paths:
 - The browser service validates every successful organization, member, invitation, and ownership
   payload before caching it. Public member and invitation objects are strict: unexpected fields
   such as member email or invitation token produce client-owned `CLIENT.INVALID_RESPONSE` instead
-  of entering the UI cache.
+  of entering the UI cache. The create and resend result that wraps the invitation ignores fields
+  it does not know, and validates `invitation_url` on its own: a missing or unusable link (not
+  `https`, or `http` on a loopback host; path not ending in `/invite`; empty fragment; query or
+  credentials present) is dropped and only the copy action disappears, because the invitation was
+  saved either way.
 - Paginated calls explicitly preserve and validate the global `meta` and `links` envelope fields;
   the default Web response interceptor continues to extract `data` for non-paginated callers.
 - Unsafe same-origin routes reject cross-origin requests before reading the body. Both incoming
@@ -150,8 +159,11 @@ The browser feature owns these fixed same-origin paths:
   the mock BFF and organization Web feature are enabled. They are replaceable development state,
   not production persistence.
 - Invitation acceptance reads a manually entered bearer token from a password input and sends it
-  only in the same-origin POST body. The Web feature never stores the token, adds it to a URL, or
-  renders it from invitation-management responses.
+  only in the same-origin POST body. The Web feature never stores the token or adds it to a URL.
+  The only invitation secret it renders is the one-time `invitation_url` of a create or resend
+  response, shown to the manager who made that call in its confirmation with a copy action; it is
+  held in component state only, never in the query cache, storage, or a toast, and is gone once
+  the confirmation closes.
 
 ## Member Lifecycle
 
@@ -162,6 +174,7 @@ one internal organization membership; `member_id` is the membership ID, not the 
 |---|---|---|---|
 | List members | `GET /v1/organizations/:id/members` | Pagination query | Paginated member views |
 | Change role | `PATCH /v1/organizations/:id/members/:member_id` | `{ role }` | Member view |
+| Change features | `PATCH /v1/organizations/:id/members/:member_id/features` | `{ broadcasts?, contacts?, templates?, api_keys? }` | Member view |
 | Remove or leave | `DELETE /v1/organizations/:id/members/:member_id` | none | `204 No Content` |
 | Transfer ownership | `POST /v1/organizations/:id/ownership-transfer` | `{ new_owner_member_id }` | `{ previous_owner, new_owner }` |
 
@@ -175,6 +188,7 @@ A member view contains the relationship ID and a deliberately small public ident
   "nickname": "Alex",
   "avatar": "https://cdn.example.com/alex.png",
   "role": "member",
+  "features": { "broadcasts": false, "contacts": true, "templates": true, "api_keys": false },
   "joined_at": "2026-07-15T20:00:00Z",
   "updated_at": "2026-07-15T20:00:00Z"
 }
@@ -201,6 +215,28 @@ A member view contains the relationship ID and a deliberately small public ident
 - Member role changes, removals, leaves, and ownership transfers emit audit changes using member,
   organization, and user IDs plus roles. Member profile fields are not copied into audit metadata.
 
+## Member Feature Grants
+
+An organization decides, per member, which console features the member may use. The catalog is
+fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`.
+
+- `owner` and `admin` always have every feature. Grants are stored on every membership but only
+  take effect for the `member` role, so member views and the context view report the effective
+  value: `true` for every feature of an owner or admin.
+- A new membership starts with `contacts` and `templates`; `broadcasts` and `api_keys`, which send
+  mail at scale, wait for an owner or admin. Memberships that existed before grants were
+  introduced keep all four.
+- `PATCH /v1/organizations/:id/members/:member_id/features` changes only the features the body
+  names; omitted features keep their value. A body naming none returns
+  `422 COMMON.VALIDATION_FAILED`. Only an `owner` or `admin` may call it (`403 PERMISSION.DENIED`
+  otherwise), and only for a `member` target: an owner or admin target returns
+  `409 ORGANIZATION.MEMBER_FEATURES_FIXED`. A change takes effect on the member's next request.
+- A change emits one `organization_members.change_features` audit change listing only the features
+  whose value changed, with member, organization, and user IDs.
+- A route that needs a feature the active membership lacks returns
+  `403 ORGANIZATION.FEATURE_NOT_GRANTED`. The routes each feature opens are listed in
+  [`MAILBOXES.md`](MAILBOXES.md#member-feature-grants).
+
 ## Invitation Lifecycle
 
 Invitation endpoints also require the standard Go API bearer token. Invitation management is
@@ -208,10 +244,10 @@ organization-scoped; acceptance is top-level because the opaque token identifies
 
 | Operation | Endpoint | Request | Successful `data` |
 |---|---|---|---|
-| Invite | `POST /v1/organizations/:id/invitations` | `{ email, role }` | `{ invitation, email_send_status }` |
+| Invite | `POST /v1/organizations/:id/invitations` | `{ email, role }` | `{ invitation, email_send_status, invitation_url? }` |
 | List invitations | `GET /v1/organizations/:id/invitations` | Pagination query | Paginated invitation views |
 | Revoke | `DELETE /v1/organizations/:id/invitations/:invitation_id` | none | `204 No Content` |
-| Resend email | `POST /v1/organizations/:id/invitations/:invitation_id/emails` | none | `201` `{ invitation, email_send_status }` |
+| Resend email | `POST /v1/organizations/:id/invitations/:invitation_id/emails` | none | `201` `{ invitation, email_send_status, invitation_url? }` |
 | Accept | `POST /v1/organization-invitations/accept` | `{ token }` | Organization membership view |
 
 An invitation view contains no plaintext token:
@@ -238,9 +274,23 @@ An invitation view contains no plaintext token:
 - Invitation email is trimmed and lower-cased. An existing member or a second unexpired pending
   invitation for the same organization and email is rejected. Expired invitations remain immutable
   history while releasing the active-invitation uniqueness slot for a replacement.
-- Invitation tokens are high-entropy bearer secrets. FastBuild returns them only to the organization
-  mail adapter in process, stores only their SHA-256 hash, and never places them in URLs, API
-  responses, audit metadata, or logs.
+- Invitation tokens are high-entropy bearer secrets. FastBuild stores only their SHA-256 hash, so a
+  stored invitation's token can never be read back. A token leaves the API only at the moment it is
+  minted: to the organization mail adapter in process, and as the one-time `invitation_url` in the
+  response of the create or resend call that minted it. It is never placed in other URLs, other
+  API responses, audit metadata, or logs.
+- `invitation_url` is the accept link in the same `<console origin>/invite#<token>` shape invitation
+  emails use, built on the server from `MAILBOX_PUBLIC_URL`; the token rides in the fragment. It is
+  returned only to the `owner` or `admin` who invited or resent, and only in that `201` response,
+  which is sent with `Cache-Control: private, no-store`. It is omitted when the call minted no token
+  (a resend without a configured mailer keeps the old token) or no console origin is configured.
+  The invitation list never carries it, members can never obtain it, and accepted, revoked, or
+  expired invitations never yield one. To share a pending invitation again, a manager resends it,
+  which mints and shows a new link and invalidates the previous one.
+- Compatibility: `invitation_url` is an additive response field, but a Web console released before
+  it validated the create and resend result strictly and reports a saved invitation (and a sent
+  resend) as a failure when the field is present. Deploy the Web before the API for this change;
+  the API only sends the field when `MAILBOX_PUBLIC_URL` is set.
 - `ORGANIZATION_INVITATION_TTL` defaults to `168h` (7 days) and must be positive. A token is
   one-time use and must belong to the authenticated user's email, compared case-insensitively.
 - Accepting an invitation and creating the membership is one database transaction. Revoked,
@@ -265,7 +315,8 @@ An invitation view contains no plaintext token:
   does not count.
 - Invitation create, revoke, resend, and accept transitions emit audit changes using internal
   invitation, organization, and user IDs. Resend also records the role, `email_send_status`, and
-  whether the token was rotated. Email addresses and tokens are not audit metadata.
+  whether the token was rotated. Invite and resend record `link_issued`, whether an
+  `invitation_url` was returned. Email addresses, tokens, and links are not audit metadata.
 
 ## Stable Errors
 
@@ -289,6 +340,8 @@ An invitation view contains no plaintext token:
 | 429 | `COMMON.RATE_LIMITED` | Invitation resend exceeded its per-invitation or per-organization quota |
 | 403 | `ORGANIZATION.INVITATION.EMAIL_MISMATCH` | The token belongs to a different account email |
 | 403 | `PERMISSION.DENIED` | The caller is a member but the role cannot perform the mutation |
+| 403 | `ORGANIZATION.FEATURE_NOT_GRANTED` | The active membership has not been granted the feature the route needs |
+| 409 | `ORGANIZATION.MEMBER_FEATURES_FIXED` | A feature change targets an owner or admin, who always have every feature |
 | 422 | `COMMON.VALIDATION_FAILED` | A request field fails the documented shape |
 | 503 | `COMMON.SERVICE_UNAVAILABLE` | Organization persistence is unavailable |
 

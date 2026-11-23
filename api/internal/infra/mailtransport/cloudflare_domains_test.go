@@ -151,10 +151,24 @@ func TestEnableRoutingNamesTheDomain(t *testing.T) {
 	client, fake := newDomainsServer(t, map[string]string{
 		"POST /zones/zone-1/email/routing/dns": cfResult(`{"id":"r","enabled":true,"name":"news.example.com","status":"ready"}`),
 	})
-	if err := client.EnableRouting(context.Background(), "zone-1", "news.example.com"); err != nil {
+	if err := client.EnableRouting(context.Background(), "zone-1", "example.com", "news.example.com"); err != nil {
 		t.Fatalf("EnableRouting: %v", err)
 	}
 	if fake.calls[0].Body != `{"name":"news.example.com"}` {
+		t.Fatalf("body = %s", fake.calls[0].Body)
+	}
+}
+
+// Cloudflare takes a name only for a subdomain of the zone: naming the apex is refused with
+// "Invalid Input: must be a subdomains of <zone>".
+func TestEnableRoutingLeavesTheNameOutAtTheZoneApex(t *testing.T) {
+	client, fake := newDomainsServer(t, map[string]string{
+		"POST /zones/zone-1/email/routing/dns": cfResult(`{"id":"r","enabled":true,"name":"example.com","status":"ready"}`),
+	})
+	if err := client.EnableRouting(context.Background(), "zone-1", "Example.com.", "example.com"); err != nil {
+		t.Fatalf("EnableRouting: %v", err)
+	}
+	if fake.calls[0].Body != `{}` {
 		t.Fatalf("body = %s", fake.calls[0].Body)
 	}
 }
@@ -195,13 +209,13 @@ func TestProviderErrorsCarryTheProviderMessage(t *testing.T) {
 	client, _ := newDomainsServer(t, map[string]string{
 		"POST /zones/zone-1/email/routing/dns": `!{"success":false,"errors":[{"code":2007,"message":"Invalid domain"}]}`,
 	})
-	err := client.EnableRouting(context.Background(), "zone-1", "news.example.com")
+	err := client.EnableRouting(context.Background(), "zone-1", "example.com", "news.example.com")
 	var failure *DomainError
 	if !errors.As(err, &failure) || failure.Status != http.StatusBadRequest || failure.Code != 2007 || failure.Message != "Invalid domain" {
 		t.Fatalf("err = %#v", err)
 	}
 	wrong := newCloudflareDomains(config.MailboxConfig{CloudflareAPIToken: "wrong"}, client.client, client.baseURL)
-	if err := wrong.EnableRouting(context.Background(), "zone-1", "x.example.com"); !errors.As(err, &failure) || failure.Message != "Authentication error" {
+	if err := wrong.EnableRouting(context.Background(), "zone-1", "example.com", "x.example.com"); !errors.As(err, &failure) || failure.Message != "Authentication error" {
 		t.Fatalf("auth err = %v", err)
 	}
 }

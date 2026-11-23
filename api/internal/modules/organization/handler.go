@@ -150,7 +150,8 @@ func (h *Handler) Update(c *gin.Context) {
 	response.Success(c, toResponse(membership))
 }
 
-// Invite persists an organization invitation before attempting email delivery.
+// Invite persists an organization invitation before attempting email delivery and returns its
+// link once to the caller.
 func (h *Handler) Invite(c *gin.Context) {
 	userID, ok := handler.GetUserID(c)
 	if !ok {
@@ -170,15 +171,14 @@ func (h *Handler) Invite(c *gin.Context) {
 		return
 	}
 
+	// The response may carry a one-time invitation link, a bearer secret.
+	c.Header("Cache-Control", "private, no-store")
 	result, err := h.service.Invite(c.Request.Context(), userID, organizationID, &req)
 	if err != nil {
 		response.HandleError(c, "Failed to create organization invitation", err)
 		return
 	}
-	response.Created(c, &CreateOrganizationInvitationResponse{
-		Invitation:      toInvitationResponse(result.Invitation, time.Now().UTC()),
-		EmailSendStatus: result.EmailSendStatus,
-	})
+	response.Created(c, toCreateInvitationResponse(result))
 }
 
 // ListInvitations returns token-free invitation history for organization managers.
@@ -237,7 +237,8 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 	response.NoContent(c)
 }
 
-// ResendInvitation emails a pending invitation again with a fresh one-time link.
+// ResendInvitation emails a pending invitation again with a fresh one-time link and returns that
+// link once to the caller.
 func (h *Handler) ResendInvitation(c *gin.Context) {
 	userID, ok := handler.GetUserID(c)
 	if !ok {
@@ -252,6 +253,8 @@ func (h *Handler) ResendInvitation(c *gin.Context) {
 		return
 	}
 
+	// The response may carry a one-time invitation link, a bearer secret.
+	c.Header("Cache-Control", "private, no-store")
 	result, err := h.service.ResendInvitation(c.Request.Context(), userID, organizationID, invitationID)
 	if err != nil {
 		var retry *InvitationRetryAfterError
@@ -261,10 +264,7 @@ func (h *Handler) ResendInvitation(c *gin.Context) {
 		response.HandleError(c, "Failed to resend organization invitation", err)
 		return
 	}
-	response.Created(c, &CreateOrganizationInvitationResponse{
-		Invitation:      toInvitationResponse(result.Invitation, time.Now().UTC()),
-		EmailSendStatus: result.EmailSendStatus,
-	})
+	response.Created(c, toCreateInvitationResponse(result))
 }
 
 // AcceptInvitation creates membership and consumes a one-time invitation token atomically.

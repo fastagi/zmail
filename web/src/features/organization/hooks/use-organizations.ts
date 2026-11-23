@@ -20,6 +20,7 @@ import type {
   OrganizationMemberPage,
   OrganizationPage,
   TransferOrganizationOwnershipInput,
+  UpdateOrganizationMemberFeaturesInput,
   UpdateOrganizationMemberInput,
   UpdateOrganizationInput,
 } from '@/features/organization/types';
@@ -202,6 +203,62 @@ export function useUpdateOrganizationMember(organizationId: number) {
   });
 }
 
+/**
+ * Grants or withdraws member features. The member list shows the new value at once and returns to
+ * the stored one when the API refuses.
+ */
+export function useUpdateOrganizationMemberFeatures(organizationId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      memberId,
+      input,
+    }: {
+      memberId: number;
+      input: UpdateOrganizationMemberFeaturesInput;
+    }) => organizationService.updateMemberFeatures(organizationId, memberId, input),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onMutate: async ({ memberId, input }) => {
+      const key = organizationKeys.members(organizationId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<OrganizationMemberPage>(key);
+      queryClient.setQueryData<OrganizationMemberPage>(key, (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === memberId && item.features
+                  ? { ...item, features: { ...item.features, ...definedFeatures(input) } }
+                  : item
+              ),
+            }
+          : current
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, rollback) => {
+      if (rollback?.previous) {
+        queryClient.setQueryData(organizationKeys.members(organizationId), rollback.previous);
+      }
+    },
+    onSuccess: (member) => {
+      updateMemberPage(queryClient, organizationId, member);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: organizationKeys.members(organizationId) });
+    },
+  });
+}
+
+function definedFeatures(
+  input: UpdateOrganizationMemberFeaturesInput
+): Partial<Record<keyof UpdateOrganizationMemberFeaturesInput, boolean>> {
+  return Object.fromEntries(
+    Object.entries(input).filter((entry): entry is [string, boolean] => entry[1] !== undefined)
+  );
+}
+
 export function useRemoveOrganizationMember(organizationId: number) {
   const queryClient = useQueryClient();
 
@@ -295,6 +352,8 @@ export function useCreateOrganizationInvitation(organizationId: number) {
   return useMutation({
     mutationFn: (input: CreateOrganizationInvitationInput) =>
       organizationService.invite(organizationId, input),
+    // The result may carry the one-time invitation link: drop it as soon as the confirmation resets.
+    gcTime: 0,
     meta: LOCAL_ERROR_HANDLING_META,
     onSuccess: ({ invitation }) => {
       queryClient.setQueryData<OrganizationInvitationPage>(
@@ -341,6 +400,8 @@ export function useResendOrganizationInvitation(organizationId: number) {
   return useMutation({
     mutationFn: (invitationId: number) =>
       organizationService.resendInvitation(organizationId, invitationId),
+    // The result may carry the one-time invitation link: drop it as soon as the confirmation resets.
+    gcTime: 0,
     meta: LOCAL_ERROR_HANDLING_META,
     onSettled: () => {
       queryClient.invalidateQueries({

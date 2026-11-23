@@ -26,9 +26,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { InvitationLinkPanel } from '@/features/organization/components/invitation-link-panel';
 import { useCreateOrganizationInvitation } from '@/features/organization/hooks/use-organizations';
 import { createOrganizationInvitationSchema } from '@/features/organization/schemas';
-import type { OrganizationInvitationRole } from '@/features/organization/types';
+import type {
+  InvitationEmailSendStatus,
+  OrganizationInvitationRole,
+} from '@/features/organization/types';
 import {
   hasOrganizationFieldError,
   resolveOrganizationErrorKey,
@@ -47,11 +51,14 @@ export function CreateOrganizationInvitationDialog({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrganizationInvitationRole>('member');
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  // The one-time link lives only here, never in the query cache, and is dropped on close.
+  const [issued, setIssued] = useState<IssuedInvitationLink>();
 
   const reset = () => {
     setEmail('');
     setRole('member');
     setClientErrors({});
+    setIssued(undefined);
     mutation.reset();
   };
 
@@ -70,7 +77,11 @@ export function CreateOrganizationInvitationDialog({
 
     setClientErrors({});
     mutation.mutate(parsed.data, {
-      onSuccess: ({ email_send_status: status }) => {
+      onSuccess: ({ invitation, email_send_status: status, invitation_url: url }) => {
+        if (url) {
+          setIssued({ email: invitation.email, url, status });
+          return;
+        }
         toast.success(t('invitationCreated'), {
           description: t(`emailSendStatus.${status}`),
         });
@@ -98,75 +109,105 @@ export function CreateOrganizationInvitationDialog({
         <Button icon={<MailPlus className="size-4" />}>{t('invite')}</Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('invite')}</DialogTitle>
-          <DialogDescription>{t('inviteDescription')}</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} aria-busy={mutation.isPending}>
-          <DialogBody className="space-y-4 py-1">
-            {mutation.error ? (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  {t(resolveOrganizationErrorKey(mutation.error))}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            <div className="space-y-2">
-              <Label htmlFor="organization-invitation-email">{t('email')}</Label>
-              <Input
-                id="organization-invitation-email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                autoCapitalize="none"
-                spellCheck={false}
-                required
-                maxLength={100}
-                value={email}
-                errorText={emailError}
-                disabled={mutation.isPending}
-                placeholder={t('emailPlaceholder')}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  setClientErrors({});
-                  mutation.reset();
-                }}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="organization-invitation-role">
-                {t('invitationRole')}
-              </Label>
-              <Select
-                value={role}
-                disabled={mutation.isPending}
-                onValueChange={(value) => {
-                  setRole(value as OrganizationInvitationRole);
-                  mutation.reset();
-                }}
-              >
-                <SelectTrigger id="organization-invitation-role" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">{t('roles.member')}</SelectItem>
-                  <SelectItem value="admin">{t('roles.admin')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </DialogBody>
-          <DialogFooter className="pt-5">
-            <DialogClose asChild>
-              <Button type="button" variant="outline" disabled={mutation.isPending}>
-                {common('cancel')}
-              </Button>
-            </DialogClose>
-            <Button type="submit" loading={mutation.isPending}>
-              {t('sendInvitation')}
-            </Button>
-          </DialogFooter>
-        </form>
+        {issued ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>{t('invitationCreated')}</DialogTitle>
+              <DialogDescription>
+                {t('invitationLink.createdDescription', { email: issued.email })}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-4 py-1">
+              <p className="text-sm text-muted-foreground">
+                {t(`emailSendStatus.${issued.status}`)}
+              </p>
+              <InvitationLinkPanel email={issued.email} url={issued.url} />
+            </DialogBody>
+            <DialogFooter className="pt-5">
+              <DialogClose asChild>
+                <Button type="button">{t('invitationLink.done')}</Button>
+              </DialogClose>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>{t('invite')}</DialogTitle>
+              <DialogDescription>{t('inviteDescription')}</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} aria-busy={mutation.isPending}>
+              <DialogBody className="space-y-4 py-1">
+                {mutation.error ? (
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      {t(resolveOrganizationErrorKey(mutation.error))}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                <div className="space-y-2">
+                  <Label htmlFor="organization-invitation-email">{t('email')}</Label>
+                  <Input
+                    id="organization-invitation-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    required
+                    maxLength={100}
+                    value={email}
+                    errorText={emailError}
+                    disabled={mutation.isPending}
+                    placeholder={t('emailPlaceholder')}
+                    onChange={(event) => {
+                      setEmail(event.target.value);
+                      setClientErrors({});
+                      mutation.reset();
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="organization-invitation-role">
+                    {t('invitationRole')}
+                  </Label>
+                  <Select
+                    value={role}
+                    disabled={mutation.isPending}
+                    onValueChange={(value) => {
+                      setRole(value as OrganizationInvitationRole);
+                      mutation.reset();
+                    }}
+                  >
+                    <SelectTrigger id="organization-invitation-role" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="member">{t('roles.member')}</SelectItem>
+                      <SelectItem value="admin">{t('roles.admin')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </DialogBody>
+              <DialogFooter className="pt-5">
+                <DialogClose asChild>
+                  <Button type="button" variant="outline" disabled={mutation.isPending}>
+                    {common('cancel')}
+                  </Button>
+                </DialogClose>
+                <Button type="submit" loading={mutation.isPending}>
+                  {t('sendInvitation')}
+                </Button>
+              </DialogFooter>
+            </form>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
+}
+
+interface IssuedInvitationLink {
+  email: string;
+  url: string;
+  status: InvitationEmailSendStatus;
 }

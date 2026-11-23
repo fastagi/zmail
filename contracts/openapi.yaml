@@ -985,7 +985,10 @@ paths:
               $ref: '#/components/schemas/OrganizationInvitationCreateRequest'
       responses:
         '201':
-          description: The persisted invitation and the synchronous email send attempt status.
+          description: >-
+            The persisted invitation, the synchronous email send attempt status, and, when a
+            console origin is configured, the invitation link shown once to this caller. Sent with
+            `Cache-Control: private, no-store`.
           content:
             application/json:
               schema:
@@ -1053,7 +1056,10 @@ paths:
         - $ref: '#/components/parameters/OrganizationInvitationID'
       responses:
         '201':
-          description: The reissued invitation and the synchronous email send attempt status.
+          description: >-
+            The reissued invitation, the synchronous email send attempt status, and, when a new
+            token was minted and a console origin is configured, the new invitation link shown once to
+            this caller. Sent with `Cache-Control: private, no-store`.
           content:
             application/json:
               schema:
@@ -1175,6 +1181,53 @@ paths:
           $ref: '#/components/responses/Conflict'
           description: '`ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED`: the owner must transfer ownership
             before leaving.'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/organizations/{organization_id}/members/{member_id}/features:
+    patch:
+      operationId: updateOrganizationMemberFeatures
+      summary: Grant or withdraw console features for one member
+      description: Changes only the named features. Owners and admins always have every feature, so
+        only a `member` target is accepted.
+      tags:
+        - Organizations
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationID'
+        - $ref: '#/components/parameters/OrganizationMemberID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationMemberFeaturesUpdateRequest'
+      responses:
+        '200':
+          description: Updated member view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: '`PERMISSION.DENIED`: only owners and admins may change member features.'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: '`ORGANIZATION.NOT_FOUND` or `ORGANIZATION.MEMBER_NOT_FOUND`.'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: '`ORGANIZATION.MEMBER_FEATURES_FIXED` when targeting an owner or admin, or
+            `COMMON.CONFLICT` when the role changed concurrently.'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          description: '`COMMON.VALIDATION_FAILED`: the body names no feature.'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/organizations/{organization_id}/ownership-transfer:
@@ -10272,6 +10325,13 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '503':
+          description: A sync was saving one of the named subscriptions at that moment
+            (`COMMON.SERVICE_UNAVAILABLE`, `Retry-After`); the provider delivers the notification again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/external-mail-notifications/outlook:
     post:
       operationId: receiveOutlookPushNotification
@@ -10329,6 +10389,13 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '503':
+          description: A sync was saving one of the named subscriptions at that moment
+            (`COMMON.SERVICE_UNAVAILABLE`, `Retry-After`); the provider delivers the notification again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/external-mail-tenants:
     get:
       operationId: listExternalMailTenants
@@ -11534,6 +11601,8 @@ components:
         - ORGANIZATION.INVITATION.EMAIL_MISMATCH
         - ORGANIZATION.INVITATION.ALREADY_PENDING
         - ORGANIZATION.MEMBER_ALREADY_EXISTS
+        - ORGANIZATION.FEATURE_NOT_GRANTED
+        - ORGANIZATION.MEMBER_FEATURES_FIXED
         - PERMISSION.DENIED
         - PERMISSION.UNKNOWN
         - PERMISSION.ROLE_NOT_FOUND
@@ -11794,8 +11863,8 @@ components:
           maxLength: 100
         key_prefix:
           type: string
-          description: Issued with the `fastbuild_` prefix (`fastbuild_test_` for a test key); keys created before
-            the rename keep their original lowercase prefix.
+          description: Issued with the `zmail_` prefix (`zmail_test_` for a test key); keys created before
+            the rename keep their original lowercase prefix, such as `fastbuild_`, and keep working.
           pattern: ^[a-z][a-z0-9]*_[a-z0-9_-]+$
         mode:
           $ref: '#/components/schemas/APIKeyMode'
@@ -11834,10 +11903,17 @@ components:
           maxLength: 100
         scopes:
           type: array
+          minItems: 1
           maxItems: 32
+          description: At least one of Zmail's mail scopes, or `*` for all of them.
           items:
             type: string
-            maxLength: 65
+            enum:
+              - mail:send
+              - mail:read
+              - mail:transactional
+              - mail:agent
+              - '*'
         expires_at:
           type: string
           format: date-time
@@ -11845,7 +11921,7 @@ components:
           $ref: '#/components/schemas/APIKeyMode'
     APIKeyMode:
       type: string
-      description: '`live` keys act for real; `test` keys are issued with the `fastbuild_test_` prefix, are
+      description: '`live` keys act for real; `test` keys are issued with the `zmail_test_` prefix, are
         accepted only by routes that declare test support, and there never send mail. Fixed at creation;
         defaults to `live`.'
       enum:
@@ -12469,6 +12545,7 @@ components:
         - name
         - slug
         - role
+        - features
         - created_at
         - updated_at
       properties:
@@ -12480,6 +12557,8 @@ components:
           $ref: '#/components/schemas/OrganizationSlug'
         role:
           $ref: '#/components/schemas/OrganizationRole'
+        features:
+          $ref: '#/components/schemas/OrganizationMemberFeatures'
         created_at:
           type: string
           format: date-time
@@ -12554,6 +12633,7 @@ components:
         - membership_id
         - user_id
         - role
+        - features
       properties:
         organization_id:
           $ref: '#/components/schemas/PositiveID'
@@ -12567,6 +12647,8 @@ components:
           $ref: '#/components/schemas/PositiveID'
         role:
           $ref: '#/components/schemas/OrganizationRole'
+        features:
+          $ref: '#/components/schemas/OrganizationMemberFeatures'
     OrganizationContextResponse:
       type: object
       additionalProperties: false
@@ -12590,6 +12672,7 @@ components:
         - user_id
         - username
         - role
+        - features
         - joined_at
         - updated_at
       properties:
@@ -12605,6 +12688,8 @@ components:
           type: string
         role:
           $ref: '#/components/schemas/OrganizationRole'
+        features:
+          $ref: '#/components/schemas/OrganizationMemberFeatures'
         joined_at:
           type: string
           format: date-time
@@ -12655,6 +12740,42 @@ components:
       properties:
         role:
           $ref: '#/components/schemas/OrganizationAssignableRole'
+    OrganizationMemberFeatures:
+      type: object
+      description: Features the membership may use. Owners and admins always report every feature.
+      additionalProperties: false
+      required:
+        - broadcasts
+        - contacts
+        - templates
+        - api_keys
+      properties:
+        broadcasts:
+          type: boolean
+          description: Draft, send, and stop marketing broadcasts.
+        contacts:
+          type: boolean
+          description: Read and edit contacts and contact lists.
+        templates:
+          type: boolean
+          description: Create and edit mail templates.
+        api_keys:
+          type: boolean
+          description: Use the member's API keys in this organization.
+    OrganizationMemberFeaturesUpdateRequest:
+      type: object
+      description: Names at least one feature; omitted features keep their value.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        broadcasts:
+          type: boolean
+        contacts:
+          type: boolean
+        templates:
+          type: boolean
+        api_keys:
+          type: boolean
     OrganizationOwnershipTransferRequest:
       type: object
       additionalProperties: false
@@ -12796,6 +12917,16 @@ components:
           $ref: '#/components/schemas/OrganizationInvitation'
         email_send_status:
           $ref: '#/components/schemas/OrganizationInvitationEmailSendStatus'
+        invitation_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: >-
+            One-time copy of the accept link for the token this call minted, in the same
+            `<console origin>/invite#<token>` shape invitation emails use. It is a bearer secret, returned
+            only to the `owner` or `admin` who invited or resent, never listed, logged, or audited.
+            Omitted when no token was minted (a resend without a configured mailer) or no console origin
+            (`MAILBOX_PUBLIC_URL`) is configured.
     OrganizationInvitationCreateResponse:
       type: object
       additionalProperties: false

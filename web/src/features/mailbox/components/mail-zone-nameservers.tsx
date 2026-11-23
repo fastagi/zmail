@@ -24,7 +24,8 @@ import { useT } from '@/i18n';
 /** At most this many imported records are listed here; the DNS page has them all. */
 const IMPORTED_PREVIEW_LIMIT = 10;
 
-type Registrar = 'Alibaba' | 'Tencent' | 'Huawei' | 'Godaddy' | 'Namecheap';
+type Registrar =
+  'Alibaba' | 'Tencent' | 'Huawei' | 'Godaddy' | 'Namecheap' | 'Cloudflare' | 'Other';
 
 /** Each registrar with the name-server hosts it hands out, to open its guide first. */
 const registrars: { key: Registrar; hosts: string[] }[] = [
@@ -33,6 +34,9 @@ const registrars: { key: Registrar; hosts: string[] }[] = [
   { key: 'Huawei', hosts: ['hwclouddns'] },
   { key: 'Godaddy', hosts: ['domaincontrol.com'] },
   { key: 'Namecheap', hosts: ['registrar-servers.com'] },
+  // Before Zmail the apex was on Cloudflare already: another account, or Cloudflare Registrar.
+  { key: 'Cloudflare', hosts: ['ns.cloudflare.com'] },
+  { key: 'Other', hosts: [] },
 ];
 
 /** The registrar whose name servers the apex had before Zmail, when one is recognized. */
@@ -89,6 +93,19 @@ export function MailZoneNameservers({
           </li>
         ))}
       </ul>
+      <div className="space-y-1">
+        <h5 id={`mail-zone-${zone.id}-next`} className="text-sm font-medium">
+          {t('domain.nameserversNextTitle')}
+        </h5>
+        <ol
+          aria-labelledby={`mail-zone-${zone.id}-next`}
+          className="list-decimal space-y-0.5 pl-5 text-sm text-muted-foreground"
+        >
+          <li>{t('domain.nameserversNext1')}</li>
+          <li>{t('domain.nameserversNext2')}</li>
+          <li>{t('domain.nameserversNext3')}</li>
+        </ol>
+      </div>
       {zone.original_name_servers.length > 0 ? (
         <p className="text-xs break-words text-muted-foreground">
           {t('domain.originalNameServers', { servers: zone.original_name_servers.join(', ') })}

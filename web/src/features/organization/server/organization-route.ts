@@ -367,6 +367,12 @@ function mockOrganizationError(error: MockOrganizationStoreError): {
         errorCode: ApiErrorCode.ORGANIZATION_MEMBER_NOT_FOUND,
         message: 'Organization member not found',
       };
+    case 'member_features_fixed':
+      return {
+        status: 409,
+        errorCode: ApiErrorCode.ORGANIZATION_MEMBER_FEATURES_FIXED,
+        message: 'Owners and admins always have every feature',
+      };
     case 'invitation_not_found':
       return {
         status: 404,

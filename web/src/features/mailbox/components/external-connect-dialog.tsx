@@ -139,7 +139,7 @@ export function ExternalConnectDialog({
       }}
     >
       <DialogContent
-        className="sm:max-w-md"
+        className="sm:max-w-[28rem]"
         onCloseAutoFocus={returnFocus}
         data-return-focus-chain=""
       >

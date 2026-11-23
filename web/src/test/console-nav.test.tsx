@@ -5,7 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ConsoleLayout from '@/app/(protected)/(console)/console/layout';
 import { messages } from '@/i18n/modules';
 
-const state = vi.hoisted(() => ({ pathname: '/console/mailboxes' }));
+const state = vi.hoisted(() => ({
+  pathname: '/console/mailboxes',
+  features: undefined as
+    | { broadcasts: boolean; contacts: boolean; templates: boolean; api_keys: boolean }
+    | undefined,
+}));
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
@@ -22,6 +27,9 @@ vi.mock('@/config/features', () => ({
   isWebFeatureEnabled: (feature: string) => feature === 'mailbox',
 }));
 vi.mock('@/components/theme-toggle', () => ({ ThemeToggle: () => null }));
+vi.mock('@/features/mailbox/hooks/use-mail-organization', () => ({
+  useChosenMemberFeatures: () => state.features,
+}));
 vi.mock('@/components/common', () => ({ LanguageSwitcher: () => null }));
 
 function layoutTree() {
@@ -41,6 +49,28 @@ function renderLayout() {
 describe('console navigation', () => {
   beforeEach(() => {
     state.pathname = '/console/mailboxes';
+    state.features = undefined;
+  });
+
+  it('hides the entries a member has not been granted in the active organization', () => {
+    state.pathname = '/console/emails';
+    state.features = { broadcasts: false, contacts: true, templates: false, api_keys: false };
+    renderLayout();
+
+    expect(screen.getByRole('link', { name: 'Contacts' })).toBeInTheDocument();
+    for (const name of ['Broadcasts', 'Templates', 'Developers']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole('link', { name: 'Mailboxes' })).toBeInTheDocument();
+  });
+
+  it('shows every entry until the grants are known', () => {
+    state.pathname = '/console/emails';
+    renderLayout();
+
+    for (const name of ['Broadcasts', 'Contacts', 'Templates', 'Developers']) {
+      expect(screen.getByRole('link', { name })).toBeInTheDocument();
+    }
   });
 
   it('folds to an icon rail on the mailboxes page, like Gmail keeps one navigation', () => {

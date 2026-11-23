@@ -90,7 +90,7 @@ export function ConnectedMailboxesDialog({
       }}
     >
       <DialogContent
-        className="sm:max-w-lg"
+        className="sm:max-w-[32rem]"
         onCloseAutoFocus={returnFocus}
         data-return-focus-chain=""
       >

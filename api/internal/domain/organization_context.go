@@ -10,6 +10,14 @@ type OrganizationContext struct {
 	MembershipID     uint
 	UserID           uint
 	Role             OrganizationRole
+	// Features are the grants stored on the membership; owners and admins have every feature
+	// regardless, so read them through CanUse.
+	Features MemberFeatures
+}
+
+// CanUse reports whether this membership may use the feature.
+func (c OrganizationContext) CanUse(feature MemberFeature) bool {
+	return c.Role.EffectiveFeatures(c.Features).Has(feature)
 }
 
 // IsValid reports whether the resolved context contains a complete membership identity.

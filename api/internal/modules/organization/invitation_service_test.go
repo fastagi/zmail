@@ -49,6 +49,10 @@ func (r *invitationRepositoryStub) ChangeMemberRole(context.Context, uint, uint,
 	return nil, nil
 }
 
+func (r *invitationRepositoryStub) UpdateMemberFeatures(context.Context, uint, uint, uint, domain.MemberFeaturePatch, time.Time) (*domain.OrganizationMembershipFeatureChange, error) {
+	return nil, nil
+}
+
 func (r *invitationRepositoryStub) RemoveMember(context.Context, uint, uint, uint) (*domain.OrganizationMembership, error) {
 	return nil, nil
 }

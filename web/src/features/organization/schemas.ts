@@ -1,5 +1,6 @@
 import {
   array,
+  boolean,
   email,
   enum as enumSchema,
   int,
@@ -22,6 +23,7 @@ import {
   toLowerCase,
   transform,
   trim,
+  unknown,
 } from 'zod/mini';
 
 export const organizationRoleSchema = enumSchema(['owner', 'admin', 'member']);
@@ -37,6 +39,20 @@ export const invitationEmailSendStatusSchema = enumSchema([
   'failed',
   'not_configured',
 ]);
+
+/** The console features an organization grants each member, in display order. */
+export const memberFeatureSchema = enumSchema(['broadcasts', 'contacts', 'templates', 'api_keys']);
+
+/**
+ * What a membership may use. Owners and admins always report every feature. Optional on the
+ * views below so a console talking to an API from before grants existed keeps working.
+ */
+export const memberFeaturesSchema = strictObject({
+  broadcasts: boolean(),
+  contacts: boolean(),
+  templates: boolean(),
+  api_keys: boolean(),
+});
 
 const safeIdSchema = number().check(
   int(),
@@ -77,6 +93,7 @@ export const organizationSchema = object({
   name: organizationNameSchema,
   slug: organizationSlugSchema,
   role: organizationRoleSchema,
+  features: optional(memberFeaturesSchema),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });
@@ -88,6 +105,7 @@ export const organizationContextSchema = object({
   membership_id: safeIdSchema,
   user_id: safeIdSchema,
   role: organizationRoleSchema,
+  features: optional(memberFeaturesSchema),
 });
 
 export const paginationMetaSchema = object({
@@ -121,6 +139,7 @@ export const organizationMemberSchema = strictObject({
   nickname: optional(string().check(maxLength(50))),
   avatar: optional(string().check(maxLength(255))),
   role: organizationRoleSchema,
+  features: optional(memberFeaturesSchema),
   joined_at: timestampSchema,
   updated_at: timestampSchema,
 });
@@ -154,9 +173,25 @@ export const organizationInvitationPageEnvelopeSchema = strictObject({
   links: paginationLinksSchema,
 });
 
-export const organizationInvitationCreateResultSchema = strictObject({
+/**
+ * The one-time accept link of a token minted by a create or resend call, in the shape invitation
+ * emails use: `<console origin>/invite#<token>`, where the console origin (MAILBOX_PUBLIC_URL) may
+ * carry a path. A bearer secret: keep it out of caches and logs.
+ */
+export const invitationUrlSchema = string().check(
+  maxLength(2048),
+  refine(isInvitationUrl)
+);
+
+/**
+ * The create and resend result. The invitation view inside stays strict, but the wrapper ignores
+ * fields it does not know, so an additive API change cannot turn a saved invitation into an error.
+ * `invitation_url` is read loosely here and validated on its own: an unusable link is dropped.
+ */
+export const organizationInvitationCreateResultSchema = object({
   invitation: organizationInvitationSchema,
   email_send_status: invitationEmailSendStatusSchema,
+  invitation_url: optional(unknown()),
 });
 
 export const organizationOwnershipTransferSchema = strictObject({
@@ -186,6 +221,17 @@ export const updateOrganizationMemberSchema = strictObject({
   role: organizationInvitationRoleSchema,
 });
 
+export const updateOrganizationMemberFeaturesSchema = strictObject({
+  broadcasts: optional(boolean()),
+  contacts: optional(boolean()),
+  templates: optional(boolean()),
+  api_keys: optional(boolean()),
+}).check(
+  refine((value) => Object.values(value).some((granted) => granted !== undefined), {
+    message: 'Name at least one feature',
+  })
+);
+
 export const transferOrganizationOwnershipSchema = strictObject({
   new_owner_member_id: safeIdSchema,
 });
@@ -201,4 +247,26 @@ export const organizationRouteIdSchema = pipe(
 function hasValidOrganizationNameLength(value: string): boolean {
   const length = Array.from(value).length;
   return length >= 2 && length <= 100;
+}
+
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function isInvitationUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  const secure =
+    url.protocol === 'https:' ||
+    (url.protocol === 'http:' && LOCAL_HOSTNAMES.has(url.hostname));
+  return (
+    secure &&
+    url.username === '' &&
+    url.password === '' &&
+    url.search === '' &&
+    url.pathname.endsWith('/invite') &&
+    url.hash.length > 1
+  );
 }

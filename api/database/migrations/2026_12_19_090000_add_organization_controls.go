@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	register("2026_12_17_090000_add_organization_controls", &addOrganizationControls{
+	register("2026_12_19_090000_add_organization_controls", &addOrganizationControls{
 		BaseMigration: migration.BaseMigration{UseTransaction: true},
 	})
 }

@@ -11,6 +11,62 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Member feature grants
+
+### High — Deploy the Web before the API
+
+Organization, organization-context, and organization-member views gain `features`
+(`broadcasts`, `contacts`, `templates`, `api_keys`): the effective grants, all `true` for owners and
+admins. A Web console from before this change validates member rows strictly and reports the members
+tab as failed against the new API. Roll the Web forward first; the new Web treats a missing
+`features` as every feature granted, so it works against the old API too.
+
+### High — Members need a grant for broadcasts, contacts, templates, and API keys
+
+Migration `2026_12_18_090000_add_member_feature_grants` (organization starter) adds
+`can_use_broadcasts`, `can_use_contacts`, `can_use_templates`, and `can_use_api_keys` to
+`organization_memberships`. Existing memberships get all four; a new member gets contacts and
+templates only. A member without the grant gets `403 ORGANIZATION.FEATURE_NOT_GRANTED` from the
+gated mailbox routes (see `contracts/MAILBOXES.md`, "Member Feature Grants"), including every API-key
+route in that organization. Owners and admins change grants with
+`PATCH /v1/organizations/{id}/members/{member_id}/features`; their own grants are fixed
+(`409 ORGANIZATION.MEMBER_FEATURES_FIXED`).
+
+A member with the broadcast grant may now send, pause, cancel, and resume broadcasts. Sending and
+resuming still need `send` on the sender mailbox, and a member stops only broadcasts it could send.
+Before, only owners and admins could do this. `domain.OrganizationContext` gains `Features` and
+`CanUse`; the organization repository gains `UpdateMemberFeatures`.
+
+## Unreleased — Connector acceptance round 3 fixes
+
+### Low — Provider releases keep their owner
+
+Migration `2026_12_17_090000_add_external_mail_release_owner` adds `owner_scope` (`unknown`,
+`member`, `shared`) and `owner_user_id` (`ON DELETE SET NULL`) to `external_mail_provider_releases`
+and backfills them from each row's connection when it still exists. A purged member's connection
+now waits only for that member's pending sign-in, not anyone's; a shared one still waits for
+anyone's. Rows left `unknown` keep the earlier rule and expire within 24 hours.
+`domain.ExternalMailProviderRelease` gains `OwnerScope` and `OwnerUserID`.
+
+### Low — Fake connector tenants
+
+With `EXTERNAL_MAIL_PROVIDERS=fake` (development only; production refuses it) the fake connector now
+accepts a synthetic tenant credential, so tenant connect can be exercised on a running stack. See
+`api/docs/EXTERNAL_MAIL_DEVELOPMENT.md`.
+
+## Unreleased — Copy invitation link
+
+### High — Deploy the Web before the API
+
+Organization invitation create and resend responses gain an optional `invitation_url`: the accept
+link of the token that call minted, returned once to the owner or admin who made it, with
+`Cache-Control: private, no-store`. The API sends it only when `MAILBOX_PUBLIC_URL` is set. A Web
+console from before this change validates that result strictly, so against the new API it reports a
+saved invitation or a sent resend as a failure and does not start the resend cooldown. Roll the Web
+forward first, then the API. The new Web accepts results with or without the field, ignores result
+fields it does not know, and drops a link it cannot use rather than failing. Audit metadata of
+invite and resend gains `link_issued`. See [`contracts/ORGANIZATIONS.md`](contracts/ORGANIZATIONS.md).
+
 ## Unreleased — Push enablement fixes
 
 ### Medium — Production push needs to tell senders apart

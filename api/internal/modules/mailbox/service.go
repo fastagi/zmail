@@ -429,6 +429,10 @@ type service struct {
 	pushHandshakes ratelimit.Store
 	// releases keeps the provider calls revocations leave to do; nil when repo does not implement it.
 	releases domain.ExternalMailReleaseRepository
+	// afterStoredHook, when set, runs after each copy a sync stores, inside its save; tests set it.
+	afterStoredHook func()
+	// pushReconcile spaces the stop of subscriptions of ended connections.
+	pushReconcile pushReconcileClock
 	// pushRefusalLog samples the log lines of refused notification requests.
 	pushRefusalLog *pushRefusalLog
 }

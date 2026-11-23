@@ -230,7 +230,7 @@ func (s *service) sendWithConnection(ctx context.Context, org uint, message mail
 // account. This keeps Zone Settings Write out of the token used by the application.
 func prepareReceiving(ctx context.Context, provider mailtransport.DomainProvider, d *domain.MailDomain) error {
 	if d.CloudflareConnectionID == nil {
-		return provider.EnableRouting(ctx, d.ZoneID, d.Name)
+		return provider.EnableRouting(ctx, d.ZoneID, d.ZoneName, d.Name)
 	}
 	records, err := provider.ListRecords(ctx, d.ZoneID, d.Name)
 	if err != nil {

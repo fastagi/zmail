@@ -380,16 +380,14 @@ def main() -> int:
         "web/docs/AUTHENTICATION.md",
         ("not a complete integration", "does not yet ship the production"),
     )
-    require_all(
-        failures,
-        "web/src/i18n/modules/console/en-US.ts",
-        ("contract-compatible production endpoint or adapter",),
-    )
-    require_all(
-        failures,
-        "web/src/i18n/modules/console/zh-Hans.ts",
-        ("apiBefore:", "apiAfter:", "next-intl"),
-    )
+    # The customer console home no longer carries scaffold "point the API URL at an
+    # adapter" steps; keep them from coming back.
+    for locale in ("en-US", "zh-Hans"):
+        require_absent(
+            failures,
+            f"web/src/i18n/modules/console/{locale}.ts",
+            ("apiBefore:", "apiAfter:", "developerSteps"),
+        )
     require_all(
         failures,
         "admin/docs/SECURITY.md",

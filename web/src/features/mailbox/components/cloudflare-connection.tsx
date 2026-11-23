@@ -16,6 +16,18 @@ const path = '/mail-cloudflare-connection';
 
 type CloudflareStep = 'list' | 'bind' | 'domain' | 'other';
 
+/** The organization's own-Cloudflare-account connection; `null` when it has none. */
+export function useCloudflareConnection(organizationId: number) {
+  return useQuery({
+    queryKey: ['mail-cloudflare-connection', organizationId],
+    queryFn: () =>
+      request.get<{ connection: Connection | null }>(path, {
+        headers: { 'Organization-Id': String(organizationId) },
+      }),
+    retry: false,
+  });
+}
+
 /**
  * The message for a failed step of the own-token flow. Every request here runs with the token the
  * user pasted (or stored), so the copy names it, and each step says what the failure means there:
@@ -45,12 +57,7 @@ export function CloudflareConnectionForm({ organizationId }: { organizationId: n
   const t = useT('mailbox');
   const cache = useQueryClient();
   const options = { headers: { 'Organization-Id': String(organizationId) } };
-  const queryKey = ['mail-cloudflare-connection', organizationId];
-  const status = useQuery({
-    queryKey,
-    queryFn: () => request.get<{ connection: Connection | null }>(path, options),
-    retry: false,
-  });
+  const status = useCloudflareConnection(organizationId);
   const [token, setToken] = useState('');
   const [zones, setZones] = useState<Zone[]>([]);
   const [zone, setZone] = useState('');

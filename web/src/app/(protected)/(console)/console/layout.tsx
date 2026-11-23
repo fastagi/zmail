@@ -10,7 +10,6 @@ import {
   Bell,
   LogOut,
   ArrowUpLeft,
-  Palette,
   Building2,
   FolderOpen,
   Gauge,
@@ -41,7 +40,8 @@ import { useT, type AllTranslationKeys } from '@/i18n';
 import { useLogout } from '@/features/auth/hooks/use-auth';
 import { useAuthStore } from '@/features/auth/store/auth-store';
 import { isWebFeatureEnabled } from '@/config/features';
-import { isDevtoolsEnabled } from '@/config/devtools';
+import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
+import type { MemberFeature } from '@/features/organization/types';
 
 import type { ConsoleNavItem } from './_components/console-mobile-nav';
 
@@ -71,6 +71,8 @@ interface NavItem {
   titleKey: Extract<AllTranslationKeys, `nav.${string}`>;
   href: string;
   icon: LucideIcon;
+  /** Shown only to members granted this feature in the active organization. */
+  feature?: MemberFeature;
 }
 
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
@@ -95,8 +97,12 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   const notificationEnabled = isWebFeatureEnabled('notification');
   const assetEnabled = isWebFeatureEnabled('asset');
   const usageEnabled = isWebFeatureEnabled('usage');
+  // Until the active organization's grants are known every entry shows; the pages gate themselves.
+  const memberFeatures = useChosenMemberFeatures(
+    organizationEnabled && isWebFeatureEnabled('mailbox')
+  );
 
-  const mainNavItems: NavItem[] = [
+  const allMainNavItems: NavItem[] = [
     {
       titleKey: 'nav.console',
       href: ROUTES.CONSOLE.HOME,
@@ -145,37 +151,35 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             titleKey: 'nav.mailBroadcasts' as const,
             href: ROUTES.CONSOLE.MAIL_BROADCASTS,
             icon: Megaphone,
+            feature: 'broadcasts' as const,
           },
           {
             titleKey: 'nav.mailContacts' as const,
             href: ROUTES.CONSOLE.MAIL_CONTACTS,
             icon: Users,
+            feature: 'contacts' as const,
           },
           {
             titleKey: 'nav.mailTemplates' as const,
             href: ROUTES.CONSOLE.MAIL_TEMPLATES,
             icon: FileText,
+            feature: 'templates' as const,
           },
           {
             titleKey: 'nav.developers' as const,
             href: ROUTES.CONSOLE.DEVELOPERS,
             icon: Code2,
+            feature: 'api_keys' as const,
           },
         ]
       : []),
     // fastbuild:slot web.console.nav
   ];
+  const mainNavItems = allMainNavItems.filter(
+    item => !item.feature || !memberFeatures || memberFeatures[item.feature]
+  );
 
   const secondaryNavItems: NavItem[] = [
-    ...(isDevtoolsEnabled()
-      ? [
-          {
-            titleKey: 'nav.styleguide' as const,
-            href: ROUTES.DEVTOOLS.STYLEGUIDE,
-            icon: Palette,
-          },
-        ]
-      : []),
     {
       titleKey: 'nav.settings',
       href: ROUTES.CONSOLE.SETTINGS,

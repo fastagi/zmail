@@ -77,8 +77,9 @@ type DNSRecord struct {
 type DomainProvider interface {
 	// FindZone returns the zone that contains name: the zone itself or the closest parent.
 	FindZone(ctx context.Context, name string) (Zone, error)
-	// EnableRouting turns on Email Routing for name, which adds its MX and SPF records.
-	EnableRouting(ctx context.Context, zoneID, name string) error
+	// EnableRouting turns on Email Routing for name in the zone zoneName, which adds its MX and
+	// SPF records.
+	EnableRouting(ctx context.Context, zoneID, zoneName, name string) error
 	// EnsureSending turns on Email Sending for name when it is not on yet, and returns its tag.
 	EnsureSending(ctx context.Context, zoneID, name string) (string, error)
 	// SendingRecords lists the records Email Sending needs for the sending subdomain tag.
@@ -310,9 +311,15 @@ func (c *CloudflareDomains) FindZone(ctx context.Context, name string) (Zone, er
 	return Zone{}, ErrZoneNotFound
 }
 
-func (c *CloudflareDomains) EnableRouting(ctx context.Context, zoneID, name string) error {
+// EnableRouting names the domain only below the zone apex: Cloudflare accepts a name for a
+// subdomain and refuses the apex's own name, which it enables when the name is left out.
+func (c *CloudflareDomains) EnableRouting(ctx context.Context, zoneID, zoneName, name string) error {
+	body := map[string]string{}
+	if !strings.EqualFold(strings.TrimSuffix(name, "."), strings.TrimSuffix(zoneName, ".")) {
+		body["name"] = name
+	}
 	return c.call(ctx, "enable email routing", http.MethodPost,
-		"/zones/"+url.PathEscape(zoneID)+"/email/routing/dns", nil, map[string]string{"name": name}, nil)
+		"/zones/"+url.PathEscape(zoneID)+"/email/routing/dns", nil, body, nil)
 }
 
 type cloudflareSendingSubdomain struct {
@@ -620,7 +627,7 @@ type unconfiguredDomains struct{}
 func (unconfiguredDomains) FindZone(context.Context, string) (Zone, error) {
 	return Zone{}, ErrNotConfigured
 }
-func (unconfiguredDomains) EnableRouting(context.Context, string, string) error {
+func (unconfiguredDomains) EnableRouting(context.Context, string, string, string) error {
 	return ErrNotConfigured
 }
 func (unconfiguredDomains) EnsureSending(context.Context, string, string) (string, error) {
