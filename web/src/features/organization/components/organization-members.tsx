@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale } from 'next-intl';
 import {
@@ -73,7 +73,14 @@ type PendingMemberAction =
   | { kind: 'remove'; member: OrganizationMember }
   | { kind: 'transfer'; member: OrganizationMember };
 
-export function OrganizationMembers({ context }: { context: OrganizationContext }) {
+export function OrganizationMembers({
+  context,
+  headerAction,
+}: {
+  context: OrganizationContext;
+  /** An optional action beside the heading, such as the mailbox roster import. */
+  headerAction?: ReactNode;
+}) {
   const t = useT('organization');
   const common = useT('common');
   const locale = useLocale();
@@ -127,13 +134,16 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
 
   return (
     <section className="py-6" aria-labelledby="organization-members-heading">
-      <div className="mb-5">
-        <h2 id="organization-members-heading" className="text-base font-semibold">
-          {t('membersTitle')}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('membersDescription')}
-        </p>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="organization-members-heading" className="text-base font-semibold">
+            {t('membersTitle')}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('membersDescription')}
+          </p>
+        </div>
+        {headerAction}
       </div>
 
       {mutationError && !pendingAction ? (

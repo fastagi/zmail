@@ -37,6 +37,9 @@ import type {
   mailboxImportRowResultSchema,
   mailboxImportRowStatusSchema,
   mailboxSchema,
+  memberImportResultSchema,
+  memberImportRowResultSchema,
+  memberImportRowStatusSchema,
   mailDomainCapabilitySchema,
   mailDomainInputSchema,
   mailDomainPreviewInputSchema,
@@ -132,6 +135,29 @@ export interface MailboxImportRowInput {
 export type MailboxImportRowStatus = Infer<typeof mailboxImportRowStatusSchema>;
 export type MailboxImportRowResult = Infer<typeof mailboxImportRowResultSchema>;
 export type MailboxImportResult = Infer<typeof mailboxImportResultSchema>;
+/** One roster row as the spreadsheet holds it. */
+export interface MemberImportRowInput {
+  email: string;
+  name: string;
+  role: string;
+  mailbox: string;
+}
+/** The grants every invitation of a roster import starts the membership with. */
+export interface MemberImportFeatures {
+  broadcasts: boolean;
+  contacts: boolean;
+  templates: boolean;
+  api_keys: boolean;
+}
+export interface MemberImportInput {
+  dryRun: boolean;
+  domain: string;
+  features: MemberImportFeatures;
+  rows: MemberImportRowInput[];
+}
+export type MemberImportRowStatus = Infer<typeof memberImportRowStatusSchema>;
+export type MemberImportRowResult = Infer<typeof memberImportRowResultSchema>;
+export type MemberImportResult = Infer<typeof memberImportResultSchema>;
 
 type MailboxAccessEventPageEnvelope = Infer<typeof mailboxAccessEventPageEnvelopeSchema>;
 

@@ -48,6 +48,12 @@ import {
   MAILBOX_IMPORT_ADDRESS_MAX_LENGTH,
   MAILBOX_IMPORT_DISPLAY_NAME_MAX_LENGTH,
   MAILBOX_IMPORT_MAX_ROWS,
+  MEMBER_IMPORT_DOMAIN_MAX_LENGTH,
+  MEMBER_IMPORT_EMAIL_MAX_LENGTH,
+  MEMBER_IMPORT_MAILBOX_MAX_LENGTH,
+  MEMBER_IMPORT_MAX_ROWS,
+  MEMBER_IMPORT_NAME_MAX_LENGTH,
+  MEMBER_IMPORT_ROLE_MAX_LENGTH,
   MAILBOX_IMPORT_MEMBERS_MAX_LENGTH,
   MAILBOX_LIST_SCOPES,
   MAILBOX_MAX_PER_ORGANIZATION,
@@ -185,6 +191,9 @@ import type {
   MailDnsRecordPatch,
   MailDnsRecordType,
   MailboxImportRowInput,
+  MemberImportFeatures,
+  MemberImportInput,
+  MemberImportRowInput,
   MailboxListScope,
   MailboxPermission,
   MailTemplateInput,
@@ -901,6 +910,44 @@ export async function importMailboxesRoute(request: Request): Promise<NextRespon
     viewerOf(target),
     input.value.rows,
     input.value.dry_run,
+    name => mockDomainStore.resolve(organizationId, name)
+  );
+  return result.ok ? success(result.value) : forbidden();
+}
+
+/**
+ * A roster import: invites each row, reserves each a personal mailbox, and starts each invitation
+ * with the chosen grants. Owners and admins only.
+ */
+export async function importMembersRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const body = await jsonObject(request, maxMailboxImportBodyBytes);
+  if (!body.ok) return body.response;
+  const input = memberImportBody(body.value);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'member-imports',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: {
+        dry_run: input.value.dryRun,
+        domain: input.value.domain,
+        features: input.value.features,
+        rows: input.value.rows,
+      },
+      fieldMap: { dry_run: 'dry_run', domain: 'domain', features: 'features', rows: 'rows' },
+    });
+  }
+  const organizationId = target.organizationId;
+  const result = mockMailboxStore.importMembers(
+    organizationId,
+    viewerOf(target),
+    input.value,
     name => mockDomainStore.resolve(organizationId, name)
   );
   return result.ok ? success(result.value) : forbidden();
@@ -4335,6 +4382,62 @@ function mailboxImportBody(
     clean.push({ address: item.address, display_name: displayName, members: item.members });
   }
   return { ok: true, value: { dry_run: dryRun, rows: clean } };
+}
+
+function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportInput> {
+  const { dry_run: dryRun, domain, features, rows } = value;
+  if (typeof dryRun !== 'boolean') {
+    return {
+      ok: false,
+      response: validationFailed({ dry_run: ['The dry_run field is required'] }),
+    };
+  }
+  if (!boundedString(domain, MEMBER_IMPORT_DOMAIN_MAX_LENGTH) || domain.trim() === '') {
+    return { ok: false, response: validationFailed({ domain: ['The domain field is required'] }) };
+  }
+  let grants: MemberImportFeatures = {
+    broadcasts: false,
+    contacts: true,
+    templates: true,
+    api_keys: false,
+  };
+  if (features !== undefined && features !== null) {
+    const item = (typeof features === 'object' ? features : {}) as Record<string, unknown>;
+    const keys = ['broadcasts', 'contacts', 'templates', 'api_keys'] as const;
+    if (keys.some(key => typeof item[key] !== 'boolean')) {
+      return {
+        ok: false,
+        response: validationFailed({ features: ['The features field is invalid'] }),
+      };
+    }
+    grants = {
+      broadcasts: item.broadcasts === true,
+      contacts: item.contacts === true,
+      templates: item.templates === true,
+      api_keys: item.api_keys === true,
+    };
+  }
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length > MEMBER_IMPORT_MAX_ROWS) {
+    return { ok: false, response: validationFailed({ rows: ['The rows field is invalid'] }) };
+  }
+  const clean: MemberImportRowInput[] = [];
+  for (const row of rows as unknown[]) {
+    const item = (row !== null && typeof row === 'object' ? row : {}) as Record<string, unknown>;
+    const name = item.name ?? '';
+    const role = item.role ?? '';
+    const mailbox = item.mailbox ?? '';
+    if (
+      !boundedString(item.email, MEMBER_IMPORT_EMAIL_MAX_LENGTH) ||
+      item.email === '' ||
+      !boundedString(name, MEMBER_IMPORT_NAME_MAX_LENGTH) ||
+      !boundedString(role, MEMBER_IMPORT_ROLE_MAX_LENGTH) ||
+      !boundedString(mailbox, MEMBER_IMPORT_MAILBOX_MAX_LENGTH)
+    ) {
+      return { ok: false, response: validationFailed({ rows: ['A row is invalid'] }) };
+    }
+    clean.push({ email: item.email, name, role, mailbox });
+  }
+  return { ok: true, value: { dryRun, domain: domain.trim(), features: grants, rows: clean } };
 }
 
 function positiveInteger(value: string | null, fallback: number): number {

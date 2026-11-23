@@ -35,6 +35,13 @@ export const MAILBOX_IMPORT_MAX_ROWS = 500;
 export const MAILBOX_IMPORT_ADDRESS_MAX_LENGTH = 320;
 export const MAILBOX_IMPORT_DISPLAY_NAME_MAX_LENGTH = 480;
 export const MAILBOX_IMPORT_MEMBERS_MAX_LENGTH = 8192;
+/** Roster import (`POST /v1/member-imports`) bounds, as the contract states them. */
+export const MEMBER_IMPORT_MAX_ROWS = 500;
+export const MEMBER_IMPORT_EMAIL_MAX_LENGTH = 320;
+export const MEMBER_IMPORT_NAME_MAX_LENGTH = 480;
+export const MEMBER_IMPORT_ROLE_MAX_LENGTH = 16;
+export const MEMBER_IMPORT_MAILBOX_MAX_LENGTH = 320;
+export const MEMBER_IMPORT_DOMAIN_MAX_LENGTH = 253;
 /** 5000 rows of 100 members each fit well within it. */
 export const MAILBOX_EXPORT_MAX_BYTES = 24 * 1024 * 1024;
 export const MAILBOX_LIST_SCOPES = ['usable'] as const;
@@ -668,6 +675,7 @@ export const mailboxAccessEventTypeSchema = union([
   literal('connection_revoked_on_leave'),
   literal('agent_granted'),
   literal('agent_revoked'),
+  literal('owner_assigned'),
 ]);
 
 export const mailboxAccessEventSchema = strictObject({
@@ -1197,6 +1205,45 @@ export const mailboxImportResultSchema = strictObject({
   succeeded: nonnegativeIntegerSchema,
   failed: nonnegativeIntegerSchema,
   rows: array(mailboxImportRowResultSchema),
+});
+
+export const memberImportRowStatusSchema = union([
+  literal('valid'),
+  literal('invited'),
+  literal('created'),
+  literal('skipped'),
+  literal('failed'),
+]);
+
+export const memberImportSkipReasonSchema = union([
+  literal('already_member'),
+  literal('already_invited'),
+  literal('mailbox_taken'),
+]);
+
+export const memberImportRowResultSchema = strictObject({
+  row: positiveIntegerSchema,
+  email: string(),
+  address: string(),
+  status: memberImportRowStatusSchema,
+  skip_reason: nullable(memberImportSkipReasonSchema),
+  error_code: nullable(string()),
+  mailbox_id: nullable(safeIdSchema),
+  invitation_id: nullable(safeIdSchema),
+  email_send_status: nullable(
+    union([literal('accepted_by_provider'), literal('failed'), literal('not_configured')])
+  ),
+});
+
+export const memberImportResultSchema = strictObject({
+  dry_run: boolean(),
+  total: nonnegativeIntegerSchema,
+  valid: nonnegativeIntegerSchema,
+  invited: nonnegativeIntegerSchema,
+  created: nonnegativeIntegerSchema,
+  skipped: nonnegativeIntegerSchema,
+  failed: nonnegativeIntegerSchema,
+  rows: array(memberImportRowResultSchema),
 });
 
 /** A calendar day `YYYY-MM-DD` the unified inbox accepts as `since` or `until`: 1970 or later. */
