@@ -18,6 +18,7 @@ const messages = {
     },
   },
   tabs: {
+    notifications: '通知',
     profile: '个人资料',
     preferences: '偏好',
     api: 'API',

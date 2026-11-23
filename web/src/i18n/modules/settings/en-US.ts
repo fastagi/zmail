@@ -15,6 +15,7 @@ const messages = {
     },
   },
   tabs: {
+    notifications: 'Notifications',
     profile: 'Profile',
     preferences: 'Preferences',
     api: 'API',

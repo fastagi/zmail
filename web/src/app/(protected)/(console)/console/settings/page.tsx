@@ -1,11 +1,12 @@
 import { lazy, Suspense } from 'react';
-import { KeyRound, ShieldCheck, SlidersHorizontal, UserRound } from 'lucide-react';
+import { Bell, KeyRound, ShieldCheck, SlidersHorizontal, UserRound } from 'lucide-react';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { isWebFeatureEnabled } from '@/config/features';
 import { ApiKeyPanel } from '@/features/api-key';
 import { MemberFeatureGate } from '@/features/mailbox/components/member-feature-gate';
+import { NotificationSettingsTab } from '@/features/notification/components/notification-settings-tab';
 import { getT } from '@/i18n/server';
 
 import { SettingsTabs } from './settings-tabs';
@@ -30,7 +31,7 @@ const UserSettingPanel = lazy(async () => {
   return { default: feature.UserSettingPanel };
 });
 
-const settingsTabs = ['profile', 'preferences', 'security', 'api'] as const;
+const settingsTabs = ['profile', 'preferences', 'notifications', 'security', 'api'] as const;
 
 /**
  * Replaceable settings surface for the starter console. `?tab=` opens one tab directly.
@@ -38,7 +39,12 @@ const settingsTabs = ['profile', 'preferences', 'security', 'api'] as const;
 export default async function SettingsPage() {
   const t = await getT('settings');
   const settingEnabled = isWebFeatureEnabled('setting');
-  const tabs = settingsTabs.filter(value => value !== 'preferences' || settingEnabled);
+  const notificationEnabled = isWebFeatureEnabled('notification');
+  const tabs = settingsTabs.filter(
+    value =>
+      (value !== 'preferences' || settingEnabled) &&
+      (value !== 'notifications' || notificationEnabled)
+  );
   // API keys work in an organization only while it grants them to the member.
   const gateApiKeys = isWebFeatureEnabled('organization') && isWebFeatureEnabled('mailbox');
   const apiTrigger = (
@@ -62,6 +68,12 @@ export default async function SettingsPage() {
             <TabsTrigger value="preferences">
               <SlidersHorizontal aria-hidden="true" />
               {t('tabs.preferences')}
+            </TabsTrigger>
+          ) : null}
+          {notificationEnabled ? (
+            <TabsTrigger value="notifications">
+              <Bell aria-hidden="true" />
+              {t('tabs.notifications')}
             </TabsTrigger>
           ) : null}
           <TabsTrigger value="security">
@@ -88,6 +100,12 @@ export default async function SettingsPage() {
             <Suspense fallback={<UserSettingPanelFallback />}>
               <UserSettingPanel />
             </Suspense>
+          </TabsContent>
+        ) : null}
+
+        {notificationEnabled ? (
+          <TabsContent value="notifications" className="pt-5">
+            <NotificationSettingsTab />
           </TabsContent>
         ) : null}
 
