@@ -217,3 +217,32 @@ func TestResendMemberWelcomeRefusals(t *testing.T) {
 		t.Fatalf("audited %d resends; refusals are not audited as resends", resends)
 	}
 }
+
+// The Members tab reads member mailbox addresses from the mailbox list: an admin sees every
+// member's Zmail personal mailbox there, a member only their own.
+func TestAdminListsEveryMemberPersonalMailbox(t *testing.T) {
+	f, _ := newResendFixture(t)
+	ctx := context.Background()
+	owned := func(viewer domain.OrganizationContext) map[string]uint {
+		t.Helper()
+		mailboxes, err := f.service.ListMailboxes(ctx, viewer, MailboxListScopeAll)
+		if err != nil {
+			t.Fatalf("ListMailboxes: %v", err)
+		}
+		addresses := map[string]uint{}
+		for _, mailbox := range mailboxes {
+			if mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerUserID != nil {
+				addresses[mailbox.Address] = *mailbox.OwnerUserID
+			}
+		}
+		return addresses
+	}
+	admin := owned(viewerOf(10, 904, domain.OrganizationRoleAdmin))
+	if admin["alice@acme.example"] != 902 || admin["owner@acme.example"] != txUser {
+		t.Fatalf("admin sees %v; want every member's personal mailbox with its owner", admin)
+	}
+	member := owned(viewerOf(10, 903, domain.OrganizationRoleMember))
+	if _, ok := member["alice@acme.example"]; ok {
+		t.Fatalf("member sees %v; another member's mailbox stays out of their list", member)
+	}
+}

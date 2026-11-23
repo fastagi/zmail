@@ -80,6 +80,13 @@ describe('member mailbox addresses', () => {
     );
   });
 
+  it('shows an admin another member mailbox it cannot open', async () => {
+    // As the API lists it to an admin: administer only, no view or send.
+    service.list.mockResolvedValue([mailbox(5, 'bo@acme.example', { owner_user_id: 6 })]);
+    renderAddresses(6);
+    expect(await screen.findByText('bo@acme.example')).toBeInTheDocument();
+  });
+
   it('shows nothing for a member without a mailbox', async () => {
     service.list.mockResolvedValue(mailboxes);
     const { container } = renderAddresses(9);
