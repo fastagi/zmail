@@ -178,7 +178,7 @@ export function ExternalConnectDialog({
                             <span
                               id={`${connector.id}-connector-hint`}
                               aria-hidden="true"
-                              className="block truncate text-xs text-text-muted"
+                              className="block text-xs text-text-muted"
                             >
                               {t('external.connect.imapHint')}
                             </span>
