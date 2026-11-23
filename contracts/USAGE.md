@@ -118,9 +118,9 @@ so a browser client renders the metrics it knows and ignores the rest.
 | Method | Path | Auth | Behavior |
 |---|---|---|---|
 | `GET` | `/v1/usage/user` | Authentication session | Current user's effective summaries |
-| `GET` | `/v1/organization-usage` | Authentication session + verified `Organization-Id` | Owner/admin organization summaries |
+| `GET` | `/v1/organization-usage` | Authentication session + verified `Organization-Id` | Owner/admin/developer organization summaries |
 
-Organization members receive `403 PERMISSION.DENIED`. Every response, including errors, is
+Organization members without the `developer` grant receive `403 PERMISSION.DENIED`. Every response, including errors, is
 `Cache-Control: private, no-store`, `Pragma: no-cache`, and varies on authorization; organization
 responses also vary on `Organization-Id`.
 

@@ -25,12 +25,18 @@ type txHandlerFixture struct {
 	engine *gin.Engine
 	// role is the caller's organization role; member unless a test changes it.
 	role domain.OrganizationRole
+	// grant is the caller's developer grant: transactional sends of a member's key need one. It
+	// covers the fixture's sending domain unless a test changes it; nil is a member without one.
+	grant *domain.DeveloperGrant
 }
 
 func newTxHandlerFixture(t *testing.T, edit func(*Settings)) *txHandlerFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	f := &txHandlerFixture{txFixture: newTxFixture(t, edit), role: domain.OrganizationRoleMember}
+	f := &txHandlerFixture{
+		txFixture: newTxFixture(t, edit), role: domain.OrganizationRoleMember,
+		grant: &domain.DeveloperGrant{Domains: []string{"mail.example"}},
+	}
 	handler := NewHandler(f.service)
 	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
@@ -65,6 +71,10 @@ func newTxHandlerFixture(t *testing.T, edit func(*Settings)) *txHandlerFixture {
 	})
 	routes.MiddlewareGroup("organization_context", func(c *gin.Context) {
 		viewer := viewerOf(10, txUser, f.role)
+		viewer.DeveloperGrant = f.grant
+		if f.grant == nil {
+			viewer.Features.Developer = false
+		}
 		c.Request = c.Request.WithContext(domain.WithOrganizationContext(c.Request.Context(), viewer))
 		c.Next()
 	})

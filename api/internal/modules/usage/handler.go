@@ -50,7 +50,8 @@ func (h *Handler) UserList(c *gin.Context) {
 	h.list(c, domain.UsageTarget{Scope: domain.UsageScopeUser, SubjectID: userID})
 }
 
-// OrganizationList returns owner/admin usage for the verified active organization.
+// OrganizationList returns the verified active organization's usage to its owners, admins, and
+// developers; developers only read it.
 func (h *Handler) OrganizationList(c *gin.Context) {
 	setPrivateUsageResponse(c, true)
 	organization, ok := domain.OrganizationContextFromContext(c.Request.Context())
@@ -58,9 +59,12 @@ func (h *Handler) OrganizationList(c *gin.Context) {
 		response.HandleError(c, "Organization context required", domain.ErrOrganizationContextRequired)
 		return
 	}
+	// Owners and admins read organization usage; so does a member holding the developer grant.
 	if !organization.Role.CanManageOrganization() {
-		response.HandleError(c, "Organization usage access forbidden", domain.ErrPermissionDenied)
-		return
+		if _, _, developer := organization.DeveloperScope(); !developer {
+			response.HandleError(c, "Organization usage access forbidden", domain.ErrPermissionDenied)
+			return
+		}
 	}
 	h.list(c, domain.UsageTarget{
 		Scope:     domain.UsageScopeOrganization,

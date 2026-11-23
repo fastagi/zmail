@@ -95,6 +95,9 @@ type MailTemplateSummaryResponse struct {
 	Key                 *string                          `json:"key"`
 	From                *MailTemplateSenderResponse      `json:"from"`
 	VariableDefinitions []MailTemplateVariableDefinition `json:"variable_definitions"`
+	// OutsideSendingScope is true when the caller is a developer whose grant no longer covers this
+	// transactional template's sender: the template is read-only for them.
+	OutsideSendingScope bool `json:"outside_sending_scope"`
 }
 
 // MailTemplateSenderResponse is the sender of a transactional template.
@@ -177,10 +180,11 @@ func designJSON(design string) json.RawMessage {
 // parameter, by name and without bodies.
 // fastbuild:bounded-list max=200 reason=an organization keeps at most MaxMailTemplatesPerOrganization templates
 func (h *Handler) ListTemplates(c *gin.Context) {
-	organizationID, ok := currentOrganizationID(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
+	organizationID := viewer.OrganizationID
 	kind := domain.MailTemplateKind(c.Query("kind"))
 	if kind != "" && kind != domain.MailTemplateStandard && kind != domain.MailTemplateTransactional {
 		response.HandleError(c, "Invalid template kind", domain.ErrInvalidInput)
@@ -191,9 +195,12 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 		response.HandleError(c, "Failed to list mail templates", err)
 		return
 	}
+	outside := h.service.TemplatesOutsideSendingScope(c.Request.Context(), viewer, templates)
 	summaries := make([]MailTemplateSummaryResponse, 0, len(templates))
 	for _, template := range templates {
-		summaries = append(summaries, toMailTemplateSummary(template))
+		summary := toMailTemplateSummary(template)
+		summary.OutsideSendingScope = outside[template.ID]
+		summaries = append(summaries, summary)
 	}
 	privateResponse(c)
 	response.Success(c, summaries)
@@ -209,8 +216,13 @@ func (h *Handler) GetTemplate(c *gin.Context) {
 		response.HandleError(c, "Failed to get mail template", err)
 		return
 	}
+	full := toMailTemplateResponse(template)
+	if viewer, ok := domain.OrganizationContextFromContext(c.Request.Context()); ok {
+		full.OutsideSendingScope = h.service.TemplatesOutsideSendingScope(
+			c.Request.Context(), viewer, []*domain.MailTemplate{template})[template.ID]
+	}
 	privateResponse(c)
-	response.Success(c, toMailTemplateResponse(template))
+	response.Success(c, full)
 }
 
 func (h *Handler) CreateTemplate(c *gin.Context) {

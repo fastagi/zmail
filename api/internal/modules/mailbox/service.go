@@ -219,6 +219,7 @@ type Service interface {
 	MemberJoined(ctx context.Context, event domain.OrganizationMemberJoinedEvent) error
 	// ListTemplates lists templates of one kind, or every template when kind is empty.
 	ListTemplates(ctx context.Context, organizationID uint, kind domain.MailTemplateKind) ([]*domain.MailTemplate, error)
+	TemplatesOutsideSendingScope(ctx context.Context, viewer domain.OrganizationContext, templates []*domain.MailTemplate) map[uint]bool
 	GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error)
 	// CreateTemplate, UpdateTemplate, and DeleteTemplate let every member write standard
 	// templates and only owners and admins write transactional ones.
@@ -314,6 +315,11 @@ type Service interface {
 	UpdateMemberWelcomeSetting(ctx context.Context, viewer domain.OrganizationContext, input MemberWelcomeInput) (MemberWelcomeSetting, error)
 	// PreviewMemberWelcome renders welcome copy with sample values; owners and admins only.
 	PreviewMemberWelcome(ctx context.Context, viewer domain.OrganizationContext, input MemberWelcomePreviewInput) (MemberWelcomePreview, error)
+	// ListMemberWelcomeMails lists the mailboxes that can be welcomed with their latest welcome
+	// mail; owners and admins only.
+	ListMemberWelcomeMails(ctx context.Context, viewer domain.OrganizationContext) ([]MemberWelcomeMail, error)
+	// ResendMemberWelcome sends a mailbox's welcome mail again; owners and admins only.
+	ResendMemberWelcome(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (MemberWelcomeMail, error)
 	// MailSignature reads the viewer's own signature for a mailbox they may send from.
 	MailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailSignature, error)
 	// SaveMailSignature replaces the viewer's own signature for a mailbox they may send from; an

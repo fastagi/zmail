@@ -22,9 +22,10 @@ type SendLaneUsage struct {
 }
 
 // ListSendLanes counts the usage of every lane over the rolling window ending at computedAt, in
-// the order transactional, broadcast, personal. Only owners and admins may read usage.
+// the order transactional, broadcast, personal. Owners, admins, and developers may read usage; the
+// numbers are the whole organization's.
 func (s *service) ListSendLanes(ctx context.Context, viewer domain.OrganizationContext) ([]SendLaneUsage, time.Time, error) {
-	if !viewer.Role.CanManageOrganization() {
+	if !canUseDeveloperTools(viewer) {
 		return nil, time.Time{}, domain.ErrPermissionDenied
 	}
 	computedAt := s.now().UTC()

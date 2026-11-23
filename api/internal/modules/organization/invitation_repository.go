@@ -102,8 +102,16 @@ func (r *repository) CreateInvitation(ctx context.Context, invitation *domain.Or
 		}
 		// GORM leaves a false grant out of the insert in favor of the column default, so the
 		// grants are always written explicitly.
-		return tx.Model(&OrganizationInvitationPO{}).Where("id = ?", invitationPO.ID).
-			UpdateColumns(memberFeatureColumns(invitation.Features)).Error
+		if grantErr := tx.Model(&OrganizationInvitationPO{}).Where("id = ?", invitationPO.ID).
+			UpdateColumns(memberFeatureColumns(invitation.Features)).Error; grantErr != nil {
+			return grantErr
+		}
+		if !invitation.Features.Developer || invitation.Role != domain.OrganizationRoleMember {
+			return nil
+		}
+		return tx.Omit(clause.Associations).Create(&InvitationDeveloperGrantPO{
+			InvitationID: invitationPO.ID, CreatedAt: now,
+		}).Error
 	})
 	if err != nil {
 		return err
@@ -377,6 +385,19 @@ func (r *repository) AcceptInvitation(ctx context.Context, tokenHash string, use
 		membershipPO.CanUseTemplates = granted.Templates
 		membershipPO.CanUseAPIKeys = granted.APIKeys
 		membershipPO.CanUseMailClients = granted.MailClients
+		var developerInvites int64
+		if countErr := tx.Model(&InvitationDeveloperGrantPO{}).
+			Where("invitation_id = ?", invitationPO.ID).Count(&developerInvites).Error; countErr != nil {
+			return countErr
+		}
+		invitationPO.GrantDeveloper = developerInvites > 0
+		if invitationPO.GrantDeveloper && invitationPO.Role == string(domain.OrganizationRoleMember) {
+			grant, grantErr := grantDeveloperOnAccept(tx, invitationPO, membershipPO.ID, now)
+			if grantErr != nil {
+				return grantErr
+			}
+			membershipPO.DeveloperGrant = grant
+		}
 
 		result := tx.Model(&OrganizationInvitationPO{}).
 			Where("id = ? AND token_hash = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitationPO.ID, tokenHash).

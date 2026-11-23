@@ -652,6 +652,15 @@ TABLE mailboxes
   COLUMN external_mail_tenant_id bigint
   COLUMN pending_owner_email character varying(320)
 
+TABLE member_developer_grants
+  COLUMN membership_id bigint NOT NULL
+  COLUMN organization_id bigint NOT NULL
+  COLUMN all_domains boolean NOT NULL DEFAULT false
+  COLUMN scope_domains text NOT NULL DEFAULT '[]'::text
+  COLUMN granted_by bigint
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE member_welcome_mails
   COLUMN id bigint NOT NULL DEFAULT nextval('member_welcome_mails_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -659,6 +668,10 @@ TABLE member_welcome_mails
   COLUMN recipient character varying(320) NOT NULL
   COLUMN transactional_message_id bigint
   COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN last_sent_at timestamp with time zone
+  COLUMN resend_count integer NOT NULL DEFAULT 0
+  COLUMN resend_window_started_at timestamp with time zone
+  COLUMN resend_window_count integer NOT NULL DEFAULT 0
 
 TABLE member_welcome_settings
   COLUMN organization_id bigint NOT NULL
@@ -732,6 +745,10 @@ TABLE oauth_sign_in_states
   COLUMN redirect_uri character varying(2048) NOT NULL
   COLUMN return_url character varying(2048) NOT NULL
   COLUMN expires_at timestamp with time zone NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE organization_invitation_developer_grants
+  COLUMN invitation_id bigint NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL
 
 TABLE organization_invitations
@@ -1052,6 +1069,7 @@ TABLE webhook_endpoints
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
   COLUMN deleted_at timestamp with time zone
+  COLUMN developer_owned boolean NOT NULL DEFAULT false
 
 TABLE webhook_events
   COLUMN id bigint NOT NULL DEFAULT nextval('webhook_events_id_seq'::regclass)
@@ -1332,6 +1350,12 @@ CONSTRAINT mailboxes.mailboxes_external_mail_tenant_id_fkey FOREIGN KEY (externa
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
+CONSTRAINT member_developer_grants.chk_member_developer_grants_scope CHECK ((all_domains OR (scope_domains <> '[]'::text)))
+CONSTRAINT member_developer_grants.fk_member_developer_grants_granted_by FOREIGN KEY (granted_by) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT member_developer_grants.fk_member_developer_grants_membership FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
+CONSTRAINT member_developer_grants.fk_member_developer_grants_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT member_developer_grants.member_developer_grants_pkey PRIMARY KEY (membership_id)
+CONSTRAINT member_welcome_mails.chk_member_welcome_mails_resends CHECK (((resend_count >= 0) AND (resend_window_count >= 0)))
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_message FOREIGN KEY (transactional_message_id) REFERENCES transactional_messages(id) ON DELETE SET NULL
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -1359,6 +1383,8 @@ CONSTRAINT oauth_sign_in_states.chk_oauth_sign_in_states_nonce_hash CHECK (((non
 CONSTRAINT oauth_sign_in_states.chk_oauth_sign_in_states_provider CHECK (((provider)::text = 'google'::text))
 CONSTRAINT oauth_sign_in_states.chk_oauth_sign_in_states_state_hash CHECK (((state_hash)::text ~ '^[0-9a-f]{64}$'::text))
 CONSTRAINT oauth_sign_in_states.oauth_sign_in_states_pkey PRIMARY KEY (state_hash)
+CONSTRAINT organization_invitation_developer_grants.fk_organization_invitation_developer_grants_invitation FOREIGN KEY (invitation_id) REFERENCES organization_invitations(id) ON DELETE CASCADE
+CONSTRAINT organization_invitation_developer_grants.organization_invitation_developer_grants_pkey PRIMARY KEY (invitation_id)
 CONSTRAINT organization_invitations.fk_organization_invitations_acceptor FOREIGN KEY (accepted_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_invitations.fk_organization_invitations_inviter FOREIGN KEY (invited_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_invitations.fk_organization_invitations_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -1685,6 +1711,8 @@ INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id
 INDEX CREATE INDEX idx_mailboxes_pending_owner ON mailboxes USING btree (organization_id, pending_owner_email) WHERE ((pending_owner_email IS NOT NULL) AND (deleted_at IS NULL))
 INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)
+INDEX CREATE INDEX idx_member_developer_grants_organization ON member_developer_grants USING btree (organization_id)
+INDEX CREATE UNIQUE INDEX member_developer_grants_pkey ON member_developer_grants USING btree (membership_id)
 INDEX CREATE UNIQUE INDEX idx_member_welcome_mails_mailbox ON member_welcome_mails USING btree (mailbox_id)
 INDEX CREATE INDEX idx_member_welcome_mails_message ON member_welcome_mails USING btree (transactional_message_id) WHERE (transactional_message_id IS NOT NULL)
 INDEX CREATE INDEX idx_member_welcome_mails_organization ON member_welcome_mails USING btree (organization_id)
@@ -1707,6 +1735,7 @@ INDEX CREATE INDEX idx_notifications_user_read ON notifications USING btree (use
 INDEX CREATE UNIQUE INDEX notifications_pkey ON notifications USING btree (id)
 INDEX CREATE INDEX idx_oauth_sign_in_states_expires ON oauth_sign_in_states USING btree (expires_at)
 INDEX CREATE UNIQUE INDEX oauth_sign_in_states_pkey ON oauth_sign_in_states USING btree (state_hash)
+INDEX CREATE UNIQUE INDEX organization_invitation_developer_grants_pkey ON organization_invitation_developer_grants USING btree (invitation_id)
 INDEX CREATE INDEX idx_organization_invitations_accepted_at ON organization_invitations USING btree (accepted_at)
 INDEX CREATE INDEX idx_organization_invitations_accepted_by ON organization_invitations USING btree (accepted_by)
 INDEX CREATE INDEX idx_organization_invitations_expires_at ON organization_invitations USING btree (expires_at)

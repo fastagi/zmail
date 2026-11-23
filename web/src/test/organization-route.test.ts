@@ -411,6 +411,40 @@ describe('organization browser route boundary', () => {
     expect(await fixed.json()).toMatchObject({ error_code: 'ORGANIZATION.MEMBER_FEATURES_FIXED' });
   });
 
+  it('grants mock developer access with a sending scope', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockOwner());
+    const { updateOrganizationMemberFeaturesRoute } = await import(
+      '@/features/organization/server/organization-lifecycle-route'
+    );
+    const patch = (body: unknown) =>
+      updateOrganizationMemberFeaturesRoute(
+        request('/api/organizations/1/members/3/features', {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        }),
+        '1',
+        '3'
+      );
+
+    // A grant needs a scope.
+    expect((await patch({ developer: true })).status).toBe(422);
+
+    const granted = await patch({ developer: true, developer_domains: ['Fast-UI.com'] });
+    expect(granted.status).toBe(200);
+    expect(await granted.json()).toMatchObject({
+      data: {
+        features: { developer: true, api_keys: true },
+        developer_scope: { all_domains: false, domains: ['fast-ui.com'] },
+      },
+    });
+
+    const withdrawn = await patch({ developer: false });
+    expect(await withdrawn.json()).toMatchObject({
+      data: { features: { developer: false, api_keys: false }, developer_scope: null },
+    });
+  });
+
   it('forwards member feature changes through one fixed production path', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';

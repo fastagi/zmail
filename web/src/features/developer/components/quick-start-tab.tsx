@@ -19,6 +19,7 @@ import type {
   TransactionalMessage,
 } from '@/features/developer/types';
 import { useDeveloperErrorMessage } from '@/features/developer/utils/developer-error';
+import { offersSenderDomain } from '@/features/developer/utils/developer-scope';
 import { logStatus } from '@/features/developer/utils/log-status';
 import { buildSnippets, type Snippets } from '@/features/developer/utils/snippets';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
@@ -83,10 +84,16 @@ function isQuickStartKey(apiKey: ApiKey, mode: DeveloperMode, now: number): bool
 }
 
 /** A domain a transactional template may send from, as the template editor offers them. */
-function senderDomain(domains: readonly MailboxDomain[]): string | null {
+function senderDomain(
+  organization: MailOrganization,
+  domains: readonly MailboxDomain[]
+): string | null {
   return (
-    domains.find(domain => domain.kind === 'organization' || domain.provider === 'log')?.domain ??
-    null
+    domains.find(
+      domain =>
+        (domain.kind === 'organization' || domain.provider === 'log') &&
+        offersSenderDomain(organization, domain)
+    )?.domain ?? null
   );
 }
 
@@ -124,11 +131,15 @@ export function QuickStartTab({
   const [sent, setSent] = useState<TransactionalMessage | null>(null);
   const [now] = useState(() => Date.now());
 
-  const items = templates.data ?? [];
+  // A template whose sender left a developer's scope cannot be sent with their key.
+  const items = useMemo(
+    () => (templates.data ?? []).filter(item => !item.outside_sending_scope),
+    [templates.data]
+  );
   const template = items.find(item => item.id === chosenTemplateId) ?? items[0] ?? null;
   const detail = useMailTemplate(organization.id, template?.id ?? null);
 
-  const domain = senderDomain(domains);
+  const domain = senderDomain(organization, domains);
   const ownKeys = (apiKeys.data?.items ?? []).filter(apiKey => isQuickStartKey(apiKey, mode, now));
   const createdHere = created?.mode === mode ? created : null;
   const sentHere = sent?.mode === mode ? sent : null;

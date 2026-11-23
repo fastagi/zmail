@@ -51,6 +51,69 @@ are public; the two Google routes share the login per-IP quota. New error codes:
 disables the routes' Google behavior), and `domain.User` gains `EmailVerifiedAt`, which stays out of
 JSON. A fork that builds the handler by hand or copies users field by field updates those call sites.
 
+## Unreleased — Developer access
+
+### High — Deploy the Web before the API
+
+Organization, context, and member responses gain `features.developer` and `developer_scope`. The
+Web parses them with strict schemas, so an older Web rejects the new API response. Ship the Web
+first: the new Web reads an older API's views as having no developer grant.
+
+### Medium — New table `member_developer_grants`
+
+Migration `2026_12_28_090000_add_member_developer_grants` (organization starter) creates
+`member_developer_grants`: one row per membership (primary key `membership_id`, `ON DELETE
+CASCADE`), its `organization_id`, `all_domains`, `scope_domains` (`text`, a JSON array), and
+`granted_by`, with the check `chk_member_developer_grants_scope` (all domains or at least one
+domain). It only creates a table; its foreign keys take a brief `SHARE ROW EXCLUSIVE` lock on
+`organization_memberships`, `organizations`, and `users` while the table is created, which blocks
+writes to those tables for that moment but not reads. The same migration creates
+`organization_invitation_developer_grants` (primary key `invitation_id`, `ON DELETE CASCADE`), which
+marks invitations and roster rows that give developer access on accept, scoped to the organization's
+default mail domain then. Migration
+`2026_12_28_090100_add_webhook_endpoint_developer_owned` (webhook starter) adds
+`webhook_endpoints.developer_owned boolean NOT NULL DEFAULT false`; the constant default makes this
+a catalog-only change, but `ADD COLUMN` still takes an `ACCESS EXCLUSIVE` lock on
+`webhook_endpoints` for that moment, so run it outside a long transaction that reads endpoints.
+Existing endpoints stay organization-owned. Rolling back drops the column and every developer grant.
+
+### Medium — Developer grant widens owner/admin-only routes
+
+A member with the `developer` feature may now manage transactional templates within the grant's
+sending domains, manage the webhooks they created, list and remove suppressions, and read send
+lanes and organization usage. Transactional sends by a member's API key, and console test sends by
+a member, now need the developer grant (`403 ORGANIZATION.FEATURE_NOT_GRANTED` otherwise) and a
+sender inside the grant (`403 DEVELOPER.DOMAIN_NOT_ALLOWED`). A fork that relied on a member key
+with only `api_keys` sending transactional mail must grant `developer`. Webhook endpoints created by
+a member receive only `email.*` events from senders inside the creator's current grant. See
+"Developer access" in `contracts/MAILBOXES.md` and `contracts/WEBHOOKS.md`.
+## Unreleased — Resending member welcome mail
+
+### Low — Deploy the API before the Web
+
+The Web gains `GET`/`POST /api/member-welcome-mails` and reads three new error codes
+(`MAILBOX.WELCOME_NOT_ELIGIBLE`, `MAILBOX.WELCOME_DISABLED`, `MAILBOX.WELCOME_RESEND_LIMITED`).
+Against an older API the new welcome status list on the Invitations tab shows a load error; nothing
+else changes, so ship the API first.
+
+### Medium — Resend columns on `member_welcome_mails`
+
+Migration `2026_12_27_140000_add_member_welcome_resends` adds `last_sent_at`, `resend_count`,
+`resend_window_started_at`, and `resend_window_count` to `member_welcome_mails`, plus a check that
+the counters are not negative. Every column is nullable or has a constant default, so PostgreSQL
+adds them without rewriting the table. The table stays one row per mailbox, now pointing at the
+latest welcome mail. Roll it back before `2026_12_26_100000_add_member_welcome_mail`.
+
+### Medium — Owners and admins can resend a welcome mail
+
+`GET /v1/member-welcome-mails` lists every mailbox that can be welcomed with its latest welcome
+(`not_sent`, `queued`, `sent`, `failed`, `suppressed`, or `expired`), without recipient addresses.
+`POST /v1/member-welcome-mails` with `{ "mailbox_id" }` stores a new transactional message keyed
+`member-welcome:<mailbox id>:<n>`, at most once a minute and five times in 24 hours per mailbox
+(`429 MAILBOX.WELCOME_RESEND_LIMITED` with `Retry-After`), and is audited as
+`member_welcome_mails.resend`. A fork that counts send-log rows by the exact key
+`member-welcome:<mailbox id>` should match the `member-welcome:<mailbox id>:` prefix too. See
+"Welcome Mail Status" and "Resending A Welcome Mail" in `contracts/MAILBOXES.md`.
 ## Unreleased — Default mail domain
 
 ### High — Deploy the Web before the API

@@ -4441,7 +4441,8 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
     // mail_clients came later: absent means granted, as the API reads it.
     if (
       keys.some(key => typeof item[key] !== 'boolean') ||
-      (item.mail_clients !== undefined && typeof item.mail_clients !== 'boolean')
+      (item.mail_clients !== undefined && typeof item.mail_clients !== 'boolean') ||
+      (item.developer !== undefined && typeof item.developer !== 'boolean')
     ) {
       return {
         ok: false,
@@ -4454,6 +4455,7 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
       templates: item.templates === true,
       api_keys: item.api_keys === true,
       mail_clients: item.mail_clients !== false,
+      ...(item.developer === true ? { developer: true } : {}),
     };
   }
   if (!Array.isArray(rows) || rows.length === 0 || rows.length > MEMBER_IMPORT_MAX_ROWS) {
@@ -4465,6 +4467,9 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
     const name = item.name ?? '';
     const role = item.role ?? '';
     const mailbox = item.mailbox ?? '';
+    if (item.developer !== undefined && typeof item.developer !== 'boolean') {
+      return { ok: false, response: validationFailed({ rows: ['A row is invalid'] }) };
+    }
     if (
       !boundedString(item.email, MEMBER_IMPORT_EMAIL_MAX_LENGTH) ||
       item.email === '' ||
@@ -4474,7 +4479,7 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
     ) {
       return { ok: false, response: validationFailed({ rows: ['A row is invalid'] }) };
     }
-    clean.push({ email: item.email, name, role, mailbox });
+    clean.push({ email: item.email, name, role, mailbox, ...(item.developer === true ? { developer: true } : {}) });
   }
   return { ok: true, value: { dryRun, domain: domain.trim(), features: grants, rows: clean } };
 }
@@ -6048,6 +6053,68 @@ export async function previewMemberWelcomeRoute(request: Request): Promise<NextR
   }
   const result = mockMemberWelcomeStore.preview(target.context.organization_name, input.value);
   return result.ok ? success(result.value) : validationFailed(result.fields);
+}
+
+/** Every mailbox that can be welcomed, with its latest welcome mail. */
+export async function listMemberWelcomeMailsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'member-welcome-mails',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const candidates = mockMailboxStore.welcomeCandidates(
+    target.organizationId,
+    target.context.user_id
+  );
+  return success(mockMemberWelcomeStore.list(target.organizationId, candidates));
+}
+
+/** Sends a mailbox's welcome mail again. */
+export async function resendMemberWelcomeMailRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const raw = await jsonObject(request, maxMemberWelcomeBodyBytes);
+  if (!raw.ok) return raw.response;
+  const mailboxId = raw.value.mailbox_id;
+  if (typeof mailboxId !== 'number' || !Number.isSafeInteger(mailboxId) || mailboxId < 1) {
+    return validationFailed({ mailbox_id: ['The mailbox_id field must be a positive integer'] });
+  }
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'member-welcome-mails',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { mailbox_id: mailboxId },
+      fieldMap: { mailbox_id: 'mailbox_id' },
+    });
+  }
+  if (!mockMailboxStore.hasMailbox(target.organizationId, mailboxId)) return mailboxNotFound();
+  const candidate = mockMailboxStore
+    .welcomeCandidates(target.organizationId, target.context.user_id)
+    .find(item => item.mailbox_id === mailboxId);
+  if (!candidate) {
+    return failure(409, ApiErrorCode.MAILBOX_WELCOME_NOT_ELIGIBLE, 'Mailbox cannot be welcomed');
+  }
+  const result = mockMemberWelcomeStore.resend(target.organizationId, candidate);
+  if (result.ok) return success(result.value, 201);
+  if (result.error === 'disabled') {
+    return failure(409, ApiErrorCode.MAILBOX_WELCOME_DISABLED, 'Member welcome mails are off');
+  }
+  const limited = failure(
+    429,
+    ApiErrorCode.MAILBOX_WELCOME_RESEND_LIMITED,
+    'Member welcome mail resent too often'
+  );
+  limited.headers.set('Retry-After', String(result.retryAfterSeconds));
+  return limited;
 }
 
 /* Thread assignment (`contracts/MAILBOXES.md`, Assignment): shared Zmail mailboxes only. */

@@ -30,8 +30,27 @@ strong encryption key. The Web feature never silently falls back to mock data in
 
 Every endpoint, event, delivery, and attempt belongs to exactly one organization. HTTP management
 routes require authentication, a verified `Organization-Id` context, and an `owner` or `admin`
-organization role. Members receive `403 PERMISSION.DENIED`; cross-organization identifiers resolve
-as `404` without revealing existence.
+organization role, or a `member` holding the developer grant (see "Developer access" in
+[MAILBOXES.md](MAILBOXES.md#developer-access)). Other members receive `403 PERMISSION.DENIED`;
+cross-organization identifiers resolve as `404` without revealing existence.
+
+Every endpoint records its creator (`created_by`). Owners and admins see and manage every endpoint
+of the organization. A developer lists, changes, tests, and reads the deliveries and attempts of
+only the endpoints they created; any other endpoint, delivery, or attempt answers `404` exactly like
+one that does not exist. Endpoints a developer created stay when the grant is withdrawn, and owners
+and admins keep managing them.
+
+Which endpoints receive a published event is decided when it is published:
+
+- an endpoint an owner or admin created belongs to the organization and receives every event it
+  subscribes to, even after its creator leaves or changes role;
+- an endpoint a developer created follows its creator's current membership: every event while the
+  creator is an owner or admin; otherwise only events about programmatic mail (transactional
+  `email.*` events) whose sender domain the creator's developer grant covers at that moment, and
+  nothing while the creator holds no grant or has left the organization. Mailbox `mail.message.*`
+  events never reach it while its creator is a member, so a developer never learns about
+  colleagues' mail. Deliveries already queued finish under the rules at publish time;
+- `webhook.test` sent to one endpoint always reaches that endpoint.
 
 The browser cannot publish arbitrary events, override delivery state, read event payloads, or invoke
 an arbitrary URL. Downstream server modules publish only through `domain.WebhookPublisher`.
@@ -155,7 +174,8 @@ never removes events needed by pending or processing deliveries.
 
 ## HTTP API
 
-All routes below require authentication, active organization context, and owner/admin authorization.
+All routes below require authentication, active organization context, and owner/admin or developer
+authorization, with developers limited to their own endpoints as described above.
 Responses are `private, no-store` and vary on `Authorization` and `Organization-Id`.
 
 | Operation | Endpoint | Successful `data` |

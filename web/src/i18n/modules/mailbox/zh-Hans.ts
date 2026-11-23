@@ -1706,6 +1706,10 @@ const messages = {
         unreadable: '无法读取这个文件。',
       },
     },
+    memberMailboxes: {
+      label: '个人邮箱',
+      more: '另有 {count} 个',
+    },
     memberWelcome: {
       title: '欢迎邮件',
       description:
@@ -1734,6 +1738,42 @@ const messages = {
       retry: '重试',
       invalid: '请修改标红的内容。只能插入上面提供的信息。',
       fieldInvalid: '只能使用上面提供的信息，并且不要超过长度限制。',
+      mails: {
+        title: '欢迎邮件发送情况',
+        description:
+          '你的域名上每个成员邮箱最近一封欢迎邮件。如果发送失败、修改了内容，或对方弄丢了邮件，可以重新发送。',
+        empty: '你的域名上还没有成员邮箱。',
+        loadFailed: '无法加载欢迎邮件的发送情况。',
+        invitationPending: '已邀请，尚未加入',
+        resend: '重新发送欢迎邮件',
+        send: '发送欢迎邮件',
+        resendLabel: '重新发送 {address} 的欢迎邮件',
+        resent: '已重新发送 {address} 的欢迎邮件。',
+        sentFirst: '已发送 {address} 的欢迎邮件。',
+        suppressedToast: '没有发送：{address} 对应的收件地址以前退信或举报过垃圾邮件。请先把它移出屏蔽名单。',
+        resendCount: '已重发 {count} 次',
+        status: {
+          not_sent: '未发送',
+          queued: '发送中',
+          sent: '已发送',
+          failed: '发送失败',
+          suppressed: '未发送（已屏蔽）',
+          expired: '已发送',
+        },
+        detail: {
+          not_sent: '还没有发过欢迎邮件。',
+          queued: '{time} 进入发送队列。',
+          sent: '{time} 发出。',
+          expired: '{time} 发出。发送详情已过保留期。',
+          suppressed: '这个地址以前退信或举报过垃圾邮件，所以没有发送。',
+        },
+        failure: {
+          senderUnverified: '你的域名还没有验证，无法用 no-reply 地址发信。',
+          permanentBounce: '对方邮件服务器拒收了这封邮件。',
+          notConfigured: '这个 Zmail 实例还没有配置发信。',
+          other: '邮件没能送达。',
+        },
+      },
     },
     rosterImport: {
       open: '批量导入',
@@ -1750,7 +1790,8 @@ const messages = {
       domain: '邮箱域名',
       domainHint: '只写了前缀的行，会在 {domain} 上开邮箱。',
       features: '受邀成员可用的功能',
-      featuresHint: '管理员始终拥有全部功能。已经是成员的人，功能保持不变。',
+      featuresHint:
+        '管理员始终拥有全部功能。已经是成员的人，功能保持不变。“开发者”也可按行开通：在 developer 列填 yes，发件范围为组织默认域名。',
       check: '检查',
       checking: '正在检查…',
       importing: '正在导入 {count} 行…',
@@ -1759,10 +1800,6 @@ const messages = {
       previewSummary: '共 {total} 行：{ready} 行可导入，{noop} 行无需处理，{attention} 行需要处理',
       doneSummary:
         '共 {total} 行：已邀请 {invited} 人并预留 {reserved} 个邮箱，为现有成员开通 {created} 个，{noop} 行无需处理，{attention} 行需要处理',
-      doneToast:
-        '已邀请 {invited} 人，已为他们预留 {reserved} 个邮箱；为现有成员开通 {created} 个，{attention} 行需要处理',
-      retryToast:
-        '重试完成：已邀请 {invited} 人，预留 {reserved} 个邮箱，开通 {created} 个，仍有 {attention} 行需要处理',
       retryFailed: '重试需要处理的 {count} 行',
       downloadFailed: '下载需要处理的行',
       done: '完成',
@@ -1803,6 +1840,19 @@ const messages = {
         invited: '邀请已发出，邮箱已为对方预留。',
         invitedNoEmail: '邀请已创建，但邮件没有发出。可在「邀请」标签里重新发送。',
         created: '已是成员，个人邮箱已开通。',
+      },
+      welcomePreview: '导入后，会给这 {count} 位新成员各发一封欢迎邮件，说明如何登录和设置邮件客户端。',
+      welcomePreviewOff: '欢迎邮件已关闭，导入后不会发送。',
+      welcomeSettingsLink: '在「邀请」中修改或关闭',
+      welcomeSettingsLinkOff: '在「邀请」中开启',
+      toast: {
+        invited: '已邀请 {count} 人',
+        reserved: '已为他们预留 {count} 个邮箱',
+        created: '为现有成员开通 {count} 个邮箱',
+        attention: '{count} 行需要处理',
+        nothing: '没有需要导入的新内容',
+        retried: '重试完成',
+        separator: '，',
       },
       welcomeSummary: '欢迎邮件：已向 {queued} 位新成员发送，{failed} 封未能发送。',
       welcomeNotes: {
@@ -1891,6 +1941,9 @@ const messages = {
     folderLimitReached: '这个邮箱已有 100 个文件夹。请删除一个后再创建。',
     labelLimitReached: '这个邮箱已有 100 个标签。请删除一个后再创建。',
     searchTooBroad: '搜索范围太大，请输入更长的关键词。',
+    welcomeNotEligible: '这个邮箱不发欢迎邮件：只有成员或受邀者在你的域名上的个人邮箱会发。',
+    welcomeDisabled: '欢迎邮件已关闭。请先在上方开启，再重新发送。',
+    welcomeResendLimited: '这封欢迎邮件刚刚发过，或今天已重发 5 次。请稍后再试。',
     roleNotFound: '该角色已不存在，列表已刷新。',
     roleNameTaken: '已有同名角色。',
     roleLimitReached: '本组织已有 50 个角色，请先删除一个再新建。',

@@ -2,7 +2,15 @@
 
 import { useId, useState, type ChangeEvent } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Download, FileSpreadsheet, Globe, RotateCcw, Upload } from 'lucide-react';
+import {
+  AlertCircle,
+  Download,
+  FileSpreadsheet,
+  Globe,
+  MailCheck,
+  RotateCcw,
+  Upload,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -37,9 +45,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { ROUTES } from '@/constants/routes';
+import { getOrganizationRoute, ROUTES } from '@/constants/routes';
 import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { saveFile, useImportMembers } from '@/features/mailbox/hooks/use-mailbox-admin';
+import { useMemberWelcomeSetting } from '@/features/mailbox/hooks/use-member-welcome';
 import type {
   MemberImportFeatures,
   MemberImportResult,
@@ -64,8 +73,16 @@ const DEFAULT_FEATURES: MemberImportFeatures = {
   templates: true,
   api_keys: false,
   mail_clients: true,
+  developer: false,
 };
-const FEATURE_KEYS = ['broadcasts', 'contacts', 'templates', 'api_keys', 'mail_clients'] as const;
+const FEATURE_KEYS = [
+  'broadcasts',
+  'contacts',
+  'templates',
+  'api_keys',
+  'mail_clients',
+  'developer',
+] as const;
 
 type Step =
   | { kind: 'choose' }
@@ -271,10 +288,8 @@ function RosterImportSteps({
       const result = await importMembers.mutateAsync({ dryRun: false, domain, features, rows });
       setEdits({});
       setStep({ kind: 'done', rows, result });
-      const { invited, reserved, created, attention } = rosterSummary(result);
-      toast[attention > 0 ? 'warning' : 'success'](
-        t('admin.rosterImport.doneToast', { invited, reserved, created, attention })
-      );
+      const counts = rosterSummary(result);
+      toast[counts.attention > 0 ? 'warning' : 'success'](rosterToast(t, counts));
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
     }
@@ -301,9 +316,9 @@ function RosterImportSteps({
       const merged = mergeRetry(previous, indexes, next);
       setEdits({});
       setStep({ kind: 'done', rows, result: merged });
-      const { invited, reserved, created, attention } = rosterSummary(next);
-      toast[attention > 0 ? 'warning' : 'success'](
-        t('admin.rosterImport.retryToast', { invited, reserved, created, attention })
+      const counts = rosterSummary(next);
+      toast[counts.attention > 0 ? 'warning' : 'success'](
+        rosterToast(t, counts, { retried: true })
       );
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
@@ -482,6 +497,13 @@ function RosterImportSteps({
                     attention: summary.attention,
                   })}
             </p>
+            {step.kind === 'preview' && actionable > 0 ? (
+              <WelcomePreviewNote
+                organizationId={organizationId}
+                count={actionable}
+                onNavigate={onClose}
+              />
+            ) : null}
             {step.kind === 'done' &&
             (step.result.welcome_mails_queued > 0 || step.result.welcome_mails_failed > 0) ? (
               <p className="text-sm text-muted-foreground">
@@ -569,6 +591,44 @@ function RosterImportSteps({
         ) : null}
       </DialogFooter>
     </>
+  );
+}
+
+/**
+ * Tells the admin before importing that new members get a welcome email, or that it is off, with
+ * a link to the setting on the Invitations tab. Says nothing while the setting is unknown.
+ */
+function WelcomePreviewNote({
+  organizationId,
+  count,
+  onNavigate,
+}: {
+  organizationId: number;
+  count: number;
+  onNavigate: () => void;
+}) {
+  const t = useT('mailbox');
+  const setting = useMemberWelcomeSetting(organizationId);
+  if (!setting.data) return null;
+  const enabled = setting.data.enabled;
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+      <MailCheck className="size-4 shrink-0" aria-hidden="true" />
+      <span className="min-w-0">
+        {enabled
+          ? t('admin.rosterImport.welcomePreview', { count })
+          : t('admin.rosterImport.welcomePreviewOff')}
+      </span>
+      <Link
+        href={`${getOrganizationRoute(organizationId)}?tab=invitations`}
+        className="font-medium text-foreground underline underline-offset-4"
+        onClick={onNavigate}
+      >
+        {enabled
+          ? t('admin.rosterImport.welcomeSettingsLink')
+          : t('admin.rosterImport.welcomeSettingsLinkOff')}
+      </Link>
+    </p>
   );
 }
 
@@ -754,6 +814,20 @@ function statusVariant(status: MemberImportRowResult['status']) {
 }
 
 type MailboxT = ReturnType<typeof useT<'mailbox'>>;
+
+/** The import toast, naming only what happened: clauses with a zero count are left out. */
+export function rosterToast(
+  t: MailboxT,
+  counts: Pick<ReturnType<typeof rosterSummary>, 'invited' | 'reserved' | 'created' | 'attention'>,
+  { retried = false }: { retried?: boolean } = {}
+): string {
+  const clauses = (['invited', 'reserved', 'created', 'attention'] as const)
+    .filter(key => counts[key] > 0)
+    .map(key => t(`admin.rosterImport.toast.${key}`, { count: counts[key] }));
+  if (clauses.length === 0) clauses.push(t('admin.rosterImport.toast.nothing'));
+  if (retried) clauses.unshift(t('admin.rosterImport.toast.retried'));
+  return clauses.join(t('admin.rosterImport.toast.separator'));
+}
 
 /** The reason or next step of one row, in local copy; backend text is never shown. */
 function rowNote(t: MailboxT, row: MemberImportRowResult): string {

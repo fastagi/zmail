@@ -222,15 +222,22 @@ type webhookNotifier struct {
 	publisher domain.WebhookPublisher
 	enabled   bool
 	now       func() time.Time
+	// sharedDomain is the platform's own sending domain, which is never a verified domain of an
+	// organization.
+	sharedDomain string
 }
 
 // NewWebhookNotifier builds the notifier from typed configuration.
 func NewWebhookNotifier(cfg *config.Config, publisher domain.WebhookPublisher) *webhookNotifier {
-	return &webhookNotifier{
+	notifier := &webhookNotifier{
 		publisher: publisher,
 		enabled:   cfg != nil && publisher != nil && cfg.Starters.Selected(config.StarterWebhook),
 		now:       time.Now,
 	}
+	if cfg != nil {
+		notifier.sharedDomain = domain.NormalizeDomainName(cfg.Mailbox.Domain)
+	}
+	return notifier
 }
 
 func (n *webhookNotifier) Notify(ctx context.Context, notification MailNotification) error {
@@ -305,8 +312,21 @@ func (n *webhookNotifier) NotifyTransactional(ctx context.Context, notification 
 		Type:           notification.Type,
 		OccurredAt:     n.publishableTime(notification.OccurredAt),
 		Data:           data,
+		Origin:         n.transactionalOrigin(message.FromAddress),
 	})
 	return err
+}
+
+// transactionalOrigin describes a transactional sender for the developer audience check. A
+// transactional sender is a verified organization domain unless it is the shared domain, which
+// only the log provider allows.
+func (n *webhookNotifier) transactionalOrigin(fromAddress string) *domain.WebhookEventOrigin {
+	name := domain.AddressDomain(fromAddress)
+	return &domain.WebhookEventOrigin{
+		Programmatic:         true,
+		SenderDomain:         name,
+		SenderDomainVerified: name != "" && name != n.sharedDomain,
+	}
 }
 
 // publishableTime keeps a provider timestamp inside the window the webhook starter accepts.

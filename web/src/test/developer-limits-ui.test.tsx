@@ -47,7 +47,7 @@ describe('developer limits and protection tab', () => {
     expect(bars).toHaveLength(3);
     expect(bars[0]).toHaveAttribute('aria-valuenow', '37');
     expect(bars[0]).toHaveAttribute('aria-valuemax', '500');
-    expect(screen.queryByText('Usage is visible to admins.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Usage is visible to admins and developers.')).not.toBeInTheDocument();
   });
 
   it('member sees limits but no usage', async () => {
@@ -61,12 +61,23 @@ describe('developer limits and protection tab', () => {
     expect(within(items[1]).getByText('400 per 24 hours')).toBeInTheDocument();
     expect(within(items[2]).getByText('200 per 24 hours')).toBeInTheDocument();
     expect(within(list).queryByRole('progressbar')).not.toBeInTheDocument();
-    expect(screen.getByText('Usage is visible to admins.')).toBeInTheDocument();
+    expect(screen.getByText('Usage is visible to admins and developers.')).toBeInTheDocument();
 
     // Neither usage nor the suppression list is requested for a member.
     expect(developer.sendLanes).not.toHaveBeenCalled();
     expect(developer.suppressions).not.toHaveBeenCalled();
     expect(screen.queryByRole('table', { name: 'Suppression list' })).not.toBeInTheDocument();
+  });
+
+  it('a developer member reads usage and manages the suppression list', async () => {
+    renderTab({ canManage: false, developer: true });
+
+    const list = await screen.findByRole('list', { name: 'Send lanes' });
+    await waitFor(() =>
+      expect(within(within(list).getAllByRole('listitem')[0]!).getByText('37 / 500')).toBeInTheDocument()
+    );
+    expect(developer.sendLanes).toHaveBeenCalled();
+    expect(developer.suppressions).toHaveBeenCalled();
   });
 
   it('protection rules show the configured values', () => {
@@ -176,9 +187,10 @@ const allFeatures = {
   templates: true,
   api_keys: true,
   mail_clients: true,
+  developer: false,
 };
 
-function renderTab({ canManage }: { canManage: boolean }) {
+function renderTab({ canManage, developer = false }: { canManage: boolean; developer?: boolean }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -186,7 +198,13 @@ function renderTab({ canManage }: { canManage: boolean }) {
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
         <LimitsTab
-          organization={{ id: 1, name: 'Acme', canManage, features: allFeatures }}
+          organization={{
+            id: 1,
+            name: 'Acme',
+            canManage,
+            features: { ...allFeatures, developer },
+            developerScope: developer ? { all_domains: true, domains: [] } : null,
+          }}
           domains={[domain({ domain: 'mail.example.com', kind: 'shared' })]}
         />
       </NextIntlClientProvider>

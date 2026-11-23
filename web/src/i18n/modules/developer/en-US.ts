@@ -1,6 +1,13 @@
 const messages = {
   title: 'Developers',
   description: 'Send sign-up codes, password resets, and receipts from your own backend.',
+  accessRequired: {
+    title: 'Developer access is needed',
+    description:
+      'The developer console manages API keys, transactional templates, webhooks, and the suppression list. An owner or admin grants developer access per member and chooses the domains it may send from.',
+    contactHint: 'Ask an admin to turn on Developer for you on the Members page.',
+    backHome: 'Back to console',
+  },
   tabs: {
     start: 'Quick start',
     templates: 'Templates',
@@ -170,7 +177,7 @@ const messages = {
       personal: '{count} waiting',
     },
     window: 'Counted over the last 24 hours, failed attempts included.',
-    usageAdminsOnly: 'Usage is visible to admins.',
+    usageAdminsOnly: 'Usage is visible to admins and developers.',
     rulesTitle: 'Protection rules',
     rules: {
       recipient: {
@@ -266,7 +273,9 @@ const messages = {
     previewTitle: 'Template preview',
     previewUnavailable: 'This template cannot be previewed.',
     from: 'From {sender}',
-    readOnly: 'Only owners and admins can change transactional templates.',
+    readOnly: 'Only owners, admins, and developers can change transactional templates.',
+    outsideScopeBadge: 'Out of scope',
+    outsideScope: 'Its sender domain is no longer in your scope, so this template is read-only.',
     created: 'Template created',
     saved: 'Template saved',
     sent24h: '{count} sent in the last 24 hours',

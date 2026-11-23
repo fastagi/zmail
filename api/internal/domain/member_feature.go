@@ -15,13 +15,17 @@ const (
 	MemberFeatureAPIKeys MemberFeature = "api_keys"
 	// MemberFeatureMailClients covers creating mail client passwords and reading mail in mail apps.
 	MemberFeatureMailClients MemberFeature = "mail_clients"
+	// MemberFeatureDeveloper covers connecting the organization's own systems: transactional
+	// templates, webhooks, the suppression list, and usage, limited to the sending domains of the
+	// member's developer grant. It includes the API keys feature.
+	MemberFeatureDeveloper MemberFeature = "developer"
 )
 
 // MemberFeatureCatalog returns every feature in its stable display order.
 func MemberFeatureCatalog() []MemberFeature {
 	return []MemberFeature{
 		MemberFeatureBroadcasts, MemberFeatureContacts, MemberFeatureTemplates, MemberFeatureAPIKeys,
-		MemberFeatureMailClients,
+		MemberFeatureMailClients, MemberFeatureDeveloper,
 	}
 }
 
@@ -29,7 +33,7 @@ func MemberFeatureCatalog() []MemberFeature {
 func (f MemberFeature) IsValid() bool {
 	switch f {
 	case MemberFeatureBroadcasts, MemberFeatureContacts, MemberFeatureTemplates, MemberFeatureAPIKeys,
-		MemberFeatureMailClients:
+		MemberFeatureMailClients, MemberFeatureDeveloper:
 		return true
 	default:
 		return false
@@ -43,6 +47,8 @@ type MemberFeatures struct {
 	Templates   bool
 	APIKeys     bool
 	MailClients bool
+	// Developer is derived from the membership's developer grant, which also holds its scope.
+	Developer bool
 }
 
 // DefaultMemberFeatures is what a new member gets: everyday contacts, templates, and mail apps,
@@ -54,7 +60,7 @@ func DefaultMemberFeatures() MemberFeatures {
 
 // AllMemberFeatures grants everything; it is what owners and admins effectively have.
 func AllMemberFeatures() MemberFeatures {
-	return MemberFeatures{Broadcasts: true, Contacts: true, Templates: true, APIKeys: true, MailClients: true}
+	return MemberFeatures{Broadcasts: true, Contacts: true, Templates: true, APIKeys: true, MailClients: true, Developer: true}
 }
 
 // Has reports whether the set grants the feature. An unknown feature is never granted.
@@ -67,9 +73,12 @@ func (f MemberFeatures) Has(feature MemberFeature) bool {
 	case MemberFeatureTemplates:
 		return f.Templates
 	case MemberFeatureAPIKeys:
-		return f.APIKeys
+		// The developer grant includes API keys.
+		return f.APIKeys || f.Developer
 	case MemberFeatureMailClients:
 		return f.MailClients
+	case MemberFeatureDeveloper:
+		return f.Developer
 	default:
 		return false
 	}
@@ -90,11 +99,15 @@ type MemberFeaturePatch struct {
 	Templates   *bool
 	APIKeys     *bool
 	MailClients *bool
+	Developer   *bool
+	// DeveloperGrant is the scope to store with Developer=true, or to replace on an existing grant.
+	DeveloperGrant *DeveloperGrant
 }
 
 // IsEmpty reports whether the patch names no feature.
 func (p MemberFeaturePatch) IsEmpty() bool {
-	return p.Broadcasts == nil && p.Contacts == nil && p.Templates == nil && p.APIKeys == nil && p.MailClients == nil
+	return p.Broadcasts == nil && p.Contacts == nil && p.Templates == nil && p.APIKeys == nil && p.MailClients == nil &&
+		p.Developer == nil && p.DeveloperGrant == nil
 }
 
 // Apply returns the features with the patch applied.
@@ -114,6 +127,9 @@ func (p MemberFeaturePatch) Apply(features MemberFeatures) MemberFeatures {
 	if p.MailClients != nil {
 		features.MailClients = *p.MailClients
 	}
+	if p.Developer != nil {
+		features.Developer = *p.Developer
+	}
 	return features
 }
 
@@ -121,4 +137,6 @@ func (p MemberFeaturePatch) Apply(features MemberFeatures) MemberFeatures {
 type OrganizationMembershipFeatureChange struct {
 	Membership *OrganizationMembership
 	Before     MemberFeatures
+	// BeforeGrant is the developer grant before the change; nil when there was none.
+	BeforeGrant *DeveloperGrant
 }

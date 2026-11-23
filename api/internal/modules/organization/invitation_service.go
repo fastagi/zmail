@@ -67,7 +67,9 @@ func (s *service) Invite(
 	if err != nil {
 		return nil, err
 	}
-	return s.createInvitation(ctx, manager, normalizeInvitationEmail(req.Email), req.Role, domain.DefaultMemberFeatures(), "invite")
+	features := domain.DefaultMemberFeatures()
+	features.Developer = req.Developer && req.Role == domain.OrganizationRoleMember
+	return s.createInvitation(ctx, manager, normalizeInvitationEmail(req.Email), req.Role, features, "invite")
 }
 
 // createInvitation stores and emails one invitation from the manager, and audits it under action.

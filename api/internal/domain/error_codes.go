@@ -56,6 +56,7 @@ const (
 
 	CodeAPIKeyOrganizationMismatch = "API_KEY.ORGANIZATION_MISMATCH"
 	CodeAPIKeyDomainNotAllowed     = "API_KEY.DOMAIN_NOT_ALLOWED"
+	CodeDeveloperDomainNotAllowed  = "DEVELOPER.DOMAIN_NOT_ALLOWED"
 
 	CodeOrganizationNotFound                       = "ORGANIZATION.NOT_FOUND"
 	CodeOrganizationContextRequired                = "ORGANIZATION.CONTEXT_REQUIRED"
@@ -186,6 +187,9 @@ const (
 	CodeMailLabelNameTaken                = "MAILBOX.LABEL_NAME_TAKEN"
 	CodeMailFolderLimitReached            = "MAILBOX.FOLDER_LIMIT_REACHED"
 	CodeMailLabelLimitReached             = "MAILBOX.LABEL_LIMIT_REACHED"
+	CodeMailWelcomeNotEligible            = "MAILBOX.WELCOME_NOT_ELIGIBLE"
+	CodeMailWelcomeDisabled               = "MAILBOX.WELCOME_DISABLED"
+	CodeMailWelcomeResendLimited          = "MAILBOX.WELCOME_RESEND_LIMITED"
 	CodeMailRoleNotFound                  = "MAILBOX.ROLE_NOT_FOUND"
 	CodeMailRoleNameTaken                 = "MAILBOX.ROLE_NAME_TAKEN"
 	CodeMailRoleLimitReached              = "MAILBOX.ROLE_LIMIT_REACHED"

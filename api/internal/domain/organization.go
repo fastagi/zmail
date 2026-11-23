@@ -68,10 +68,12 @@ type OrganizationMembership struct {
 	UserID         uint             `json:"user_id"`
 	Role           OrganizationRole `json:"role"`
 	Features       MemberFeatures   `json:"-"`
-	Organization   *Organization    `json:"-"`
-	User           *User            `json:"-"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
+	// DeveloperGrant is the stored developer grant; nil when the member has none.
+	DeveloperGrant *DeveloperGrant `json:"-"`
+	Organization   *Organization   `json:"-"`
+	User           *User           `json:"-"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 // OrganizationMembershipRoleChange captures the persisted role transition.

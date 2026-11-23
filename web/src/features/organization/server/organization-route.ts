@@ -403,6 +403,12 @@ function mockOrganizationError(error: MockOrganizationStoreError): {
         errorCode: ApiErrorCode.PERMISSION_DENIED,
         message: 'Operation forbidden',
       };
+    case 'developer_scope_invalid':
+      return {
+        status: 422,
+        errorCode: ApiErrorCode.COMMON_VALIDATION_FAILED,
+        message: 'Developer access needs a sending scope, and a scope needs developer access',
+      };
     case 'slug_conflict':
       return {
         status: 409,

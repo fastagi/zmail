@@ -8,6 +8,7 @@ import { useSendLanes } from '@/features/developer/hooks/use-developer';
 import { MAIL_SEND_LANES } from '@/features/developer/schemas';
 import type { MailSendLane, MailSendLaneUsage } from '@/features/developer/types';
 import { useDeveloperErrorMessage } from '@/features/developer/utils/developer-error';
+import { canUseDeveloperTools } from '@/features/developer/utils/developer-scope';
 import { ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import type { MailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import type { MailboxDomain } from '@/features/mailbox/types';
@@ -84,7 +85,7 @@ export function LimitsTab({
           </ul>
         </section>
       </div>
-      {organization.canManage ? <SuppressionList organizationId={organization.id} /> : null}
+      {canUseDeveloperTools(organization) ? <SuppressionList organizationId={organization.id} /> : null}
     </div>
   );
 }
@@ -100,7 +101,9 @@ function SendLanes({
   const tm = useT('mailbox');
   const locale = useLocale();
   const errorMessage = useDeveloperErrorMessage();
-  const usage = useSendLanes(organization.id, { canManage: organization.canManage });
+  // Owners, admins, and developers read lane usage; other members see only the limits.
+  const readsUsage = canUseDeveloperTools(organization);
+  const usage = useSendLanes(organization.id, { canManage: readsUsage });
   const number = (value: number) => value.toLocaleString(locale);
 
   const configured: Record<MailSendLane, number> = {
@@ -112,7 +115,7 @@ function SendLanes({
 
   return (
     <div className="mt-4 space-y-4">
-      {organization.canManage && usage.error ? (
+      {readsUsage && usage.error ? (
         <ErrorAlert
           message={errorMessage(usage.error)}
           retryLabel={tm('actions.retry')}
@@ -133,7 +136,7 @@ function SendLanes({
                       limit: number(measured.limit),
                     })}
                   </span>
-                ) : organization.canManage && usage.isPending ? (
+                ) : readsUsage && usage.isPending ? (
                   <Skeleton className="h-4 w-20" aria-hidden="true" />
                 ) : (
                   <span className="text-sm text-muted-foreground tabular-nums">
@@ -157,7 +160,7 @@ function SendLanes({
         })}
       </ul>
       <p className="text-xs text-muted-foreground">
-        {organization.canManage ? t('limits.window') : t('limits.usageAdminsOnly')}
+        {readsUsage ? t('limits.window') : t('limits.usageAdminsOnly')}
       </p>
     </div>
   );

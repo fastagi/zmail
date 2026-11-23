@@ -57,6 +57,8 @@ var (
 	ErrAPIKeyOrganizationMismatch = errors.New("api key is bound to another organization")
 	// ErrAPIKeyDomainNotAllowed: a domain-restricted key tried to send from another domain.
 	ErrAPIKeyDomainNotAllowed = errors.New("api key may not send from this domain")
+	// ErrDeveloperDomainNotAllowed: a developer acted on a sending domain outside the grant's scope.
+	ErrDeveloperDomainNotAllowed = errors.New("sending domain is outside the developer grant")
 
 	// Organization errors
 	ErrOrganizationNotFound                       = errors.New("organization not found")

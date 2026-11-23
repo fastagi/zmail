@@ -15,4 +15,5 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(domain.ErrAPIKeyRevoked, http.StatusUnauthorized, domain.CodeAPIKeyRevoked)
 	mapper.Register(domain.ErrAPIKeyOrganizationMismatch, http.StatusForbidden, domain.CodeAPIKeyOrganizationMismatch)
 	mapper.Register(domain.ErrAPIKeyDomainNotAllowed, http.StatusForbidden, domain.CodeAPIKeyDomainNotAllowed)
+	mapper.Register(domain.ErrDeveloperDomainNotAllowed, http.StatusForbidden, domain.CodeDeveloperDomainNotAllowed)
 }
