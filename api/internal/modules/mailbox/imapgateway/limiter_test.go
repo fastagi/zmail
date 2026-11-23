@@ -11,7 +11,8 @@ import (
 
 func TestLimiterLocksIPAndUserIndependently(t *testing.T) {
 	ctx := context.Background()
-	now := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
+	// The memory store measures its window by the real clock, so the fake clock starts there too.
+	now := time.Now()
 	limiter := newAuthLimiter(ratelimit.NewMemoryStores(), func() time.Time { return now })
 
 	// A username that signed in from an IP keeps working there after the username is locked.
