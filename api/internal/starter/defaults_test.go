@@ -24,7 +24,7 @@ func TestDefaultManifestsRegisterDefaultAssets(t *testing.T) {
 	}
 
 	migrations := registry.Migrations()
-	assert.Len(t, migrations, 14)
+	assert.Len(t, migrations, 15)
 	assert.Contains(t, migrations, "2026_04_26_000000_create_audit_logs_table")
 	assert.Contains(t, migrations, "2026_04_27_000002_add_business_fields_to_audit_logs")
 	retentionMigration, exists := migrations["2026_07_25_000000_add_audit_retention_index"]
@@ -39,6 +39,7 @@ func TestDefaultManifestsRegisterDefaultAssets(t *testing.T) {
 	assert.Contains(t, migrations, "2026_10_04_000000_add_audience_to_authentication_sessions")
 	assert.Contains(t, migrations, "2026_04_06_000000_create_api_keys_table")
 	assert.Contains(t, migrations, "2026_11_23_090000_add_api_key_mode")
+	assert.Contains(t, migrations, "2026_12_26_090000_add_api_key_restrictions")
 
 	seeders := registry.Seeders()
 	require.Len(t, seeders, 1)
@@ -58,7 +59,7 @@ func TestConfiguredManifestsEnableOrganizationAdditively(t *testing.T) {
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 22)
+	assert.Len(t, migrations, 23)
 	assert.Contains(t, migrations, "2026_10_11_000000_create_rate_limit_buckets_table", "core migrations are selection independent")
 	organizationMigration, exists := migrations["2026_07_14_000000_create_organizations_tables"]
 	require.True(t, exists)
@@ -79,7 +80,7 @@ func TestConfiguredManifestsEnablePermissionAfterOrganization(t *testing.T) {
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 23)
+	assert.Len(t, migrations, 24)
 	permissionMigration, exists := migrations["2026_07_15_010000_create_permission_tables"]
 	require.True(t, exists)
 	assert.True(t, permissionMigration.WithinTransaction())
@@ -111,7 +112,7 @@ func TestConfiguredManifestsEnableNotificationWithoutOrganization(t *testing.T) 
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 19)
+	assert.Len(t, migrations, 20)
 	_, hasWebPush := migrations["2026_12_23_090000_add_web_push"]
 	assert.True(t, hasWebPush, "web push belongs to the notification starter")
 	notificationMigration, exists := migrations["2026_07_15_020000_create_notification_tables"]
@@ -129,7 +130,7 @@ func TestConfiguredManifestsEnableAssetWithoutOrganization(t *testing.T) {
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 17)
+	assert.Len(t, migrations, 18)
 	assetMigration, exists := migrations["2026_07_15_030000_create_assets_table"]
 	require.True(t, exists)
 	assert.True(t, assetMigration.WithinTransaction())
@@ -146,7 +147,7 @@ func TestConfiguredManifestsEnableSettingAfterOrganization(t *testing.T) {
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 23)
+	assert.Len(t, migrations, 24)
 	settingMigration, exists := migrations["2026_07_15_040000_create_settings_table"]
 	require.True(t, exists)
 	assert.True(t, settingMigration.WithinTransaction())
@@ -171,7 +172,7 @@ func TestConfiguredManifestsEnableUsageAfterOrganization(t *testing.T) {
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 23)
+	assert.Len(t, migrations, 24)
 	usageMigration, exists := migrations["2026_07_15_050000_create_usage_tables"]
 	require.True(t, exists)
 	assert.True(t, usageMigration.WithinTransaction())
@@ -196,7 +197,7 @@ func TestConfiguredManifestsEnableWebhookAfterOrganization(t *testing.T) {
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 23)
+	assert.Len(t, migrations, 24)
 	webhookMigration, exists := migrations["2026_07_15_060000_create_webhook_tables"]
 	require.True(t, exists)
 	assert.True(t, webhookMigration.WithinTransaction())

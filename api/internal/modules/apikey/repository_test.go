@@ -163,3 +163,30 @@ func TestRepositoryPersistsKeyMode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, domain.APIKeyModeLive, stored.Mode, "an unset mode is stored as live")
 }
+
+func TestRepositoryPersistsKeyRestriction(t *testing.T) {
+	db := newAPIKeyRepositoryTestDB(t)
+	repo := NewRepository(db)
+	organizationID := uint(5)
+	bound := &domain.APIKey{
+		UserID: 7, Name: "bound", KeyPrefix: "zmail_ab12cd34", KeyHash: "hash-bound",
+		OrganizationID: &organizationID, SendingDomains: []string{"acme.example"},
+	}
+	open := &domain.APIKey{UserID: 7, Name: "open", KeyPrefix: "zmail_cd34ef56", KeyHash: "hash-open"}
+	require.NoError(t, repo.Create(context.Background(), bound))
+	require.NoError(t, repo.Create(context.Background(), open))
+
+	stored, err := repo.FindByHash(context.Background(), "hash-bound")
+	require.NoError(t, err)
+	require.NotNil(t, stored.OrganizationID)
+	assert.Equal(t, organizationID, *stored.OrganizationID)
+	assert.Equal(t, []string{"acme.example"}, stored.SendingDomains)
+
+	stored, err = repo.FindByHash(context.Background(), "hash-open")
+	require.NoError(t, err)
+	assert.Nil(t, stored.OrganizationID)
+	assert.Nil(t, stored.SendingDomains, "an unrestricted key stays unrestricted when read back")
+	var raw struct{ SendingDomains *string }
+	require.NoError(t, db.Raw(`SELECT sending_domains FROM api_keys WHERE key_hash = 'hash-open'`).Scan(&raw).Error)
+	assert.Nil(t, raw.SendingDomains, "unrestricted is stored as NULL, never as an empty list")
+}

@@ -12,7 +12,7 @@ import (
 var ProviderSet = wire.NewSet(
 	NewRepository,
 	wire.Bind(new(domain.APIKeyRepository), new(*repository)),
-	NewService,
+	ProvideService,
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,
 )
@@ -26,6 +26,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 		assembly.WithStarterMigrationNames(
 			"2026_04_06_000000_create_api_keys_table",
 			"2026_11_23_090000_add_api_key_mode",
+			"2026_12_26_090000_add_api_key_restrictions",
 		),
 	)
 }

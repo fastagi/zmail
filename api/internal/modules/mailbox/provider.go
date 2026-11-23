@@ -29,6 +29,8 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailAgentEventPruner), new(*service)),
 	wire.Bind(new(domain.MailClientStore), new(*service)),
 	wire.Bind(new(domain.MailSubmissionStore), new(*service)),
+	// API keys may be restricted to the domains an organization sends from.
+	wire.Bind(new(domain.SendingDomainDirectory), new(*service)),
 	// Owners and members are validated against the organization starter's memberships.
 	NewMembershipDirectory,
 	// Console test sends go to the caller's account address, read through the user starter.

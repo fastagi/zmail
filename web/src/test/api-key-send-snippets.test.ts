@@ -24,6 +24,16 @@ describe('send-with-a-key snippets', () => {
     expect(curl).toContain("-H 'Organization-Id: 12'");
   });
 
+  it('leaves out Organization-Id for a key bound to its organization', () => {
+    const snippets = buildSendSnippets({ ...input, omitOrganizationHeader: true });
+    for (const snippet of Object.values(snippets)) {
+      expect(snippet).not.toContain('Organization-Id');
+      expect(snippet).toContain('zmail_ab12cd34.secret');
+    }
+    const body = snippets.curl.slice(snippets.curl.indexOf("-d '") + 4, snippets.curl.lastIndexOf("'"));
+    expect(JSON.parse(body.replaceAll(`'\\''`, "'")).from).toBe('dev@acme.zmail.im');
+  });
+
   it('quotes a recipient with a quote for the shell', () => {
     const { curl } = buildSendSnippets(input);
     expect(curl).toContain(`o'\\''brien@example.com`);

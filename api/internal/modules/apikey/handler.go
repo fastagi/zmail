@@ -3,6 +3,7 @@ package apikey
 import (
 	"github.com/gin-gonic/gin"
 
+	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/middleware"
 	"github.com/fastagi/zmail/api/internal/infra/router"
@@ -44,6 +45,9 @@ func (h *Handler) RegisterMiddleware(r *router.Router) {
 			if err != nil {
 				return nil, err
 			}
+			// The binding travels with the request: organization context resolution and sends
+			// read it from there.
+			c.Request = c.Request.WithContext(domain.WithAPIKeyRestriction(c.Request.Context(), apiKey.Restriction()))
 
 			return &middleware.KeyAuthResult{
 				Key: key,

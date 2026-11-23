@@ -22,10 +22,25 @@ const state = vi.hoisted(() => ({
     mutateAsync: vi.fn(),
   },
   readiness: { status: 'loading' } as unknown,
+  readinessRequests: [] as (number | undefined)[],
+  organizations: { status: 'ready', organizations: [] } as unknown,
+  domains: {} as Record<number, unknown>,
+}));
+
+vi.mock('@/features/api-key/hooks/use-restriction-options', () => ({
+  useRestrictionOrganizations: () => state.organizations,
+  useRestrictionDomains: (organizationId: number) => {
+    return organizationId > 0
+      ? (state.domains[organizationId] ?? { status: 'loading' })
+      : { status: 'unavailable' };
+  },
 }));
 
 vi.mock('@/features/api-key/hooks/use-send-readiness', () => ({
-  useSendReadiness: () => state.readiness,
+  useSendReadiness: (organizationId?: number) => {
+    state.readinessRequests.push(organizationId);
+    return state.readiness;
+  },
 }));
 
 vi.mock('@/features/api-key/hooks/use-api-keys', () => ({
@@ -64,6 +79,105 @@ describe('API key settings workflow', () => {
     state.revoke.isPending = false;
     state.revoke.mutateAsync.mockReset();
     state.readiness = ready;
+    state.readinessRequests = [];
+    state.organizations = {
+      status: 'ready',
+      organizations: [
+        { id: 12, name: 'Acme' },
+        { id: 13, name: 'Globex' },
+      ],
+    };
+    state.domains = {
+      12: { status: 'ready', domains: ['acme.zmail.im', 'mail.acme.example'] },
+      13: { status: 'ready', domains: [] },
+    };
+  });
+
+  it('creates an unrestricted key unless an organization is chosen', async () => {
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: 'x'.repeat(32) });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    const organization = screen.getByRole('combobox', { name: 'Use only in one organization' });
+    expect(organization).toHaveValue('0');
+    expect(screen.queryByRole('group', { name: 'Send only from these domains' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    await waitFor(() =>
+      expect(state.create.mutateAsync).toHaveBeenCalledWith({ name: 'Deploy', scopes: ['mail:send'] })
+    );
+  });
+
+  it('limits a key to one organization and to the domains chosen from its own list', async () => {
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: 'x'.repeat(32) });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Use only in one organization' }), {
+      target: { value: '12' },
+    });
+    const domains = screen.getByRole('group', { name: 'Send only from these domains' });
+    expect(within(domains).getAllByRole('checkbox')).toHaveLength(2);
+    fireEvent.click(within(domains).getByRole('checkbox', { name: 'mail.acme.example' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    await waitFor(() =>
+      expect(state.create.mutateAsync).toHaveBeenCalledWith({
+        name: 'Deploy',
+        scopes: ['mail:send'],
+        organization_id: 12,
+        sending_domains: ['mail.acme.example'],
+      })
+    );
+  });
+
+  it('drops chosen domains when the organization changes', async () => {
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: 'x'.repeat(32) });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    const organization = screen.getByRole('combobox', { name: 'Use only in one organization' });
+    fireEvent.change(organization, { target: { value: '12' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'acme.zmail.im' }));
+    fireEvent.change(organization, { target: { value: '13' } });
+    expect(screen.getByText('This organization has no domains to send from yet.')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    await waitFor(() =>
+      expect(state.create.mutateAsync).toHaveBeenCalledWith({
+        name: 'Deploy',
+        scopes: ['mail:send'],
+        organization_id: 13,
+      })
+    );
+  });
+
+  it('shows what a limited key may reach on its row, and nothing on an unrestricted one', () => {
+    state.apiKeys.data = {
+      items: [
+        { ...apiKey, id: 43, name: 'Billing', organization_id: 12, sending_domains: ['mail.acme.example'] },
+        { ...apiKey, id: 44, name: 'Archived org', organization_id: 99 },
+        apiKey,
+      ],
+      meta: { total: 3 },
+    };
+    renderWithMessages(<ApiKeyPanel />);
+
+    expect(screen.getByText('Only in Acme')).toBeInTheDocument();
+    expect(screen.getByText('Sends only from mail.acme.example')).toBeInTheDocument();
+    expect(screen.getByText('Only in organization #99')).toBeInTheDocument();
+    expect(screen.getAllByText(/^Only in /)).toHaveLength(2);
+  });
+
+  it('hides the limits when organizations are not available', () => {
+    state.organizations = { status: 'unavailable' };
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    expect(screen.queryByRole('combobox', { name: 'Use only in one organization' })).not.toBeInTheDocument();
   });
 
   it('renders metadata without fabricating or exposing a plaintext key', () => {
@@ -288,6 +402,71 @@ describe('API key settings workflow', () => {
       'href',
       '/console/emails?org=12'
     );
+  });
+
+  it('drops the Organization-Id header from the example of an organization-bound key', async () => {
+    const plaintextKey = 'zmail_abcdef123456.0123456789abcdef0123456789abcdef0123456789abcdef';
+    state.create.mutateAsync.mockResolvedValue({
+      api_key: { ...apiKey, organization_id: 12 },
+      plaintext_key: plaintextKey,
+    });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(state.readinessRequests).toContain(12);
+    for (const language of ['curl', 'Node.js', 'Python']) {
+      fireEvent.click(within(dialog).getByRole('button', { name: language }));
+      const sample = within(dialog).getByLabelText('Code sample');
+      expect(sample).toHaveTextContent(plaintextKey);
+      expect(sample).not.toHaveTextContent('Organization-Id');
+    }
+    expect(
+      within(dialog).getByText(
+        'This key only works in Acme, so the example sends no Organization-Id header.'
+      )
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/one key works in every organization/)).not.toBeInTheDocument();
+  });
+
+  it('sends the example of a domain-restricted key from an allowed domain', async () => {
+    state.readiness = { ...ready, senders: ['dev@acme.zmail.im', 'billing@mail.acme.example'] };
+    state.create.mutateAsync.mockResolvedValue({
+      api_key: { ...apiKey, organization_id: 12, sending_domains: ['mail.acme.example'] },
+      plaintext_key: 'x'.repeat(32),
+    });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    const dialog = await screen.findByRole('dialog');
+    const sample = within(dialog).getByLabelText('Code sample');
+    expect(sample).toHaveTextContent('billing@mail.acme.example');
+    expect(sample).not.toHaveTextContent('dev@acme.zmail.im');
+    expect(within(dialog).queryByText(/you have no mailbox there yet/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the own mailbox with a hint when no mailbox is on an allowed domain', async () => {
+    state.create.mutateAsync.mockResolvedValue({
+      api_key: { ...apiKey, organization_id: 12, sending_domains: ['mail.acme.example'] },
+      plaintext_key: 'x'.repeat(32),
+    });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Code sample')).toHaveTextContent('dev@acme.zmail.im');
+    expect(
+      within(dialog).getByText(/This key only sends from mail\.acme\.example, and you have no mailbox there yet/)
+    ).toBeInTheDocument();
   });
 
   it('keeps the plaintext key out of the page once the dialog closes', () => {
