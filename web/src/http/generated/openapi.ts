@@ -5482,6 +5482,11 @@ export interface components {
             id: components["schemas"]["PositiveID"];
             /** @description The provider's explanation of the last failed setup step, while the domain is pending. */
             last_error?: string;
+            /**
+             * @description Stable classification of last_error that clients translate into what went wrong and what the owner can do. Present with last_error; codes may be added, and clients treat an unknown code like domain.setup_failed.
+             * @enum {string}
+             */
+            last_error_code?: "domain.permission_denied" | "domain.provider_unavailable" | "domain.routing_refused" | "domain.sending_refused" | "domain.dns_record_refused" | "domain.routing_rule_refused" | "domain.provider_refused" | "domain.zone_not_found" | "domain.setup_failed";
             name: string;
             records: components["schemas"]["MailDomainRecord"][];
             /** @description A setup is running in the background. The domain changes when it finishes; read it again until this is false. */

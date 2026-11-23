@@ -1631,10 +1631,26 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
 - The setup runs in the background, because it makes several provider calls that can outlast the
   request: connecting answers at once with the domain `pending` and `setting_up` true, and clients
   read the domain again until `setting_up` is false. A step the provider refuses leaves the domain
-  `pending` with `last_error`, and `POST /v1/mail-domains/:domain_id/setups` starts every step again
+  `pending` with `last_error` (the provider's words) and `last_error_code` (below), and
+  `POST /v1/mail-domains/:domain_id/setups` starts every step again
   safely. One setup runs per domain at a time; a check while it runs returns the domain unchanged,
   and a setup or receiving request while it runs makes it run once more afterwards, from the domain
   as stored then. A failed zone lookup while connecting is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.
+- `last_error_code` classifies the first failure of the last setup or check, so a client can say what
+  went wrong and what to do; both fields are absent once a check passes. Clients treat a code they
+  do not know like `domain.setup_failed`.
+
+  | Code | Meaning |
+  |---|---|
+  | `domain.permission_denied` | The Cloudflare token may not make the call (HTTP 401/403 or an authentication error code); reconnect Cloudflare with DNS and Email Routing edit permissions |
+  | `domain.provider_unavailable` | Cloudflare was unavailable, rate limited, or timed out; retry the setup later |
+  | `domain.routing_refused` | Cloudflare refused to enable Email Routing for the domain, usually because another mail service's MX records are in the zone |
+  | `domain.sending_refused` | Cloudflare refused to enable Email Sending for the domain or list its sending records |
+  | `domain.dns_record_refused` | Cloudflare refused to add a required DNS record, usually because a conflicting record exists |
+  | `domain.routing_rule_refused` | Cloudflare refused a mailbox's Email Routing rule |
+  | `domain.provider_refused` | Cloudflare refused another call |
+  | `domain.zone_not_found` | The domain's Cloudflare zone is no longer reachable with the connection |
+  | `domain.setup_failed` | Any other failure |
 - `POST /v1/mail-domains/:domain_id/checks` reads the zone and reports each required record with
   `purpose` (`receiving`, `sending`, `dmarc`), `type`, `name`, `content`, optional `priority`, and
   `status`: `ok`, `missing`, or `conflict` with the conflicting value in `found`. A `send_only`

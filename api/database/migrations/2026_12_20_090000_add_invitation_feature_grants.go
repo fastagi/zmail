@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	register("2026_12_19_090000_add_invitation_feature_grants", &addInvitationFeatureGrants{
+	register("2026_12_20_090000_add_invitation_feature_grants", &addInvitationFeatureGrants{
 		BaseMigration: migration.BaseMigration{UseTransaction: true},
 	})
 }

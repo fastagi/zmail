@@ -219,6 +219,8 @@ export const mailDomainSchema = strictObject({
   // Cloudflare refused to look for the pending zone's name servers now; check again later.
   zone_check_limited: boolean(),
   last_error: optional(string()),
+  // Stable class of last_error; an unknown code reads like domain.setup_failed.
+  last_error_code: optional(string()),
   checked_at: nullable(timestampSchema),
   verified_at: nullable(timestampSchema),
   created_at: timestampSchema,

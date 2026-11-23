@@ -38,7 +38,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_07_15_000000_create_organization_invitations_table",
 			"2026_12_07_090000_add_organization_invitation_email_status",
 			"2026_12_18_090000_add_member_feature_grants",
-			"2026_12_19_090000_add_invitation_feature_grants",
+			"2026_12_20_090000_add_invitation_feature_grants",
 		),
 	)
 }

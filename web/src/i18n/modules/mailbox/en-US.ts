@@ -644,7 +644,50 @@ const messages = {
     settingUpToast: 'Setting up the domain in Cloudflare',
     pendingHint:
       'Mailboxes can use this domain once every record is in place. DNS changes can take a few minutes; check again afterwards.',
-    lastError: 'The last setup step failed: {error}',
+    setupErrorDetails: 'Technical details',
+    setupError: {
+      permissionDenied: {
+        title: 'Cloudflare did not allow this step',
+        action:
+          'The Cloudflare connection lacks a permission. Reconnect Cloudflare with DNS and Email Routing edit permissions, then choose Set up again.',
+      },
+      providerUnavailable: {
+        title: 'Cloudflare is busy or unreachable right now',
+        action: 'Nothing is wrong with your domain. Wait a few minutes, then choose Set up again.',
+      },
+      routingRefused: {
+        title: 'Cloudflare would not turn on receiving for this domain',
+        action:
+          'Another mail service usually still receives mail for it. Remove its MX records in Cloudflare, or connect a subdomain such as mail.yourcompany.com, then choose Set up again.',
+      },
+      sendingRefused: {
+        title: 'Cloudflare would not turn on sending for this domain',
+        action:
+          'Check that Email Sending is available for this Cloudflare account, then choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+      },
+      dnsRecordRefused: {
+        title: 'A required DNS record could not be added',
+        action:
+          'A record with the same name probably exists already. Compare the records below with your zone in Cloudflare, remove the one marked as a conflict, then choose Set up again.',
+      },
+      routingRuleRefused: {
+        title: "A mailbox's receiving rule could not be created",
+        action: 'Choose Set up again. If it keeps failing, check the Email Routing rules of this zone in Cloudflare.',
+      },
+      providerRefused: {
+        title: 'Cloudflare refused a setup step',
+        action: 'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+      },
+      zoneNotFound: {
+        title: "This domain's Cloudflare zone is no longer reachable",
+        action:
+          'The zone may have been removed, or the Cloudflare connection no longer covers it. Reconnect Cloudflare with access to this zone.',
+      },
+      setupFailed: {
+        title: 'A setup step did not finish',
+        action: 'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+      },
+    },
     stepsLabel: 'Setup progress',
     stepConnect: 'Connect the domain',
     stepNameservers: 'Point nameservers to Cloudflare',

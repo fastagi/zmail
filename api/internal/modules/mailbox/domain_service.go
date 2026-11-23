@@ -449,11 +449,14 @@ func (s *service) check(ctx context.Context, mailDomain *domain.MailDomain, fail
 			mailDomain.VerifiedAt = &now
 		}
 		mailDomain.LastError = ""
+		mailDomain.LastErrorCode = ""
 	} else {
 		mailDomain.Status = domain.MailDomainStatusPending
 		mailDomain.LastError = ""
+		mailDomain.LastErrorCode = ""
 		if len(failures) > 0 {
 			mailDomain.LastError = failures[0].Error()
+			mailDomain.LastErrorCode = domainSetupErrorCode(failures[0])
 			slog.WarnContext(ctx, "mail domain setup or check failed",
 				slog.String("domain", mailDomain.Name), slog.String("error", mailDomain.LastError))
 		}
