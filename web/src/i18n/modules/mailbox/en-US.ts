@@ -490,7 +490,9 @@ const messages = {
     draftSaved: 'Saved as a draft',
     draftSavedWithFiles:
       'Saved as a draft. Attached files stay only while this page is open; after a reload, attach them again.',
-    draftFilesLost: 'Attach again: {names}. Files are not kept after the page reloads.',
+    draftSavedWithStoredFiles:
+      'Saved as a draft. Its attached files are kept in this browser; on another device, attach them again.',
+    draftFilesLost: 'Attach again: {names}. This browser did not keep the files.',
     sessionEndedDraft: 'What you wrote is kept in this browser and opens again after you sign in.',
     signIn: 'Sign in',
     invalidRecipients: 'Not a plain email address: {addresses}',
@@ -1934,7 +1936,8 @@ const messages = {
       toast: {
         invited: 'Invited {count, plural, one {# person} other {# people}}.',
         reserved: 'Reserved {count, plural, one {# mailbox} other {# mailboxes}} for them.',
-        created: '{count, plural, one {# existing member} other {# existing members}} got a mailbox.',
+        created:
+          '{count, plural, one {# existing member} other {# existing members}} got a mailbox.',
         attention: '{count, plural, one {# row needs} other {# rows need}} attention.',
         nothing: 'Nothing new to import.',
         retried: 'Retried.',
@@ -2155,7 +2158,8 @@ const messages = {
       title: 'Add an external mailbox',
       description: 'Bring mail from an account you already use into your Zmail inbox.',
       choose: 'Choose where your mail is',
-      imapHint: 'QQ, 163, 126, Tencent Exmail, Aliyun, iCloud, and other mail you sign in to with an app password',
+      imapHint:
+        'QQ, 163, 126, Tencent Exmail, Aliyun, iCloud, and other mail you sign in to with an app password',
       comingSoon: 'Coming soon',
       consentTitle: 'Before you connect {provider}',
       consentDescription: 'You will sign in on {provider} and come back here.',
@@ -2253,14 +2257,22 @@ const messages = {
       codeTitle: 'Use an app password, not your sign-in password',
       codeSteps: {
         qq: 'In QQ Mail on the web, open Settings → Account, turn on the IMAP/SMTP service, then generate an authorization code and paste it below.',
-        netease163: 'In 163 Mail on the web, open Settings → POP3/SMTP/IMAP, turn on the IMAP/SMTP service, then add an authorization code and paste it below.',
-        netease126: 'In 126 Mail on the web, open Settings → POP3/SMTP/IMAP, turn on the IMAP/SMTP service, then add an authorization code and paste it below.',
-        exmail: 'In Tencent Exmail on the web, open Settings → Client settings, turn on IMAP/SMTP, then generate a client-specific password and paste it below.',
-        aliyun: 'In Aliyun Mail on the web, open Settings → POP3/SMTP/IMAP and turn on IMAP; if two-step sign-in is on, create a third-party client password and paste it below.',
-        gmail: 'Turn on 2-Step Verification for your Google Account, then create an app password and paste its 16 letters below.',
-        icloud: 'Sign in to your Apple Account, open Sign-In and Security → App-Specific Passwords, create one, and paste it below.',
-        yahoo: 'In Yahoo Account security, choose Generate app password, create one for Zmail, and paste it below.',
-        fastmail: 'In Fastmail, open Settings → Privacy & Security → Manage app passwords, create one with IMAP and SMTP access, and paste it below.',
+        netease163:
+          'In 163 Mail on the web, open Settings → POP3/SMTP/IMAP, turn on the IMAP/SMTP service, then add an authorization code and paste it below.',
+        netease126:
+          'In 126 Mail on the web, open Settings → POP3/SMTP/IMAP, turn on the IMAP/SMTP service, then add an authorization code and paste it below.',
+        exmail:
+          'In Tencent Exmail on the web, open Settings → Client settings, turn on IMAP/SMTP, then generate a client-specific password and paste it below.',
+        aliyun:
+          'In Aliyun Mail on the web, open Settings → POP3/SMTP/IMAP and turn on IMAP; if two-step sign-in is on, create a third-party client password and paste it below.',
+        gmail:
+          'Turn on 2-Step Verification for your Google Account, then create an app password and paste its 16 letters below.',
+        icloud:
+          'Sign in to your Apple Account, open Sign-In and Security → App-Specific Passwords, create one, and paste it below.',
+        yahoo:
+          'In Yahoo Account security, choose Generate app password, create one for Zmail, and paste it below.',
+        fastmail:
+          'In Fastmail, open Settings → Privacy & Security → Manage app passwords, create one with IMAP and SMTP access, and paste it below.',
       },
       codeLinks: {
         gmail: 'Open Google app passwords',

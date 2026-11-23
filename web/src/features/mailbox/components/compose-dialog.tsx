@@ -33,8 +33,10 @@ import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
 import {
   type StoredComposeDraft,
+  composeDraftFilesKept,
   composeDraftKey,
   draftToKeep,
+  loadComposeDraftFiles,
   readComposeDraft,
   readComposeDraftFiles,
   writeComposeDraft,
@@ -204,6 +206,24 @@ export function ComposeDialog({
   const [lostFiles, setLostFiles] = useState(() =>
     keptFiles.length > 0 ? [] : (kept?.attachments ?? [])
   );
+  // After a reload the files come back from where this browser kept them; until that read ends,
+  // they are neither reported lost nor forgotten.
+  const [restoringFiles, setRestoringFiles] = useState(() => lostFiles.length > 0);
+  useEffect(() => {
+    if (!restoringFiles) return;
+    let live = true;
+    void loadComposeDraftFiles(draftKey).then(found => {
+      if (!live) return;
+      setRestoringFiles(false);
+      if (found.length === 0) return;
+      // Files attached meanwhile already settled the draft.
+      setFiles(current => (current.length > 0 ? current : found));
+      setLostFiles([]);
+    });
+    return () => {
+      live = false;
+    };
+  }, [draftKey, restoringFiles]);
   // Until they are attached again, the names of lost files stay with the draft as a reminder.
   const attachments = files.length > 0 ? files.map(file => file.name) : lostFiles;
   const written = () => ({
@@ -238,8 +258,20 @@ export function ComposeDialog({
         ...(pending && { pending }),
       }
     );
-    writeComposeDraftFiles(draftKey, files);
-  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles, knownSavedId]);
+    // Files still being read back are not forgotten in the meantime.
+    if (!restoringFiles || files.length > 0) writeComposeDraftFiles(draftKey, files);
+  }, [
+    draftKey,
+    startingDraft,
+    to,
+    cc,
+    subject,
+    body,
+    files,
+    lostFiles,
+    knownSavedId,
+    restoringFiles,
+  ]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
@@ -489,7 +521,7 @@ export function ComposeDialog({
    * Saves a closed new message as a draft of the API too. The browser copy remembers the saved
    * id, so closing again updates that draft rather than adding another one.
    */
-  const keepOnServer = (keep: StoredComposeDraft, withFiles: boolean) => {
+  const keepOnServer = (keep: StoredComposeDraft, sayKept: () => void) => {
     saveDraft
       .mutateAsync({
         input: {
@@ -510,7 +542,7 @@ export function ComposeDialog({
           if (textOf(current) === textOf(keep)) {
             writeComposeDraft(draftKey, { ...keep, savedId: saved.id });
           }
-          toast.success(t(withFiles ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
+          sayKept();
         },
         () => toast.error(t('drafts.saveFailed'))
       );
@@ -532,11 +564,24 @@ export function ComposeDialog({
       [to, cc, subject, body].every(value => value.trim() === '');
     // Clearing a saved draft and closing it discards it everywhere.
     if (blank && !isReplyOrForward) forgetSaved();
-    writeComposeDraftFiles(draftKey, files);
+    // Files still being read back after a reload stay where this browser kept them.
+    if (!restoringFiles || files.length > 0) writeComposeDraftFiles(draftKey, files);
+    // The toast says whether attached files outlive this page: the API keeps none of them.
+    const filesKept = files.length > 0 ? composeDraftFilesKept(draftKey) : null;
+    const sayKept = () => {
+      if (!filesKept) {
+        toast.success(t('compose.draftSaved'));
+        return;
+      }
+      void filesKept.then(stored =>
+        toast.success(
+          t(stored ? 'compose.draftSavedWithStoredFiles' : 'compose.draftSavedWithFiles')
+        )
+      );
+    };
     // A new message says it is saved once the API has it; a refusal says it stays in this browser.
-    if (keep && !isReplyOrForward) keepOnServer(keep, files.length > 0);
-    else if (keep)
-      toast.success(t(files.length > 0 ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
+    if (keep && !isReplyOrForward) keepOnServer(keep, sayKept);
+    else if (keep) sayKept();
     onClose();
   };
 
@@ -722,7 +767,7 @@ export function ComposeDialog({
               {t('compose.attachHint')}
             </p>
           </div>
-          {lostFiles.length > 0 && files.length === 0 ? (
+          {lostFiles.length > 0 && files.length === 0 && !restoringFiles ? (
             <p role="status" className="text-xs text-warning">
               {t('compose.draftFilesLost', { names: lostFiles.join(', ') })}
             </p>

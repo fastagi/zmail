@@ -476,7 +476,9 @@ const messages = {
     openDraft: '打开',
     draftSaved: '已存为草稿',
     draftSavedWithFiles: '已存为草稿。附件只在当前页面保留，刷新或关闭页面后需要重新添加。',
-    draftFilesLost: '请重新添加附件：{names}。刷新页面后附件不会保留。',
+    draftSavedWithStoredFiles:
+      '已存为草稿。附件已保存在此浏览器中；在其他设备上打开时需要重新添加。',
+    draftFilesLost: '请重新添加附件：{names}。此浏览器未能保留这些附件。',
     sessionEndedDraft: '已写的内容保存在此浏览器中，重新登录后会再次打开。',
     signIn: '登录',
     invalidRecipients: '不是有效的邮箱地址：{addresses}',
@@ -1750,7 +1752,8 @@ const messages = {
         resendLabel: '重新发送 {address} 的欢迎邮件',
         resent: '已重新发送 {address} 的欢迎邮件。',
         sentFirst: '已发送 {address} 的欢迎邮件。',
-        suppressedToast: '没有发送：{address} 对应的收件地址以前退信或举报过垃圾邮件。请先把它移出屏蔽名单。',
+        suppressedToast:
+          '没有发送：{address} 对应的收件地址以前退信或举报过垃圾邮件。请先把它移出屏蔽名单。',
         resendCount: '已重发 {count} 次',
         status: {
           not_sent: '未发送',
@@ -1841,7 +1844,8 @@ const messages = {
         invitedNoEmail: '邀请已创建，但邮件没有发出。可在「邀请」标签里重新发送。',
         created: '已是成员，个人邮箱已开通。',
       },
-      welcomePreview: '导入后，会给这 {count} 位新成员各发一封欢迎邮件，说明如何登录和设置邮件客户端。',
+      welcomePreview:
+        '导入后，会给这 {count} 位新成员各发一封欢迎邮件，说明如何登录和设置邮件客户端。',
       welcomePreviewOff: '欢迎邮件已关闭，导入后不会发送。',
       welcomeSettingsLink: '在「邀请」中修改或关闭',
       welcomeSettingsLinkOff: '在「邀请」中开启',
@@ -2136,14 +2140,19 @@ const messages = {
       codeTitle: '这里填授权码，不是登录密码',
       codeSteps: {
         qq: '在网页版 QQ 邮箱打开“设置 → 账号”，开启 IMAP/SMTP 服务，按提示生成授权码，粘贴到下面。',
-        netease163: '在网页版 163 邮箱打开“设置 → POP3/SMTP/IMAP”，开启 IMAP/SMTP 服务，新增授权码，粘贴到下面。',
-        netease126: '在网页版 126 邮箱打开“设置 → POP3/SMTP/IMAP”，开启 IMAP/SMTP 服务，新增授权码，粘贴到下面。',
-        exmail: '在网页版腾讯企业邮打开“设置 → 客户端设置”，开启 IMAP/SMTP 服务，生成客户端专用密码，粘贴到下面。',
-        aliyun: '在网页版阿里邮箱打开“设置 → POP3/SMTP/IMAP”，开启 IMAP；如果开了二次验证，再生成三方客户端安全密码，粘贴到下面。',
+        netease163:
+          '在网页版 163 邮箱打开“设置 → POP3/SMTP/IMAP”，开启 IMAP/SMTP 服务，新增授权码，粘贴到下面。',
+        netease126:
+          '在网页版 126 邮箱打开“设置 → POP3/SMTP/IMAP”，开启 IMAP/SMTP 服务，新增授权码，粘贴到下面。',
+        exmail:
+          '在网页版腾讯企业邮打开“设置 → 客户端设置”，开启 IMAP/SMTP 服务，生成客户端专用密码，粘贴到下面。',
+        aliyun:
+          '在网页版阿里邮箱打开“设置 → POP3/SMTP/IMAP”，开启 IMAP；如果开了二次验证，再生成三方客户端安全密码，粘贴到下面。',
         gmail: '先为 Google 账号开启两步验证，再创建一个应用专用密码，把 16 位字母粘贴到下面。',
         icloud: '登录 Apple 账户，打开“登录与安全 → App 专用密码”，生成一个，粘贴到下面。',
         yahoo: '在 Yahoo 账户安全设置里选择“生成应用密码”，为 Zmail 生成一个，粘贴到下面。',
-        fastmail: '在 Fastmail 打开“设置 → 隐私与安全 → 管理应用密码”，新建一个带 IMAP 和 SMTP 权限的密码，粘贴到下面。',
+        fastmail:
+          '在 Fastmail 打开“设置 → 隐私与安全 → 管理应用密码”，新建一个带 IMAP 和 SMTP 权限的密码，粘贴到下面。',
       },
       codeLinks: {
         gmail: '打开 Google 应用专用密码',
