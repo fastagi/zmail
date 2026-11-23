@@ -11,6 +11,17 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail domain error codes
+
+### Low — Domains gain `last_error_code`
+
+Migration `2026_12_19_090000_add_mail_domain_error_code` (mailbox starter) adds
+`mail_domains.last_error_code varchar(64) NOT NULL DEFAULT ''`. PostgreSQL adds a column with a
+constant default without rewriting the table; the `ALTER TABLE` takes a brief `ACCESS EXCLUSIVE`
+lock. Existing domains get an empty code until their next setup or check. The domain view returns
+`last_error_code` beside `last_error` (see `contracts/MAILBOXES.md`); clients treat an unknown code
+like `domain.setup_failed`.
+
 ## Unreleased — Member feature grants
 
 ### High — Deploy the Web before the API

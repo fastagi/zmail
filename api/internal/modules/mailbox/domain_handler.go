@@ -43,6 +43,7 @@ type MailDomainResponse struct {
 	Status           string                     `json:"status"`
 	Records          []MailDomainRecordResponse `json:"records"`
 	LastError        string                     `json:"last_error,omitempty"`
+	LastErrorCode    string                     `json:"last_error_code,omitempty"`
 	SettingUp        bool                       `json:"setting_up"`
 	ZoneCheckLimited bool                       `json:"zone_check_limited"`
 	CheckedAt        *time.Time                 `json:"checked_at"`
@@ -72,6 +73,7 @@ func toMailDomainResponse(mailDomain *domain.MailDomain) MailDomainResponse {
 		Status:           string(mailDomain.Status),
 		Records:          records,
 		LastError:        mailDomain.LastError,
+		LastErrorCode:    mailDomain.LastErrorCode,
 		SettingUp:        mailDomain.SettingUp,
 		ZoneCheckLimited: mailDomain.ZoneCheckLimited,
 		CheckedAt:        mailDomain.CheckedAt,

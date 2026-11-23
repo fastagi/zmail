@@ -122,7 +122,7 @@ describe('organization mail domains', () => {
     expect(within(card).getByTestId('mail-domain-status')).toHaveTextContent('Pending');
     expect(within(card).getByText('Cloudflare zone: example.org')).toBeInTheDocument();
     expect(
-      within(card).getByText(/last setup step failed: cloudflare enable email routing/u)
+      within(card).getByText(/cloudflare enable email routing failed: Authentication error/u)
     ).toBeInTheDocument();
     const rows = within(card).getAllByRole('row').slice(1);
     expect(rows.map(row => row.getAttribute('data-record-status'))).toEqual([
@@ -135,6 +135,37 @@ describe('organization mail domains', () => {
       within(rows[2]!).getByText('Found instead: v=spf1 include:other.test -all')
     ).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Set up again' })).toBeInTheDocument();
+  });
+
+  it('explains a failed setup step in plain words and keeps the provider text as details', () => {
+    state.mailDomains.data = [
+      {
+        ...pendingDomain(),
+        last_error: 'cloudflare enable email routing failed: Authentication error',
+        last_error_code: 'domain.permission_denied',
+      },
+    ];
+    renderPage();
+
+    const card = screen.getByRole('article', { name: 'news.example.org' });
+    const alert = within(card).getByTestId('mail-domain-last-error');
+    expect(alert).toHaveTextContent('Cloudflare did not allow this step');
+    expect(alert).toHaveTextContent(/DNS and Email Routing edit permissions/u);
+    const details = within(alert).getByText('Technical details');
+    expect(details.closest('details')).not.toHaveAttribute('open');
+    expect(within(alert).getByText(/Authentication error/u)).toBeInTheDocument();
+  });
+
+  it('falls back to a general explanation for a code it does not know', () => {
+    state.mailDomains.data = [
+      { ...pendingDomain(), last_error: 'something new', last_error_code: 'domain.brand_new' },
+    ];
+    renderPage();
+
+    const alert = within(screen.getByRole('article', { name: 'news.example.org' })).getByTestId(
+      'mail-domain-last-error'
+    );
+    expect(alert).toHaveTextContent('A setup step did not finish');
   });
 
   it('connects a domain and reports whether it verified', async () => {
