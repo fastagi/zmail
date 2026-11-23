@@ -44,6 +44,8 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     description: t('description'),
     metadataBase: new URL(env.NEXT_PUBLIC_APP_URL),
+    // Opened from the Home Screen, iOS runs Zmail standalone, which web push requires there.
+    appleWebApp: { capable: true, title: 'Zmail', statusBarStyle: 'default' },
   };
 }
 
