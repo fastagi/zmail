@@ -52,6 +52,13 @@ jobs:
           flag admin '^(admin/|contracts/)'
           echo "Changed files:"; echo "$changed"
 
+      # The governance and contract scripts need Python 3.11+ (tomllib); pin it so the job does not
+      # depend on whichever Python the runner image ships.
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
       - name: Root governance guardrails
         run: make governance
 
@@ -85,6 +92,13 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
+
+      # The governance and contract scripts need Python 3.11+ (tomllib); pin it so the job does not
+      # depend on whichever Python the runner image ships.
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
