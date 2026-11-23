@@ -39,9 +39,25 @@ func TestAddMemberDeveloperGrantsUpDown(t *testing.T) {
 	assert.Zero(t, count, "removing the member must remove the grant")
 
 	require.NoError(t, (&addMemberDeveloperGrants{}).Down(db))
-	rolledBack := dumpSchema(t, db)
-	assert.NotContains(t, rolledBack, "member_developer_grants")
-	assert.NotContains(t, rolledBack, "developer_owned")
+	assert.NotContains(t, dumpSchema(t, db), "member_developer_grants")
 	require.NoError(t, (&addMemberDeveloperGrants{}).Up(db))
+	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
+}
+
+// TestAddWebhookEndpointDeveloperOwnedUpDown leaves existing endpoints organization-owned and rolls
+// back and forward to the golden schema.
+func TestAddWebhookEndpointDeveloperOwnedUpDown(t *testing.T) {
+	db := testplatform.OpenPostgres(t, nil)
+	migrateAll(t, db)
+	migrated := dumpSchema(t, db)
+
+	var defaultValue string
+	require.NoError(t, db.Raw(`SELECT column_default FROM information_schema.columns
+		WHERE table_name = 'webhook_endpoints' AND column_name = 'developer_owned'`).Scan(&defaultValue).Error)
+	assert.Equal(t, "false", defaultValue)
+
+	require.NoError(t, (&addWebhookEndpointDeveloperOwned{}).Down(db))
+	assert.NotContains(t, dumpSchema(t, db), "developer_owned")
+	require.NoError(t, (&addWebhookEndpointDeveloperOwned{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }

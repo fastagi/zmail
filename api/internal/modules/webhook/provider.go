@@ -34,6 +34,9 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 		assembly.WithStarterSummary("Organization-owned outbound endpoints with signed durable delivery, retries, and replay."),
 		assembly.WithStarterDependencies(config.StarterUser, config.StarterAudit, config.StarterOrganization),
 		assembly.WithStarterModule(handler),
-		assembly.WithStarterMigrationNames("2026_07_15_060000_create_webhook_tables"),
+		assembly.WithStarterMigrationNames(
+			"2026_07_15_060000_create_webhook_tables",
+			"2026_12_28_090100_add_webhook_endpoint_developer_owned",
+		),
 	)
 }
