@@ -1329,6 +1329,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-domains/{domain_id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Make a verified domain the organization's default
+         * @description Marks the domain as the one forms preselect for new mailboxes and clears the mark on the organization's other domains. Without a chosen domain, or while the chosen one is pending, the verified domain connected first is the default. Choosing the default again changes nothing. Only owners and admins may.
+         */
+        put: operations["setDefaultMailDomain"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail-domains/{domain_id}/receiving": {
         parameters: {
             query?: never;
@@ -5313,6 +5333,8 @@ export interface components {
             daily_send_limit: number;
             /** @description The transactional lane limit. Live, non-simulated transactional messages one organization may attempt per rolling 24 hours. */
             daily_transactional_limit: number;
+            /** @description True on exactly one item, the domain forms preselect for new mailboxes; the organization's default domain, or the shared domain while the organization has no verified domain. */
+            default: boolean;
             domain: string;
             /** @description Whether the API accepts signed deliveries from the mail edge. */
             inbound_enabled: boolean;
@@ -5854,6 +5876,8 @@ export interface components {
             checked_at: string | null;
             /** Format: date-time */
             created_at: string;
+            /** @description The organization's default domain, which forms preselect for new mailboxes. The verified domain an owner or admin chose, else the verified domain connected first; at most one domain is the default, and none while no domain is verified. */
+            default: boolean;
             id: components["schemas"]["PositiveID"];
             /** @description The provider's explanation of the last failed setup step, while the domain is pending. */
             last_error?: string;
@@ -5862,6 +5886,8 @@ export interface components {
              * @enum {string}
              */
             last_error_code?: "domain.permission_denied" | "domain.provider_unavailable" | "domain.routing_refused" | "domain.sending_refused" | "domain.dns_record_refused" | "domain.routing_rule_refused" | "domain.provider_refused" | "domain.zone_not_found" | "domain.setup_failed";
+            /** @description The organization's live mailboxes with an address on the domain. */
+            mailbox_count: number;
             name: string;
             records: components["schemas"]["MailDomainRecord"][];
             /** @description A setup is running in the background. The domain changes when it finishes; read it again until this is false. */
@@ -12186,6 +12212,46 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    setDefaultMailDomain: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive connected mail domain identifier. */
+                domain_id: components["parameters"]["MailDomainID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The domain, now with `default` true. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDomainResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };

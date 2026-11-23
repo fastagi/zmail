@@ -29,7 +29,7 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 | Role | May |
 |---|---|
 | `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see; read the platform accounts registered with a mailbox they may read or that they own, with their history |
-| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create, rename, and delete mailboxes; list the mailbox directory, and import and export mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; list, create, change, and delete every platform account and hand over an owner's accounts; read the usage of each send lane; list the suppression list and remove addresses from it |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create, rename, and delete mailboxes; list the mailbox directory, and import and export mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, make the default, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; list, create, change, and delete every platform account and hand over an owner's accounts; read the usage of each send lane; list the suppression list and remove addresses from it |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
 mailbox only as a member of it, and the access history records how they became one. A member who
@@ -46,6 +46,7 @@ recorded but has no special rights to it. A removed member loses access on their
 | Check a domain | `POST /api/mail-domains/:id/checks` | `POST /v1/mail-domains/:domain_id/checks` | `200` envelope |
 | Remove a domain | `DELETE /api/mail-domains/:id` | `DELETE /v1/mail-domains/:domain_id` | `204` |
 | Enable receiving on a domain | none yet | `POST /v1/mail-domains/:domain_id/receiving` | `200` envelope |
+| Make a domain the default | `PUT /api/mail-domains/:id/default` | `PUT /v1/mail-domains/:domain_id/default` | `200` envelope |
 | Preview a domain | none yet | `POST /v1/mail-domain-previews` | `200` envelope |
 | List managed zones | none yet | `GET /v1/mail-zones` | `200` envelope, at most 20 items |
 | Get a managed zone | none yet | `GET /v1/mail-zones/:zone_id` | `200` envelope |
@@ -188,6 +189,9 @@ has no browser route: only the mail edge calls it.
   `transactional_recipient_limit_per_minute`, `transactional_key_limit_per_second`, and
   `simulator_domain` (see [Transactional Mail](#transactional-mail)), `broadcasts_enabled`, and
   `custom_domains_enabled`.
+- Exactly one item has `default: true`: the organization's default domain (see Domains), or the
+  shared domain while the organization has no verified domain. Forms that create mailboxes
+  preselect it; it never changes what an empty `domain` means.
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
@@ -1776,6 +1780,14 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
   not Cloudflare Email Routing's (`*.mx.cloudflare.net`), else `send_receive`. A failed lookup,
   including a name without MX records, answers `existing_mx: []` and `send_receive`. An unusable
   name is `422 MAILBOX.DOMAIN_INVALID`, and the shared domain `409 MAILBOX.DOMAIN_TAKEN`.
+- Every domain carries `mailbox_count`, the organization's live mailboxes with an address on it,
+  and `default`. The default domain is the one an owner or admin chose with
+  `PUT /v1/mail-domains/:domain_id/default` while it is `verified`; with none chosen, or while the
+  chosen one is `pending`, it is the verified domain connected first. At most one domain is the
+  default, and none while no domain is verified. Choosing a `pending` domain is
+  `422 MAILBOX.DOMAIN_NOT_VERIFIED`; choosing the default again changes nothing. The answer is the
+  domain with `default: true`. Removing the chosen domain makes the verified domain connected first
+  the default again.
 - Removing a domain that a mailbox still uses, or that a transactional template sends from, is
   `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
   domain and leaves its DNS and Cloudflare settings as they are, including a managed zone, which is
@@ -1801,6 +1813,8 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
     ],
     "setting_up": false,
     "zone_check_limited": false,
+    "default": true,
+    "mailbox_count": 4,
     "checked_at": "2026-11-17T10:00:00Z",
     "verified_at": "2026-11-17T10:00:00Z",
     "created_at": "2026-11-17T09:59:58Z"

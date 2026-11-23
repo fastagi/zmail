@@ -4320,6 +4320,44 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains/{domain_id}/default:
+    put:
+      operationId: setDefaultMailDomain
+      summary: Make a verified domain the organization's default
+      description: Marks the domain as the one forms preselect for new mailboxes and clears the mark on the
+        organization's other domains. Without a chosen domain, or while the chosen one is pending, the verified
+        domain connected first is the default. Choosing the default again changes nothing. Only owners and admins
+        may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '200':
+          description: The domain, now with `default` true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-cloudflare-previews:
     post:
       operationId: previewCloudflareZones
@@ -15560,11 +15598,16 @@ components:
         - simulator_domain
         - broadcasts_enabled
         - custom_domains_enabled
+        - default
       properties:
         domain:
           type: string
           minLength: 1
           maxLength: 253
+        default:
+          type: boolean
+          description: True on exactly one item, the domain forms preselect for new mailboxes; the organization's
+            default domain, or the shared domain while the organization has no verified domain.
         kind:
           type: string
           description: '`shared` is the instance domain every organization may use; `organization` is a verified
@@ -20593,6 +20636,8 @@ components:
         - records
         - setting_up
         - zone_check_limited
+        - default
+        - mailbox_count
         - checked_at
         - verified_at
         - created_at
@@ -20632,6 +20677,15 @@ components:
           type: boolean
           description: True on a check answer when Cloudflare refused to look for the pending zone's name servers
             now because it looked too recently; check again later.
+        default:
+          type: boolean
+          description: The organization's default domain, which forms preselect for new mailboxes. The verified
+            domain an owner or admin chose, else the verified domain connected first; at most one domain is the
+            default, and none while no domain is verified.
+        mailbox_count:
+          type: integer
+          description: The organization's live mailboxes with an address on the domain.
+          minimum: 0
         last_error:
           type: string
           description: The provider's explanation of the last failed setup step, while the domain is pending.
