@@ -15,6 +15,9 @@ import {
   notificationReadStateResultSchema,
   notificationSchema,
   notificationStatusSchema,
+  webPushConfigSchema,
+  webPushSubscriptionListSchema,
+  webPushSubscriptionSchema,
 } from '@/features/notification/schemas';
 import type {
   MarkNotificationsReadInput,
@@ -24,7 +27,11 @@ import type {
   NotificationPreference,
   NotificationReadStateResult,
   NotificationStatus,
+  RegisterWebPushSubscriptionInput,
+  ReplaceNotificationPreferenceInput,
   ReplaceNotificationReadStateInput,
+  WebPushConfig,
+  WebPushSubscription,
 } from '@/features/notification/types';
 
 interface ListOptions {
@@ -69,12 +76,58 @@ export const notificationService = {
     );
   },
 
-  async replacePreference(input: NotificationPreference): Promise<NotificationPreference> {
+  async replacePreference(
+    input: ReplaceNotificationPreferenceInput
+  ): Promise<NotificationPreference> {
     return parseNotificationPreference(
-      await request.put<unknown, NotificationPreference>('/notification-preferences', input)
+      await request.put<unknown, ReplaceNotificationPreferenceInput>(
+        '/notification-preferences',
+        input
+      )
     );
   },
+
+  async webPushConfig(): Promise<WebPushConfig> {
+    return parseWebPushConfig(await request.get<unknown>('/web-push-config'));
+  },
+
+  async listWebPushSubscriptions(): Promise<WebPushSubscription[]> {
+    return parseWebPushSubscriptionList(await request.get<unknown>('/web-push-subscriptions'));
+  },
+
+  async registerWebPushSubscription(
+    input: RegisterWebPushSubscriptionInput
+  ): Promise<WebPushSubscription> {
+    return parseWebPushSubscription(
+      await request.put<unknown, RegisterWebPushSubscriptionInput>(
+        '/web-push-subscriptions',
+        input
+      )
+    );
+  },
+
+  async removeWebPushSubscription(subscriptionId: number): Promise<void> {
+    await request.delete<unknown>(`/web-push-subscriptions/${subscriptionId}`);
+  },
 };
+
+export function parseWebPushConfig(value: unknown): WebPushConfig {
+  const parsed = webPushConfigSchema.safeParse(value);
+  if (!parsed.success) throw invalidResponse();
+  return parsed.data;
+}
+
+export function parseWebPushSubscription(value: unknown): WebPushSubscription {
+  const parsed = webPushSubscriptionSchema.safeParse(value);
+  if (!parsed.success) throw invalidResponse();
+  return parsed.data;
+}
+
+export function parseWebPushSubscriptionList(value: unknown): WebPushSubscription[] {
+  const parsed = webPushSubscriptionListSchema.safeParse(value);
+  if (!parsed.success) throw invalidResponse();
+  return parsed.data;
+}
 
 export function parseNotificationPage(value: unknown): NotificationPage {
   const parsed = notificationPageEnvelopeSchema.safeParse(value);
@@ -153,4 +206,19 @@ assertContract<
     ContractData<'replaceNotificationPreferences', 200>
   >
 >();
-assertContract<Sends<NotificationPreference, ContractRequest<'replaceNotificationPreferences'>>>();
+assertContract<
+  Sends<ReplaceNotificationPreferenceInput, ContractRequest<'replaceNotificationPreferences'>>
+>();
+assertContract<Accepts<z.input<typeof webPushConfigSchema>, ContractData<'getWebPushConfig', 200>>>();
+assertContract<
+  Accepts<
+    z.input<typeof webPushSubscriptionListSchema>,
+    ContractData<'listWebPushSubscriptions', 200>
+  >
+>();
+assertContract<
+  Accepts<z.input<typeof webPushSubscriptionSchema>, ContractData<'putWebPushSubscription', 200>>
+>();
+assertContract<
+  Sends<RegisterWebPushSubscriptionInput, ContractRequest<'putWebPushSubscription'>>
+>();

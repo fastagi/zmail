@@ -38,6 +38,7 @@ import {
 import type {
   NotificationItem,
   NotificationPreference,
+  ReplaceNotificationPreferenceInput,
 } from '@/features/notification/types';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -86,7 +87,8 @@ export function NotificationCenter() {
 
   async function savePreference(): Promise<void> {
     if (!preference.data) return;
-    const input: NotificationPreference = {
+    // web_push_enabled is left out so this dialog keeps the stored push preference.
+    const input: ReplaceNotificationPreferenceInput = {
       in_app_enabled:
         preferenceDraft.in_app_enabled ?? preference.data.in_app_enabled,
       email_enabled: preferenceDraft.email_enabled ?? preference.data.email_enabled,
