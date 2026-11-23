@@ -148,6 +148,10 @@ const messages = {
         label: 'AI agent',
         description: 'Read new mail and draft replies in mailboxes that grant this key agent access.',
       },
+      templatesCreate: {
+        label: 'Create mail templates',
+        description: 'Let an AI tool save organization templates for people to review. It cannot send, edit, or delete.',
+      },
     },
     expiresAt: 'Expiry',
     expiry: {

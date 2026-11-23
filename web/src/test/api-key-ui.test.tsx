@@ -120,7 +120,7 @@ describe('API key settings workflow', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
     const boxes = screen.getAllByRole('checkbox');
-    expect(boxes).toHaveLength(4);
+    expect(boxes).toHaveLength(5);
     expect(screen.getByRole('checkbox', { name: /Send mail/ })).toBeChecked();
     expect(screen.queryByRole('textbox', { name: /scope/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: /Transactional mail/ }));
@@ -130,6 +130,28 @@ describe('API key settings workflow', () => {
       expect(state.create.mutateAsync).toHaveBeenCalledWith({
         name: 'Deploy',
         scopes: ['mail:send', 'mail:transactional'],
+      })
+    );
+  });
+
+  it('offers a template-creation key for AI tools under the custom purpose', async () => {
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: 'x'.repeat(32) });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'AI tool' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    const templates = screen.getByRole('checkbox', { name: /Create mail templates/ });
+    expect(templates).not.toBeChecked();
+    expect(templates.closest('label')).toHaveTextContent('templates:create');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Send mail/ }));
+    fireEvent.click(templates);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    await waitFor(() =>
+      expect(state.create.mutateAsync).toHaveBeenCalledWith({
+        name: 'AI tool',
+        scopes: ['templates:create'],
       })
     );
   });

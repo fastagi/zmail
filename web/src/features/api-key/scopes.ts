@@ -2,7 +2,13 @@
  * The scopes a new key may carry (`contracts/API_KEYS.md`), in the order the create dialog offers
  * them. `mail:send` is the one most developers need, so a new key starts with it.
  */
-export const API_KEY_SCOPES = ['mail:send', 'mail:read', 'mail:transactional', 'mail:agent'] as const;
+export const API_KEY_SCOPES = [
+  'mail:send',
+  'mail:read',
+  'mail:transactional',
+  'mail:agent',
+  'templates:create',
+] as const;
 
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 
@@ -14,6 +20,7 @@ export const API_KEY_SCOPE_MESSAGE_KEYS = {
   'mail:read': 'read',
   'mail:transactional': 'transactional',
   'mail:agent': 'agent',
+  'templates:create': 'templatesCreate',
 } as const satisfies Record<ApiKeyScope, string>;
 
 /** What the API accepts on create: a named scope, or the explicit `*` wildcard. */
