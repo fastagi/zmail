@@ -328,8 +328,10 @@ type MailboxDomainResponse struct {
 	Domain string `json:"domain"`
 	// Kind is "shared" for the instance's domain, usable by every organization, or
 	// "organization" for a verified domain the organization connected.
-	Kind         string `json:"kind"`
-	MaxMailboxes int    `json:"max_mailboxes"`
+	Kind string `json:"kind"`
+	// Default is true on the one domain new mailboxes use unless another is picked.
+	Default      bool `json:"default"`
+	MaxMailboxes int  `json:"max_mailboxes"`
 	// Provider is the outbound transport: "cloudflare" delivers, "log" only records.
 	Provider string `json:"provider"`
 	// InboundEnabled tells whether the API accepts signed deliveries from the mail edge.

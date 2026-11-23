@@ -398,6 +398,7 @@ TABLE mail_domains
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
   COLUMN cloudflare_connection_id uuid
   COLUMN last_error_code character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN is_default boolean NOT NULL DEFAULT false
 
 TABLE mail_drafts
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_drafts_id_seq'::regclass)
@@ -1567,6 +1568,7 @@ INDEX CREATE INDEX idx_mail_deleted_sends_lane ON mail_deleted_sends USING btree
 INDEX CREATE INDEX idx_mail_deleted_sends_mailbox ON mail_deleted_sends USING btree (mailbox_id, send_attempted_at)
 INDEX CREATE INDEX idx_mail_deleted_sends_message_id ON mail_deleted_sends USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_deleted_sends_pkey ON mail_deleted_sends USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_domains_default ON mail_domains USING btree (organization_id) WHERE is_default
 INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)
