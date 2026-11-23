@@ -59,9 +59,12 @@ func (h *Handler) OrganizationList(c *gin.Context) {
 		response.HandleError(c, "Organization context required", domain.ErrOrganizationContextRequired)
 		return
 	}
-	if _, _, developer := organization.DeveloperScope(); !developer {
-		response.HandleError(c, "Organization usage access forbidden", domain.ErrPermissionDenied)
-		return
+	// Owners and admins read organization usage; so does a member holding the developer grant.
+	if !organization.Role.CanManageOrganization() {
+		if _, _, developer := organization.DeveloperScope(); !developer {
+			response.HandleError(c, "Organization usage access forbidden", domain.ErrPermissionDenied)
+			return
+		}
 	}
 	h.list(c, domain.UsageTarget{
 		Scope:     domain.UsageScopeOrganization,
