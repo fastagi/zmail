@@ -27,6 +27,7 @@ type MailDomainPO struct {
 	Status                 string  `gorm:"size:20;not null;default:'pending'"`
 	Records                string  `gorm:"type:jsonb;not null;default:'[]'"`
 	LastError              string  `gorm:"size:500;not null;default:''"`
+	LastErrorCode          string  `gorm:"size:64;not null;default:''"`
 	CheckedAt              *time.Time
 	VerifiedAt             *time.Time
 	CreatedBy              uint `gorm:"not null"`
@@ -51,6 +52,7 @@ func (po *MailDomainPO) toDomain() *domain.MailDomain {
 		SendingTag:             po.SendingTag,
 		Status:                 domain.MailDomainStatus(po.Status),
 		LastError:              po.LastError,
+		LastErrorCode:          po.LastErrorCode,
 		CheckedAt:              po.CheckedAt,
 		VerifiedAt:             po.VerifiedAt,
 		CreatedBy:              po.CreatedBy,
@@ -99,6 +101,7 @@ func mailDomainPO(mailDomain *domain.MailDomain) (*MailDomainPO, error) {
 		Status:                 string(status),
 		Records:                string(encoded),
 		LastError:              truncateRunes(mailDomain.LastError, 500),
+		LastErrorCode:          mailDomain.LastErrorCode,
 		CheckedAt:              mailDomain.CheckedAt,
 		VerifiedAt:             mailDomain.VerifiedAt,
 		CreatedBy:              mailDomain.CreatedBy,
@@ -200,13 +203,14 @@ func (r *repository) UpdateDomain(ctx context.Context, mailDomain *domain.MailDo
 	result := r.conn(ctx).Model(&MailDomainPO{}).
 		Where("id = ? AND organization_id = ?", mailDomain.ID, mailDomain.OrganizationID).
 		Updates(map[string]any{
-			"sending_tag": po.SendingTag,
-			"status":      po.Status,
-			"records":     po.Records,
-			"last_error":  po.LastError,
-			"checked_at":  po.CheckedAt,
-			"verified_at": po.VerifiedAt,
-			"updated_at":  time.Now(),
+			"sending_tag":     po.SendingTag,
+			"status":          po.Status,
+			"records":         po.Records,
+			"last_error":      po.LastError,
+			"last_error_code": po.LastErrorCode,
+			"checked_at":      po.CheckedAt,
+			"verified_at":     po.VerifiedAt,
+			"updated_at":      time.Now(),
 		})
 	if result.Error != nil {
 		return result.Error

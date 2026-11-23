@@ -581,11 +581,7 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
           <p className="text-sm text-muted-foreground">{t('domain.pendingHint')}</p>
         ) : null}
         {domain.last_error && !settingUp ? (
-          <Alert className="border-warning/40 bg-warning-subtle text-warning">
-            <AlertDescription className="break-words">
-              {t('domain.lastError', { error: domain.last_error })}
-            </AlertDescription>
-          </Alert>
+          <DomainSetupError code={domain.last_error_code} detail={domain.last_error} />
         ) : null}
         {error ? (
           <p role="alert" className="text-sm text-error">
@@ -1049,5 +1045,46 @@ function RecordTable({ records }: { records: MailDomainRecord[] }) {
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+const setupErrorKeys = {
+  'domain.permission_denied': 'permissionDenied',
+  'domain.provider_unavailable': 'providerUnavailable',
+  'domain.routing_refused': 'routingRefused',
+  'domain.sending_refused': 'sendingRefused',
+  'domain.dns_record_refused': 'dnsRecordRefused',
+  'domain.routing_rule_refused': 'routingRuleRefused',
+  'domain.provider_refused': 'providerRefused',
+  'domain.zone_not_found': 'zoneNotFound',
+  'domain.setup_failed': 'setupFailed',
+} as const;
+
+type SetupErrorKey = (typeof setupErrorKeys)[keyof typeof setupErrorKeys];
+
+function setupErrorKey(code: string | undefined): SetupErrorKey {
+  return code && code in setupErrorKeys
+    ? setupErrorKeys[code as keyof typeof setupErrorKeys]
+    : 'setupFailed';
+}
+
+/** Says what went wrong in a setup step and what to do, with the provider's words folded away. */
+function DomainSetupError({ code, detail }: { code: string | undefined; detail: string }) {
+  const t = useT('mailbox');
+  const key = setupErrorKey(code);
+  return (
+    <Alert
+      data-testid="mail-domain-last-error"
+      className="border-warning/40 bg-warning-subtle text-warning"
+    >
+      <AlertDescription className="space-y-1.5 break-words">
+        <p className="font-medium">{t(`domain.setupError.${key}.title`)}</p>
+        <p>{t(`domain.setupError.${key}.action`)}</p>
+        <details className="text-xs">
+          <summary className="cursor-pointer select-none">{t('domain.setupErrorDetails')}</summary>
+          <p className="mt-1 font-mono">{detail}</p>
+        </details>
+      </AlertDescription>
+    </Alert>
   );
 }
