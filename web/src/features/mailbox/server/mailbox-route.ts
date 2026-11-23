@@ -301,7 +301,12 @@ export async function listMailboxDomainsRoute(request: Request): Promise<NextRes
       organizationId: String(target.organizationId),
     });
   }
-  return success(mockMailboxStore.domains(mockDomainStore.verifiedNames(target.organizationId)));
+  return success(
+    mockMailboxStore.domains(
+      mockDomainStore.verifiedNames(target.organizationId),
+      mockDomainStore.defaultName(target.organizationId)
+    )
+  );
 }
 
 export async function listMailDomainsRoute(request: Request): Promise<NextResponse> {
@@ -403,6 +408,27 @@ export async function enableMailDomainReceivingRoute(
   return mockDomainResponse(mockDomainStore.enableReceiving(target.organizationId, domainId.value));
 }
 
+/** Makes a verified domain the organization's default; reads no body. */
+export async function setDefaultMailDomainRoute(
+  request: Request,
+  rawDomainId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const domainId = parseRouteId(rawDomainId);
+  if (!domainId.ok) return domainId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mail-domains/${domainId.value}/default`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return mockDomainResponse(mockDomainStore.setDefault(target.organizationId, domainId.value));
+}
+
 /** Changes nothing, so members may preview too. */
 export async function previewMailDomainRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
@@ -473,6 +499,8 @@ function mockDomainResponse(result: MockDomainResult, status: 200 | 201 = 200): 
       return failure(409, ApiErrorCode.MAILBOX_ZONE_PENDING, 'Managed zone is not active yet');
     case 'zone_limit':
       return failure(422, ApiErrorCode.MAILBOX_ZONE_LIMIT_REACHED, 'Managed zone limit reached');
+    case 'not_verified':
+      return failure(422, ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED, 'Mail domain is not verified');
     default:
       return failure(422, ApiErrorCode.MAILBOX_DOMAIN_INVALID, 'Mail domain name is invalid');
   }

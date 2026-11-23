@@ -206,6 +206,17 @@ export const mailboxService = {
     return parsed.data;
   },
 
+  /** Makes a verified domain the organization's default for new mailboxes. */
+  async setDefaultMailDomain(organizationId: number, domainId: number): Promise<MailDomain> {
+    validId(domainId);
+    return parseMailDomain(
+      await request.put<unknown>(`/mail-domains/${domainId}/default`, undefined, {
+        headers: organizationHeaders(organizationId),
+      }),
+      domainId
+    );
+  },
+
   /** Turns a send-only domain into one that also receives; the setup runs in the background. */
   async enableReceiving(organizationId: number, domainId: number): Promise<MailDomain> {
     validId(domainId);

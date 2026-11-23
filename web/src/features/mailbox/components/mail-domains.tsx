@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Check,
+  ChevronDown,
   ChevronRight,
   Globe,
   Inbox,
@@ -12,6 +13,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Star,
   Trash2,
   Wrench,
 } from 'lucide-react';
@@ -58,8 +60,12 @@ import {
   usePreviewMailDomain,
   useRefreshMailDomain,
   useRemoveMailDomain,
+  useSetDefaultMailDomain,
 } from '@/features/mailbox/hooks/use-mailbox';
-import { MAIL_DOMAIN_NAME_MAX_LENGTH } from '@/features/mailbox/schemas';
+import {
+  MAIL_DOMAIN_MAX_PER_ORGANIZATION,
+  MAIL_DOMAIN_NAME_MAX_LENGTH,
+} from '@/features/mailbox/schemas';
 import type {
   MailDomain,
   MailDomainCapability,
@@ -115,16 +121,53 @@ export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; can
     zones.data && domains.data
       ? zones.data.filter(zone => !domains.data.some(domain => domain.zone?.id === zone.id))
       : [];
+  const connectedCount = domains.data?.length ?? 0;
+  const atLimit = connectedCount >= MAIL_DOMAIN_MAX_PER_ORGANIZATION;
+  const connectForm = useRef<HTMLFormElement>(null);
+  const connectInput = useRef<HTMLInputElement>(null);
+  const showConnectForm = () => {
+    connectForm.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    connectInput.current?.focus({ preventScroll: true });
+  };
 
   return (
     <section aria-labelledby="mail-domains-connected" className="space-y-4 rounded-md border p-4">
-      <div className="space-y-1">
-        <h2 id="mail-domains-connected" className="text-base font-semibold">
-          {t('domain.connectedTitle')}
-        </h2>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          {t(enabled ? 'domain.connectedDescription' : 'domain.connectedDisabled')}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <h2 id="mail-domains-connected" className="text-base font-semibold">
+            {t('domain.connectedTitle')}
+          </h2>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            {t(enabled ? 'domain.connectedDescription' : 'domain.connectedDisabled')}
+          </p>
+        </div>
+        {enabled && domains.data ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-sm text-muted-foreground" data-testid="mail-domain-count">
+              {t('domain.domainCount', {
+                count: connectedCount,
+                max: MAIL_DOMAIN_MAX_PER_ORGANIZATION,
+              })}
+            </span>
+            {canManage ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={atLimit}
+                aria-describedby={atLimit ? 'mail-domain-limit-hint' : undefined}
+                icon={<Plus className="size-4" />}
+                onClick={showConnectForm}
+              >
+                {t('domain.addDomainAction')}
+              </Button>
+            ) : null}
+            {canManage && atLimit ? (
+              <p id="mail-domain-limit-hint" className="basis-full text-xs text-muted-foreground">
+                {t('domain.domainLimitReached', { max: MAIL_DOMAIN_MAX_PER_ORGANIZATION })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {!enabled ? null : domains.isPending ? (
         <Skeleton className="h-24 w-full" aria-hidden="true" />
@@ -154,7 +197,11 @@ export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; can
           )}
           {canManage ? (
             <>
-              <ConnectDomainForm />
+              <ConnectDomainForm
+                another={connectedCount > 0}
+                formRef={connectForm}
+                inputRef={connectInput}
+              />
               <OwnCloudflareAccount key={organizationId} organizationId={organizationId} />
             </>
           ) : (
@@ -209,7 +256,16 @@ export function connectDomainErrorKey(failure: unknown) {
   return resolveMailboxErrorKey(failure);
 }
 
-function ConnectDomainForm() {
+function ConnectDomainForm({
+  another,
+  formRef,
+  inputRef,
+}: {
+  /** The organization already has a domain, so this one is another. */
+  another: boolean;
+  formRef: RefObject<HTMLFormElement | null>;
+  inputRef: RefObject<HTMLInputElement | null>;
+}) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const connect = useConnectMailDomain(organizationId);
@@ -337,20 +393,27 @@ function ConnectDomainForm() {
 
   return (
     <form
-      className="space-y-3 rounded-md border bg-muted/20 p-4"
+      ref={formRef}
+      className="scroll-mt-4 space-y-3 rounded-md border bg-muted/20 p-4"
       aria-labelledby="mail-domain-connect-title"
       onSubmit={submit}
     >
       <div className="space-y-1">
         <h3 id="mail-domain-connect-title" className="font-semibold">
-          {t('domain.connectTitle')}
+          {t(another ? 'domain.connectAnotherTitle' : 'domain.connectTitle')}
         </h3>
+        {another ? (
+          <p className="text-xs text-muted-foreground">
+            {t('domain.connectAnotherHint', { max: MAIL_DOMAIN_MAX_PER_ORGANIZATION })}
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground">{t('domain.connectWhen')}</p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="mail-domain-name-input">{t('domain.connectLabel')}</Label>
         <div className="flex flex-wrap items-center gap-2">
           <Input
+            ref={inputRef}
             id="mail-domain-name-input"
             className="w-full max-w-sm flex-1"
             value={name}
@@ -436,18 +499,25 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
   const organizationId = useMailOrganizationId();
   const refresh = useRefreshMailDomain(organizationId);
   const remove = useRemoveMailDomain(organizationId);
+  const setDefault = useSetDefaultMailDomain(organizationId);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmReceiving, setConfirmReceiving] = useState(false);
   const [creatingMailbox, setCreatingMailbox] = useState(false);
   // Cloudflare refused the last re-check of the pending zone.
   const [limited, setLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A ready domain folds into one row; its records open on request.
+  const [expanded, setExpanded] = useState(false);
   const verified = domain.status === 'verified';
   const headingId = `mail-domain-${domain.id}`;
+  const detailsId = `${headingId}-details`;
   const zonePending = domain.zone?.status === 'pending';
 
   const settingUp = domain.setting_up;
-  const busy = settingUp || refresh.isPending || remove.isPending;
+  const ready = verified && !settingUp;
+  // Until a domain is ready its next step stays in view.
+  const open = !ready || expanded;
+  const busy = settingUp || refresh.isPending || remove.isPending || setDefault.isPending;
   const run = async (action: 'setups' | 'checks') => {
     setError(null);
     try {
@@ -458,6 +528,16 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
       else if (result.setting_up) toast.message(t('domain.settingUpToast'));
       else if (result.status === 'verified') toast.success(t('domain.verified'));
       else toast.message(t('domain.stillPending'));
+    } catch (failure) {
+      setError(t(resolveMailboxErrorKey(failure)));
+    }
+  };
+
+  const makeDefault = async () => {
+    setError(null);
+    try {
+      await setDefault.mutateAsync(domain.id);
+      toast.success(t('domain.defaultSet', { domain: domain.name }));
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
     }
@@ -476,12 +556,28 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
   };
 
   return (
-    <article aria-labelledby={headingId} className="rounded-md border" data-domain={domain.name}>
-      <div className="flex flex-wrap items-center gap-3 border-b p-3">
+    <article
+      aria-labelledby={headingId}
+      className="rounded-md border"
+      data-domain={domain.name}
+      data-expanded={open}
+    >
+      <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 p-3', open && 'border-b')}>
         <Globe className="size-4 text-muted-foreground" aria-hidden="true" />
         <h3 id={headingId} className="min-w-0 font-semibold break-all">
           {domain.name}
         </h3>
+        {domain.default ? (
+          <Badge
+            variant="outline"
+            data-testid="mail-domain-default"
+            title={t('domain.defaultHint')}
+            className="gap-1 border-transparent bg-primary/10 text-primary"
+          >
+            <Star className="size-3" aria-hidden="true" />
+            {t('domain.defaultBadge')}
+          </Badge>
+        ) : null}
         <Badge
           variant="outline"
           data-testid="mail-domain-status"
@@ -503,12 +599,40 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
           <Badge variant="outline" className="font-normal text-muted-foreground">
             {t('domain.sendOnlyBadge')}
           </Badge>
+        ) : ready ? (
+          <Badge variant="outline" className="font-normal text-muted-foreground">
+            {t('domain.capabilitySendReceive')}
+          </Badge>
         ) : null}
-        <span className="text-xs text-muted-foreground">
-          {t('domain.zone', { zone: domain.zone_name })}
-        </span>
+        {domain.mailbox_count !== undefined ? (
+          <span className="text-xs text-muted-foreground">
+            {t('domain.mailboxCount', { count: domain.mailbox_count })}
+          </span>
+        ) : null}
+        {open ? (
+          <span className="text-xs text-muted-foreground">
+            {t('domain.zone', { zone: domain.zone_name })}
+          </span>
+        ) : null}
         <div className="ml-auto flex flex-wrap gap-2">
-          {domain.zone ? (
+          {ready ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-expanded={expanded}
+              aria-controls={expanded ? detailsId : undefined}
+              icon={
+                <ChevronDown
+                  className={cn('size-4 transition-transform', expanded && 'rotate-180')}
+                />
+              }
+              onClick={() => setExpanded(current => !current)}
+            >
+              {t(expanded ? 'domain.hideRecords' : 'domain.showRecords')}
+            </Button>
+          ) : null}
+          {open && domain.zone ? (
             <Button asChild size="sm" variant="outline">
               <Link
                 href={mailOrganizationHref(getMailZoneDnsRoute(domain.zone.id), organizationId)}
@@ -546,12 +670,36 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
               )}
             </>
           ) : null}
+          {ready && canManage ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              icon={<Plus className="size-4" />}
+              onClick={() => setCreatingMailbox(true)}
+            >
+              {t('domain.createMailboxAction', { domain: domain.name })}
+            </Button>
+          ) : null}
+          {ready && canManage && !domain.default ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              loading={setDefault.isPending}
+              disabled={busy}
+              icon={<Star className="size-4" />}
+              onClick={() => void makeDefault()}
+            >
+              {t('domain.makeDefaultAction')}
+            </Button>
+          ) : null}
           {canManage ? (
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              disabled={refresh.isPending || remove.isPending}
+              disabled={refresh.isPending || remove.isPending || setDefault.isPending}
               icon={<Trash2 className="size-4" />}
               onClick={() => setConfirmRemove(true)}
             >
@@ -560,68 +708,65 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
           ) : null}
         </div>
       </div>
-      <div className="space-y-3 p-3">
-        <DomainSetupSteps current={zonePending ? 1 : verified && !settingUp ? 3 : 2} />
-        {verified && !settingUp && canManage ? (
-          <Button
-            type="button"
-            size="sm"
-            icon={<Plus className="size-4" />}
-            onClick={() => setCreatingMailbox(true)}
-          >
-            {t('domain.createMailboxAction', { domain: domain.name })}
-          </Button>
-        ) : null}
-        {settingUp ? (
-          <p className="flex items-start gap-2 text-sm text-muted-foreground" role="status">
-            <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
-            <span>{t('domain.settingUpHint')}</span>
-          </p>
-        ) : !verified && !zonePending ? (
-          <p className="text-sm text-muted-foreground">{t('domain.pendingHint')}</p>
-        ) : null}
-        {domain.last_error && !settingUp ? (
-          <DomainSetupError code={domain.last_error_code} detail={domain.last_error} />
-        ) : null}
-        {error ? (
-          <p role="alert" className="text-sm text-error">
-            {error}
-          </p>
-        ) : null}
-        {domain.zone && zonePending ? (
-          <MailZoneNameservers
-            zone={domain.zone}
-            canManage={canManage}
-            checking={refresh.isPending && refresh.variables?.action === 'checks'}
-            checkDisabled={busy}
-            limited={limited || domain.zone_check_limited}
-            onCheck={() => void run('checks')}
-          />
-        ) : null}
-        {domain.records.length > 0 ? (
-          <>
-            <RecordTable records={domain.records} />
-            <RecordHelp domain={domain} />
-          </>
-        ) : null}
-        {verified && !settingUp && canManage && domain.capability === 'send_only' ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              icon={<Inbox className="size-4" />}
-              onClick={() => setConfirmReceiving(true)}
-            >
-              {t('domain.receivingAction')}
-            </Button>
-          </div>
-        ) : null}
-        {verified && !settingUp ? (
-          <MailDomainTestChecklist domain={domain.name} capability={domain.capability} />
-        ) : null}
-      </div>
+      {!open && error ? (
+        <p role="alert" className="px-3 pb-3 text-sm text-error">
+          {error}
+        </p>
+      ) : null}
+      {open ? (
+        <div id={detailsId} className="space-y-3 p-3">
+          <DomainSetupSteps current={zonePending ? 1 : ready ? 3 : 2} />
+          {settingUp ? (
+            <p className="flex items-start gap-2 text-sm text-muted-foreground" role="status">
+              <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
+              <span>{t('domain.settingUpHint')}</span>
+            </p>
+          ) : !verified && !zonePending ? (
+            <p className="text-sm text-muted-foreground">{t('domain.pendingHint')}</p>
+          ) : null}
+          {domain.last_error && !settingUp ? (
+            <DomainSetupError code={domain.last_error_code} detail={domain.last_error} />
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-sm text-error">
+              {error}
+            </p>
+          ) : null}
+          {domain.zone && zonePending ? (
+            <MailZoneNameservers
+              zone={domain.zone}
+              canManage={canManage}
+              checking={refresh.isPending && refresh.variables?.action === 'checks'}
+              checkDisabled={busy}
+              limited={limited || domain.zone_check_limited}
+              onCheck={() => void run('checks')}
+            />
+          ) : null}
+          {domain.records.length > 0 ? (
+            <>
+              <RecordTable records={domain.records} />
+              <RecordHelp domain={domain} />
+            </>
+          ) : null}
+          {verified && !settingUp && canManage && domain.capability === 'send_only' ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                icon={<Inbox className="size-4" />}
+                onClick={() => setConfirmReceiving(true)}
+              >
+                {t('domain.receivingAction')}
+              </Button>
+            </div>
+          ) : null}
+          {ready ? (
+            <MailDomainTestChecklist domain={domain.name} capability={domain.capability} />
+          ) : null}
+        </div>
+      ) : null}
       <Dialog open={creatingMailbox} onOpenChange={setCreatingMailbox}>
         <DialogContent size="lg" className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
