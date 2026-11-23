@@ -117,8 +117,8 @@ func (r *repository) ChangeMemberRole(
 		}
 		// A role change withdraws developer access: an admin needs none, and demoting them later
 		// must not quietly restore an old grant.
-		if err := tx.Where("membership_id = ?", target.ID).Delete(&MemberDeveloperGrantPO{}).Error; err != nil {
-			return fmt.Errorf("withdraw developer grant: %w", err)
+		if deleteErr := tx.Where("membership_id = ?", target.ID).Delete(&MemberDeveloperGrantPO{}).Error; deleteErr != nil {
+			return fmt.Errorf("withdraw developer grant: %w", deleteErr)
 		}
 		target.DeveloperGrant = nil
 		target.Role = string(role)

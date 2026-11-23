@@ -25,7 +25,10 @@ func endpointOwnerFromContext(ctx context.Context) uint {
 	if ctx == nil {
 		return 0
 	}
-	owner, _ := ctx.Value(endpointOwnerKey{}).(uint)
+	owner, ok := ctx.Value(endpointOwnerKey{}).(uint)
+	if !ok {
+		return 0
+	}
 	return owner
 }
 

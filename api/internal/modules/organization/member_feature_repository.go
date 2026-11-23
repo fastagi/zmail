@@ -125,7 +125,7 @@ func updateDeveloperGrant(
 	if err != nil {
 		return err
 	}
-	if err := requireVerifiedOrganizationDomains(tx, organizationID, grant.Domains); err != nil {
+	if err = requireVerifiedOrganizationDomains(tx, organizationID, grant.Domains); err != nil {
 		return err
 	}
 	saved, err := saveDeveloperGrant(tx, organizationID, target.ID, actorUserID, grant, now)
