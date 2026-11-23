@@ -1475,6 +1475,7 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		RFCMessageID: parsed.MessageID,
 		DedupeKey:    inboundDedupeKey(parsed.MessageID, delivery.Raw),
 		Attachments:  parsed.Attachments,
+		RawSource:    delivery.Raw,
 	}
 	created := false
 	err = s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {

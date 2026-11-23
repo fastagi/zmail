@@ -28,6 +28,9 @@ var (
 	// ErrMailboxAccessConflict rejects an access change the mailbox's current type does not allow.
 	ErrMailboxAccessConflict = errors.New("mailbox access conflicts with its type")
 	ErrMailMessageNotFound   = errors.New("mail message not found")
+	// ErrMailMessageSourceNotFound is a message stored without its raw source; mail apps get a
+	// rebuilt message instead.
+	ErrMailMessageSourceNotFound = errors.New("mail message source not found")
 	// ErrTransactionalMessageNotFound means no transactional message matched the lookup.
 	ErrTransactionalMessageNotFound    = errors.New("transactional message not found")
 	ErrMailMessageInvalid              = errors.New("mail message is invalid")

@@ -337,7 +337,7 @@ func deleteMessageChunk(tx *gorm.DB, ids []uint) (int, error) {
 	if err := keepDeletedSends(tx, ids); err != nil {
 		return 0, err
 	}
-	for _, dependant := range []any{&MailAttachmentPO{}, &MailMessageEventPO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
+	for _, dependant := range []any{&MailAttachmentPO{}, &MailMessageSourcePO{}, &MailMessageEventPO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
 		if err := tx.Where("message_id IN ?", ids).Delete(dependant).Error; err != nil {
 			return 0, err
 		}
