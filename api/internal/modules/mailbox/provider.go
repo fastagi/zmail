@@ -6,6 +6,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
@@ -39,11 +40,38 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(mailNotifier), new(*webhookNotifier)),
 	// Broadcast notices go to the notification center and, through the system mailer, by email.
 	NewBroadcastNoticeSender,
-	NewService,
+	ProvideService,
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,
 	NewOperatorMetricsHandler,
 )
+
+// ProvideService builds the service with the organization starter's roster inviter, which sends
+// the invitations of a roster import.
+func ProvideService(
+	repo domain.MailboxRepository,
+	memberships membershipDirectory,
+	templates domain.MailTemplateRepository,
+	contacts domain.MailContactRepository,
+	broadcasts domain.MailBroadcastRepository,
+	organize domain.MailOrganizeRepository,
+	domains domain.MailDomainRepository,
+	zones domain.MailZoneRepository,
+	domainProvider mailtransport.DomainProvider,
+	transport mailtransport.Transport,
+	notifier mailNotifier,
+	settings Settings,
+	transactional domain.TransactionalMailRepository,
+	limits *ratelimit.Stores,
+	accounts accountDirectory,
+	notices broadcastNoticeSender,
+	inviter domain.OrganizationRosterInviter,
+) *service {
+	svc := NewService(repo, memberships, templates, contacts, broadcasts, organize, domains, zones, domainProvider,
+		transport, notifier, settings, transactional, limits, accounts, notices)
+	svc.inviter = inviter
+	return svc
+}
 
 // NewMembershipDirectory reads memberships through the organization starter's repository.
 func NewMembershipDirectory(organizations domain.OrganizationRepository) membershipDirectory {
@@ -112,6 +140,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_17_090000_add_external_mail_release_owner",
 			"2026_12_19_090000_add_mail_domain_error_code",
 			"2026_12_20_090000_add_broadcast_notices",
+			"2026_12_21_100000_add_mailbox_pending_owner",
 		),
 	)
 }

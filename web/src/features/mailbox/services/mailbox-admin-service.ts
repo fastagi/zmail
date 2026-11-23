@@ -4,9 +4,11 @@ import {
   MAILBOX_DIRECTORY_CURSOR_MAX_LENGTH,
   MAILBOX_DIRECTORY_QUERY_MAX_LENGTH,
   MAILBOX_IMPORT_MAX_ROWS,
+  MEMBER_IMPORT_MAX_ROWS,
   mailboxDirectoryPageEnvelopeSchema,
   mailboxImportResultSchema,
   mailboxSchema,
+  memberImportResultSchema,
 } from '@/features/mailbox/schemas';
 import type {
   Mailbox,
@@ -15,6 +17,10 @@ import type {
   MailboxImportResult,
   MailboxImportRowInput,
   MailboxType,
+  MemberImportFeatures,
+  MemberImportInput,
+  MemberImportResult,
+  MemberImportRowInput,
 } from '@/features/mailbox/types';
 import { ClientErrorCode } from '@/http/codes';
 import {
@@ -97,6 +103,25 @@ export const mailboxAdminService = {
     return parsed.data;
   },
 
+  /**
+   * Checks (`dryRun`) or applies a roster import: invites each row, reserves each a personal
+   * mailbox on `domain`, and starts each invitation with `features`. Owners and admins only.
+   */
+  async importMembers(organizationId: number, input: MemberImportInput): Promise<MemberImportResult> {
+    const headers = organizationHeaders(organizationId);
+    const { rows } = input;
+    if (rows.length === 0 || rows.length > MEMBER_IMPORT_MAX_ROWS) throw invalidResponse();
+    const parsed = memberImportResultSchema.safeParse(
+      await request.post<unknown, MemberImportBody>(
+        '/member-imports',
+        { dry_run: input.dryRun, domain: input.domain, features: input.features, rows },
+        { headers }
+      )
+    );
+    if (!parsed.success || parsed.data.rows.length !== rows.length) throw invalidResponse();
+    return parsed.data;
+  },
+
   /** The CSV file of every mailbox of one type, with the name the API gave it. */
   async exportMailboxes(
     organizationId: number,
@@ -111,6 +136,13 @@ export const mailboxAdminService = {
     };
   },
 };
+
+interface MemberImportBody {
+  dry_run: boolean;
+  domain: string;
+  features: MemberImportFeatures;
+  rows: MemberImportRowInput[];
+}
 
 function dispositionFilename(disposition: string | null): string | null {
   const match = /^attachment;\s*filename="([A-Za-z0-9._-]{1,128})"$/u.exec(disposition ?? '');
@@ -147,3 +179,7 @@ assertContract<
 assertContract<
   Sends<{ dry_run: boolean; rows: MailboxImportRowInput[] }, ContractRequest<'importMailboxes'>>
 >();
+assertContract<
+  Accepts<z.input<typeof memberImportResultSchema>, ContractData<'importMembers', 200>>
+>();
+assertContract<Sends<MemberImportBody, ContractRequest<'importMembers'>>>();

@@ -9,6 +9,7 @@ import type {
   MailboxDirectoryFilters,
   MailboxImportRowInput,
   MailboxType,
+  MemberImportInput,
 } from '@/features/mailbox/types';
 
 /** One directory page; the previous page stays on screen while the next one loads. */
@@ -55,6 +56,29 @@ export function useImportMailboxes(organizationId: number) {
       dryRun
         ? undefined
         : queryClient.invalidateQueries({ queryKey: mailboxKeys.organization(organizationId) }),
+  });
+}
+
+/**
+ * Checks or applies a roster import. A real run changes members, invitations, and mailboxes, so
+ * all three are read again afterwards.
+ */
+export function useImportMembers(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MemberImportInput) =>
+      mailboxAdminService.importMembers(organizationId, input),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: (_result, _error, { dryRun }) =>
+      dryRun
+        ? undefined
+        : Promise.all([
+            queryClient.invalidateQueries({ queryKey: mailboxKeys.organization(organizationId) }),
+            queryClient.invalidateQueries({ queryKey: ['organizations', 'members', organizationId] }),
+            queryClient.invalidateQueries({
+              queryKey: ['organizations', 'invitations', organizationId],
+            }),
+          ]),
   });
 }
 

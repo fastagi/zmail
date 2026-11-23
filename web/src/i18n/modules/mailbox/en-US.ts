@@ -672,11 +672,13 @@ const messages = {
       },
       routingRuleRefused: {
         title: "A mailbox's receiving rule could not be created",
-        action: 'Choose Set up again. If it keeps failing, check the Email Routing rules of this zone in Cloudflare.',
+        action:
+          'Choose Set up again. If it keeps failing, check the Email Routing rules of this zone in Cloudflare.',
       },
       providerRefused: {
         title: 'Cloudflare refused a setup step',
-        action: 'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+        action:
+          'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
       },
       zoneNotFound: {
         title: "This domain's Cloudflare zone is no longer reachable",
@@ -685,7 +687,8 @@ const messages = {
       },
       setupFailed: {
         title: 'A setup step did not finish',
-        action: 'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+        action:
+          'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
       },
     },
     stepsLabel: 'Setup progress',
@@ -992,6 +995,7 @@ const messages = {
       connectionRevokedOnLeave: 'Disconnected because {subject} left the organization',
       agentGranted: "{actor} let an agent key of {subject} receive this mailbox's mail",
       agentRevoked: '{actor} revoked an agent key of {subject}',
+      ownerAssigned: '{subject} accepted the invitation and now owns this reserved mailbox',
       agentEnded: 'An agent key of {subject} lost access',
     },
     conflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
@@ -1578,9 +1582,11 @@ const messages = {
     reasonMessage: "The message couldn't be built for this address",
     reasonBounce: "The address doesn't exist or refuses mail",
     reasonSuppressed: 'The mail provider blocks this address after earlier bounces or complaints',
-    reasonUnreachable: "The mail provider couldn't be reached, so this message may not have gone out",
+    reasonUnreachable:
+      "The mail provider couldn't be reached, so this message may not have gone out",
     reasonProviderResponse: 'The mail provider gave an answer Zmail could not read',
-    reasonUnavailable: 'Sending was unavailable. Ask your Zmail administrator to check mail sending.',
+    reasonUnavailable:
+      'Sending was unavailable. Ask your Zmail administrator to check mail sending.',
     reasonUnverified: "The sending domain isn't verified",
     reasonCanceled: 'Canceled before it was sent',
     reasonExpired: 'Waited too long and was not sent',
@@ -1759,6 +1765,93 @@ const messages = {
         empty: 'The file has no rows to import.',
         missing_columns: 'The file needs the columns address and members.',
         too_many_rows: 'The file has more than 500 rows. Split it and import each part.',
+        unreadable: 'The file could not be read.',
+      },
+    },
+    rosterImport: {
+      open: 'Import roster',
+      title: 'Import a roster',
+      description:
+        'Invite people in bulk. Each person gets an invitation, a personal mailbox reserved on your domain, and the features you pick. They own the mailbox once they accept with the same email.',
+      file: 'CSV file',
+      chooseFile: 'Choose file',
+      noFile: 'No file chosen',
+      template: 'Download template',
+      paste: 'Or paste rows',
+      columnsHint:
+        'Columns: email (required), name, role (member or admin), mailbox (a prefix such as alice, or a full address). An empty mailbox uses the part of the email before @. Up to 500 rows; you can paste cells copied from a spreadsheet.',
+      domain: 'Mailbox domain',
+      domainHint: 'A row with only a prefix gets an address on {domain}.',
+      features: 'Features for invited members',
+      featuresHint: 'Admins always have every feature. Existing members keep what they have.',
+      check: 'Check rows',
+      checking: 'Checking the rows…',
+      importing: 'Importing {count, plural, one {# row} other {# rows}}…',
+      back: 'Back to edit',
+      confirm: 'Import {count, plural, one {# row} other {# rows}}',
+      previewSummary:
+        '{total} rows: {ready} ready, {noop} need no change, {attention} need attention',
+      doneSummary:
+        '{total} rows: {invited} invited with {reserved, plural, one {# mailbox} other {# mailboxes}} reserved, {created} mailboxes created for existing members, {noop} need no change, {attention} need attention',
+      doneToast:
+        'Invited {invited, plural, one {# person} other {# people}} and reserved {reserved, plural, one {# mailbox} other {# mailboxes}} for them. {created} existing members got a mailbox; {attention, plural, one {# row needs} other {# rows need}} attention.',
+      retryToast:
+        'Retried: {invited} invited, {reserved, plural, one {# mailbox} other {# mailboxes}} reserved, {created} created, {attention} still need attention.',
+      retryFailed:
+        'Retry {count, plural, one {# row that needs} other {# rows that need}} attention',
+      downloadFailed: 'Download rows that need attention',
+      done: 'Done',
+      close: 'Close',
+      retryLoad: 'Try again',
+      noDomainTitle: 'Connect a domain first',
+      noDomainDescription:
+        'Personal mailboxes are created on a verified domain of your organization. Connect and verify one, then come back to import your roster.',
+      connectDomain: 'Connect a domain',
+      newPrefixLabel: 'New mailbox prefix for {email}',
+      newPrefixPlaceholder: 'New prefix',
+      roles: {
+        member: 'Member',
+        admin: 'Admin',
+      },
+      columns: {
+        row: 'Row',
+        role: 'Role',
+        email: 'Email',
+        address: 'Mailbox',
+        status: 'Status',
+        note: 'Details',
+      },
+      status: {
+        valid: 'Ready',
+        invited: 'Invited',
+        created: 'Created',
+        skipped: 'Skipped',
+        failed: 'Failed',
+        taken: 'Address taken',
+      },
+      skip: {
+        already_member: 'Already a member with a personal mailbox.',
+        already_invited: 'Already invited, and the mailbox is reserved.',
+        mailbox_taken:
+          'Someone else or a shared mailbox holds this address, so no invitation goes out. Enter another prefix.',
+      },
+      notes: {
+        valid: 'Will invite them and reserve {address}.',
+        invited: 'Invitation sent; the mailbox is reserved for them.',
+        invitedNoEmail:
+          'Invitation created, but no email went out. Resend it from the Invitations tab.',
+        created: 'Existing member; their personal mailbox is ready.',
+      },
+      rowErrors: {
+        emailInvalid: 'Enter a valid email of up to 100 characters.',
+        roleInvalid: 'Role must be member or admin.',
+        domainRequired: 'Use a verified domain of your organization, not the shared domain.',
+        duplicate: 'An earlier row has the same email or mailbox.',
+      },
+      errors: {
+        empty: 'There are no rows to import.',
+        missing_columns: 'The first line needs an email column.',
+        too_many_rows: 'There are more than 500 rows. Split them and import each part.',
         unreadable: 'The file could not be read.',
       },
     },

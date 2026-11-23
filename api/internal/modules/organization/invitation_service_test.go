@@ -22,6 +22,7 @@ type invitationRepositoryStub struct {
 	acceptInvitationFn func(context.Context, string, uint, time.Time) (*domain.OrganizationMembership, *domain.OrganizationInvitation, error)
 	reissueFn          func(context.Context, uint, uint, string, time.Time, time.Time) (*domain.OrganizationInvitation, error)
 	findPendingFn      func(uint, uint) (*domain.OrganizationInvitation, error)
+	findByEmailFn      func(uint, string) (*domain.OrganizationInvitation, error)
 	recordedStatuses   []string
 }
 
@@ -358,6 +359,13 @@ func TestServiceResendInvitationRequiresManager(t *testing.T) {
 
 	_, err := svc.ResendInvitation(context.Background(), 17, 42, 73)
 	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+}
+
+func (r *invitationRepositoryStub) FindPendingInvitationByEmail(_ context.Context, organizationID uint, email string, _ time.Time) (*domain.OrganizationInvitation, error) {
+	if r.findByEmailFn != nil {
+		return r.findByEmailFn(organizationID, email)
+	}
+	return nil, nil
 }
 
 func (r *invitationRepositoryStub) FindPendingInvitation(_ context.Context, organizationID, invitationID uint, _ time.Time) (*domain.OrganizationInvitation, error) {

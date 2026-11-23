@@ -22,6 +22,7 @@ type administrationStore interface {
 
 var (
 	_ domain.OrganizationAdministrator = (*service)(nil)
+	_ domain.OrganizationRosterInviter = (*service)(nil)
 	_ administrationStore              = (*repository)(nil)
 )
 

@@ -68,6 +68,9 @@ import type {
   MailboxImportResult,
   MailboxImportRowResult,
   MailboxListScope,
+  MemberImportInput,
+  MemberImportResult,
+  MemberImportRowResult,
   MailboxType,
   MailTemplate,
   MailTemplateInput,
@@ -140,6 +143,8 @@ interface MailboxAccessState {
   webhooksEnabled: boolean;
   members: Map<number, MailboxMember>;
   events: MailboxAccessEvent[];
+  /** A personal mailbox a roster import reserved: no owner until this email joins. */
+  pendingOwnerEmail?: string;
 }
 
 interface StoredMailbox {
@@ -248,13 +253,30 @@ interface MockMailboxStoreDependencies {
   membershipOf: (organizationId: number, userId: number) => number | null;
   /** Account emails of the organization's current members by user id, lowercased. */
   memberEmails: (organizationId: number) => Map<number, string>;
+  /** The organization half of a roster import: pending invitations and new ones. */
+  rosterInviter: MockRosterInviter;
 }
+
+export interface MockRosterInviter {
+  pendingInvitationIdFor: (organizationId: number, email: string) => number | null;
+  inviteRosterMember: (
+    organizationId: number,
+    email: string,
+    role: 'member' | 'admin',
+    features: MemberImportInput['features']
+  ) => { id: number; email_send_status: 'not_configured' };
+}
+
+/** The longest email an organization invitation stores, as in the API. */
+const maxRosterEmailLength = 100;
+const rosterEmailPattern = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/u;
 
 const defaultDependencies: MockMailboxStoreDependencies = {
   now: () => new Date(),
   membershipOf: (organizationId, userId) =>
     mockOrganizationStore.membershipIdOf(organizationId, userId),
   memberEmails: organizationId => mockOrganizationStore.memberEmails(organizationId),
+  rosterInviter: mockOrganizationStore,
 };
 
 /** One directory page as the route validated its query. */
@@ -754,6 +776,271 @@ export class MockMailboxStore {
       return fail(codes[created.error]);
     });
     return { ok: true, value: result };
+  }
+
+
+  /**
+   * The roster import mock, mirroring the API's `ImportMembers`: each row reconciles toward a
+   * pending invitation plus a personal mailbox reserved for its email (or, for a current member
+   * without one, their own mailbox), so sending the same rows again changes nothing.
+   */
+  importMembers(
+    organizationId: number,
+    viewer: MailboxViewer,
+    input: MemberImportInput,
+    resolveDomain: MockImportDomainResolver
+  ): { ok: true; value: MemberImportResult } | { ok: false; error: 'forbidden' } {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    const members = new Map<string, number>();
+    for (const [userId, email] of this.dependencies.memberEmails(organizationId)) {
+      members.set(email, userId);
+    }
+    const defaultDomain = input.domain.trim().toLowerCase().replace(/\.$/u, '');
+    const seenEmails = new Set<string>();
+    const seenAddresses = new Set<string>();
+    let planned = this.mailboxesOf(organizationId).size;
+    const result: MemberImportResult = {
+      dry_run: input.dryRun,
+      total: input.rows.length,
+      valid: 0,
+      invited: 0,
+      created: 0,
+      skipped: 0,
+      failed: 0,
+      rows: [],
+    };
+
+    input.rows.forEach((raw, index) => {
+      const email = stripFormulaGuard(raw.email.trim()).trim().toLowerCase();
+      let address = '';
+      const push = (
+        status: MemberImportRowResult['status'],
+        extra: Partial<MemberImportRowResult> = {}
+      ) => {
+        result.rows.push({
+          row: index + 1,
+          email,
+          address,
+          status,
+          skip_reason: null,
+          error_code: null,
+          mailbox_id: null,
+          invitation_id: null,
+          email_send_status: null,
+          ...extra,
+        });
+        result[status] += 1;
+      };
+      const fail = (code: string) => push('failed', { error_code: code });
+
+      const duplicateEmail = seenEmails.has(email);
+      if (email !== '') seenEmails.add(email);
+      if (email === '' || email.length > maxRosterEmailLength || !rosterEmailPattern.test(email)) {
+        return fail(ApiErrorCode.MAILBOX_IMPORT_EMAIL_INVALID);
+      }
+      const roleText = raw.role.trim().toLowerCase();
+      if (roleText !== '' && roleText !== 'member' && roleText !== 'admin') {
+        return fail(ApiErrorCode.MAILBOX_IMPORT_ROLE_INVALID);
+      }
+      const role = roleText === 'admin' ? 'admin' : 'member';
+      const mailboxText = stripFormulaGuard(raw.mailbox.trim()).trim().toLowerCase();
+      const at = mailboxText.lastIndexOf('@');
+      let rawLocal = at >= 0 ? mailboxText.slice(0, at) : mailboxText;
+      const domainName =
+        at >= 0 ? mailboxText.slice(at + 1).replace(/\.$/u, '') : defaultDomain;
+      if (rawLocal === '') rawLocal = email.slice(0, email.indexOf('@')).split('+')[0] ?? '';
+      const localPart = normalizeLocalPart(rawLocal, {
+        sharedDomain: domainName === MOCK_MAILBOX_DOMAIN,
+      });
+      if (!localPart.ok) {
+        return fail(
+          localPart.reason === 'reserved'
+            ? ApiErrorCode.MAILBOX_ADDRESS_RESERVED
+            : ApiErrorCode.MAILBOX_ADDRESS_INVALID
+        );
+      }
+      if (domainName === '' || domainName === MOCK_MAILBOX_DOMAIN) {
+        return fail(ApiErrorCode.MAILBOX_IMPORT_DOMAIN_REQUIRED);
+      }
+      address = `${localPart.value}@${domainName}`;
+      const displayName = normalizeDisplayName(stripFormulaGuard(raw.name));
+      if (displayName === null) return fail(ApiErrorCode.MAILBOX_ADDRESS_INVALID);
+      const duplicateAddress = seenAddresses.has(address);
+      seenAddresses.add(address);
+      if (duplicateEmail || duplicateAddress) {
+        return fail(ApiErrorCode.MAILBOX_IMPORT_DUPLICATE_ROW);
+      }
+      const placement = resolveDomain(domainName);
+      if (!placement.ok) {
+        return fail(
+          placement.error === 'not_verified'
+            ? ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED
+            : ApiErrorCode.MAILBOX_DOMAIN_NOT_FOUND
+        );
+      }
+
+      const reservation = () => this.reservationFor(organizationId, address, email);
+      const plan = (): string | null => {
+        if (planned >= MAILBOX_MAX_PER_ORGANIZATION) return ApiErrorCode.MAILBOX_LIMIT_REACHED;
+        planned += 1;
+        return null;
+      };
+
+      const memberId = members.get(email);
+      if (memberId !== undefined) {
+        if (this.ownsPersonal(organizationId, memberId)) {
+          return push('skipped', { skip_reason: 'already_member' });
+        }
+        const reserved = reservation();
+        if (reserved === 'taken') return push('skipped', { skip_reason: 'mailbox_taken' });
+        if (reserved) {
+          if (input.dryRun) return push('valid', { mailbox_id: reserved.mailbox.id });
+          this.claimReserved(organizationId, memberId, email);
+          return push('created', { mailbox_id: reserved.mailbox.id });
+        }
+        if (input.dryRun) {
+          const limited = plan();
+          return limited ? fail(limited) : push('valid');
+        }
+        const created = this.create(
+          organizationId,
+          viewer,
+          {
+            local_part: localPart.value,
+            display_name: displayName,
+            type: 'personal',
+            owner_user_id: memberId,
+          },
+          placement.name
+        );
+        if (!created.ok) return fail(ApiErrorCode.MAILBOX_LIMIT_REACHED);
+        return push('created', { mailbox_id: created.mailbox.id });
+      }
+
+      const pending = this.dependencies.rosterInviter.pendingInvitationIdFor(organizationId, email);
+      const reserved = reservation();
+      if (reserved === 'taken') return push('skipped', { skip_reason: 'mailbox_taken' });
+      if (pending !== null && reserved) {
+        return push('skipped', {
+          skip_reason: 'already_invited',
+          mailbox_id: reserved.mailbox.id,
+          invitation_id: pending,
+        });
+      }
+      let mailboxId: number | null = reserved ? reserved.mailbox.id : null;
+      if (!reserved) {
+        const limited = input.dryRun
+          ? plan()
+          : this.mailboxesOf(organizationId).size >= MAILBOX_MAX_PER_ORGANIZATION
+            ? ApiErrorCode.MAILBOX_LIMIT_REACHED
+            : null;
+        if (limited) return fail(limited);
+        if (!input.dryRun) {
+          mailboxId = this.reservePersonal(organizationId, viewer, address, displayName, email);
+        }
+      }
+      if (input.dryRun) return push('valid', { mailbox_id: mailboxId });
+      if (pending !== null) {
+        return push('invited', { mailbox_id: mailboxId, invitation_id: pending });
+      }
+      const invitation = this.dependencies.rosterInviter.inviteRosterMember(
+        organizationId,
+        email,
+        role,
+        input.features
+      );
+      return push('invited', {
+        mailbox_id: mailboxId,
+        invitation_id: invitation.id,
+        email_send_status: invitation.email_send_status,
+      });
+    });
+    return { ok: true, value: result };
+  }
+
+  /**
+   * Gives `userId` every personal mailbox reserved for `email` in the organization, as the API
+   * does on `member_joined`; access history records `owner_assigned`.
+   */
+  claimReserved(organizationId: number, userId: number, email: string): number[] {
+    const claimed: number[] = [];
+    for (const state of this.mailboxesOf(organizationId).values()) {
+      if (state.access.pendingOwnerEmail !== email || state.access.ownerUserId !== null) continue;
+      state.access.ownerUserId = userId;
+      delete state.access.pendingOwnerEmail;
+      this.record(state, 'owner_assigned', null, userId, {});
+      claimed.push(state.mailbox.id);
+    }
+    return claimed;
+  }
+
+  /** The live reservation of `address` for `email`, null when the address is free, else taken. */
+  private reservationFor(
+    organizationId: number,
+    address: string,
+    email: string
+  ): MailboxState | null | 'taken' {
+    for (const state of this.mailboxesOf(organizationId).values()) {
+      if (state.mailbox.address !== address) continue;
+      return state.access.type === 'personal' &&
+        state.access.ownerUserId === null &&
+        state.access.pendingOwnerEmail === email
+        ? state
+        : 'taken';
+    }
+    return this.claimedAddresses.has(address) ? 'taken' : null;
+  }
+
+  private ownsPersonal(organizationId: number, userId: number): boolean {
+    for (const state of this.mailboxesOf(organizationId).values()) {
+      const { access } = state;
+      if (access.type === 'personal' && access.origin === 'zmail' && access.ownerUserId === userId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A personal mailbox with no owner, held for `email`: nobody reads it until they join. */
+  private reservePersonal(
+    organizationId: number,
+    viewer: MailboxViewer,
+    address: string,
+    displayName: string,
+    email: string
+  ): number {
+    const mailbox: StoredMailbox = {
+      id: this.nextMailboxId++,
+      address,
+      display_name: displayName,
+      created_at: this.timestamp(),
+    };
+    const state: MailboxState = {
+      mailbox,
+      access: {
+        type: 'personal',
+        origin: 'zmail',
+        ownerUserId: null,
+        ownerLeft: null,
+        sealedBefore: null,
+        sealedThroughMessageId: 0,
+        webhooksEnabled: false,
+        members: new Map(),
+        events: [],
+        pendingOwnerEmail: email,
+      },
+      roleId: null,
+      messages: new Map(),
+      reads: new Map(),
+      stars: new Map(),
+      folders: new Map(),
+      labels: new Map(),
+      files: new Map(),
+    };
+    this.record(state, 'created', viewer.userId, null, { type: 'personal' });
+    this.mailboxesOf(organizationId).set(mailbox.id, state);
+    this.claimedAddresses.add(address);
+    return mailbox.id;
   }
 
   /** Every mailbox of one type as the API's CSV file, newest first; owners and admins only. */
@@ -2269,6 +2556,9 @@ function csvField(value: string): string {
 }
 
 export const mockMailboxStore = new MockMailboxStore();
+mockOrganizationStore.onMemberJoined((organizationId, userId, email) => {
+  mockMailboxStore.claimReserved(organizationId, userId, email);
+});
 
 function summaryOf(message: MailMessage): MailMessageSummary {
   return {

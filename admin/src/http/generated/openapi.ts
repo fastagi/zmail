@@ -2406,6 +2406,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/member-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite a roster, reserve each person a personal mailbox, and set their feature grants
+         * @description Needs the `owner` or `admin` organization role. Each row reconciles toward an invited person with a personal mailbox on a verified organization domain, so sending a file again changes nothing; with `dry_run` nothing is written. A reserved mailbox has no owner and nobody reads it until the person whose email it is reserved for joins the organization.
+         */
+        post: operations["importMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/notification-preferences": {
         parameters: {
             query?: never;
@@ -4334,7 +4354,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "ORGANIZATION.FEATURE_NOT_GRANTED" | "ORGANIZATION.MEMBER_FEATURES_FIXED" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.DRAFT_NOT_FOUND" | "MAILBOX.DRAFT_LIMIT_REACHED" | "MAILBOX.ASSIGNMENT_UNAVAILABLE" | "MAILBOX.NOTE_NOT_FOUND" | "MAILBOX.NOTE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "ORGANIZATION.FEATURE_NOT_GRANTED" | "ORGANIZATION.MEMBER_FEATURES_FIXED" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.IMPORT_EMAIL_INVALID" | "MAILBOX.IMPORT_ROLE_INVALID" | "MAILBOX.IMPORT_DOMAIN_REQUIRED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.DRAFT_NOT_FOUND" | "MAILBOX.DRAFT_LIMIT_REACHED" | "MAILBOX.ASSIGNMENT_UNAVAILABLE" | "MAILBOX.NOTE_NOT_FOUND" | "MAILBOX.NOTE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -4928,7 +4948,7 @@ export interface components {
             meta: components["schemas"]["PaginationMeta"];
         };
         /** @enum {string} */
-        MailboxAccessEventType: "created" | "member_set" | "member_removed" | "owner_left" | "owner_returned" | "handed_over" | "sealed_deleted" | "webhooks_changed" | "renamed" | "connection_bound" | "connection_reconnected" | "connection_revoked" | "connection_force_disconnected" | "connection_revoked_on_leave" | "agent_granted" | "agent_revoked";
+        MailboxAccessEventType: "created" | "member_set" | "member_removed" | "owner_left" | "owner_returned" | "owner_assigned" | "handed_over" | "sealed_deleted" | "webhooks_changed" | "renamed" | "connection_bound" | "connection_reconnected" | "connection_revoked" | "connection_force_disconnected" | "connection_revoked_on_leave" | "agent_granted" | "agent_revoked";
         MailboxDirectoryEntry: {
             address: string;
             awaiting_handover: boolean;
@@ -6248,6 +6268,71 @@ export interface components {
             data: components["schemas"]["MailZone"];
             message: string;
         };
+        /** @description The grants every invitation of the import starts the membership with. */
+        MemberImportFeatures: {
+            api_keys?: boolean;
+            broadcasts?: boolean;
+            contacts?: boolean;
+            templates?: boolean;
+        };
+        MemberImportRequest: {
+            /** @description The verified organization domain mailboxes default to. */
+            domain: string;
+            /** @description True only validates; false invites and reserves every row that passes. */
+            dry_run: boolean;
+            /** @description Absent means the new-member defaults, contacts and templates. */
+            features?: components["schemas"]["MemberImportFeatures"];
+            rows: components["schemas"]["MemberImportRow"][];
+        };
+        MemberImportResult: {
+            created: number;
+            dry_run: boolean;
+            failed: number;
+            invited: number;
+            rows: components["schemas"]["MemberImportRowResult"][];
+            skipped: number;
+            total: number;
+            valid: number;
+        };
+        MemberImportResultResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MemberImportResult"];
+            message: string;
+        };
+        MemberImportRow: {
+            /** @description The address the person signs in and accepts the invitation with. */
+            email: string;
+            /** @description A local part on `domain`, or a whole address on a verified organization domain. Empty uses the email's local part without a `+tag`. */
+            mailbox?: string;
+            /** @description The mailbox display name. */
+            name?: string;
+            /** @description `member` (the default when empty) or `admin`, ignoring case. */
+            role?: string;
+        };
+        MemberImportRowResult: {
+            /** @description The mailbox address the row resolves to; empty when the row failed before it was known. */
+            address: string;
+            /** @description The email lowercased, after the formula guard is removed. */
+            email: string;
+            /** @description The invitation email outcome when the row sent one. */
+            email_send_status: ("accepted_by_provider" | "failed" | "not_configured") | null;
+            /** @description Why the row failed; null unless `status` is `failed`. */
+            error_code: components["schemas"]["ErrorCode"] | null;
+            /** @description The pending invitation the row created or found. */
+            invitation_id: components["schemas"]["PositiveID"] | null;
+            /** @description The mailbox the row created, reserved, or found. */
+            mailbox_id: components["schemas"]["PositiveID"] | null;
+            /** @description One-based index into the request's rows. */
+            row: number;
+            /** @description Why nothing changed; null unless `status` is `skipped`. */
+            skip_reason: components["schemas"]["MemberImportSkipReason"] | null;
+            status: components["schemas"]["MemberImportRowStatus"];
+        };
+        /** @enum {string} */
+        MemberImportRowStatus: "valid" | "invited" | "created" | "skipped" | "failed";
+        /** @enum {string} */
+        MemberImportSkipReason: "already_member" | "already_invited" | "mailbox_taken";
         Notification: {
             /** @description Same-origin relative path; absent when the notification has no action. */
             action_url?: string;
@@ -14755,6 +14840,40 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    importMembers: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberImportRequest"];
+            };
+        };
+        responses: {
+            /** @description The outcome of every row, in request order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberImportResultResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             413: components["responses"]["RequestTooLarge"];
             422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];

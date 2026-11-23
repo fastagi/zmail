@@ -57,6 +57,11 @@ const OrganizationUsagePanel = lazy(async () => {
   return { default: feature.OrganizationUsagePanel };
 });
 
+const RosterImportButton = lazy(async () => {
+  const feature = await import('@/features/mailbox/components/admin/roster-import-dialog');
+  return { default: feature.RosterImportButton };
+});
+
 const WebhookManagement = lazy(async () => {
   const feature = await import('@/features/webhook/components/webhook-management');
   return { default: feature.WebhookManagement };
@@ -105,6 +110,7 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
   const settingEnabled = isWebFeatureEnabled('setting');
   const usageEnabled = isWebFeatureEnabled('usage');
   const webhookEnabled = isWebFeatureEnabled('webhook');
+  const mailboxEnabled = isWebFeatureEnabled('mailbox');
   // `?tab=invitations`, from the getting-started checklist, opens straight on inviting.
   const requestedTab = useSearchParams()?.get('tab');
   const initialTab =
@@ -268,7 +274,16 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
         </TabsContent>
 
         <TabsContent value="members">
-          <OrganizationMembers context={context} />
+          <OrganizationMembers
+            context={context}
+            headerAction={
+              mailboxEnabled && canManageOrganization ? (
+                <Suspense fallback={null}>
+                  <RosterImportButton organizationId={context.organization_id} />
+                </Suspense>
+              ) : null
+            }
+          />
         </TabsContent>
 
         {canManageOrganization ? (

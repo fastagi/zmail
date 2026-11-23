@@ -100,7 +100,10 @@ func (r *repository) CreateInvitation(ctx context.Context, invitation *domain.Or
 			}
 			return createErr
 		}
-		return nil
+		// GORM leaves a false grant out of the insert in favor of the column default, so the
+		// grants are always written explicitly.
+		return tx.Model(&OrganizationInvitationPO{}).Where("id = ?", invitationPO.ID).
+			UpdateColumns(memberFeatureColumns(invitation.Features)).Error
 	})
 	if err != nil {
 		return err
@@ -258,6 +261,28 @@ func (r *repository) FindPendingInvitation(ctx context.Context, organizationID, 
 	return invitation.toDomain(), nil
 }
 
+// FindPendingInvitationByEmail returns the organization's invitation for the lowercased email
+// that can still be accepted at now, or nil when there is none.
+func (r *repository) FindPendingInvitationByEmail(ctx context.Context, organizationID uint, email string, now time.Time) (*domain.OrganizationInvitation, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if organizationID == 0 || !validInvitationEmail(email) {
+		return nil, domain.ErrInvalidInput
+	}
+	var invitation OrganizationInvitationPO
+	err = db.Where("pending_key = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?",
+		invitationPendingKey(organizationID, email), now).First(&invitation).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return invitation.toDomain(), nil
+}
+
 // RecordInvitationEmailAttempt stores the outcome of the latest invitation email attempt. It
 // matches the token hash that was sent, so a slow attempt for a token a later resend replaced
 // cannot overwrite the newer outcome.
@@ -340,6 +365,17 @@ func (r *repository) AcceptInvitation(ctx context.Context, tokenHash string, use
 			}
 			return createErr
 		}
+		// The membership starts with the invitation's grants, written explicitly because GORM
+		// leaves a false grant out of the insert in favor of the column default.
+		granted := invitationPO.toDomain().Features
+		if grantErr := tx.Model(&OrganizationMembershipPO{}).Where("id = ?", membershipPO.ID).
+			UpdateColumns(memberFeatureColumns(granted)).Error; grantErr != nil {
+			return grantErr
+		}
+		membershipPO.CanUseBroadcasts = granted.Broadcasts
+		membershipPO.CanUseContacts = granted.Contacts
+		membershipPO.CanUseTemplates = granted.Templates
+		membershipPO.CanUseAPIKeys = granted.APIKeys
 
 		result := tx.Model(&OrganizationInvitationPO{}).
 			Where("id = ? AND token_hash = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitationPO.ID, tokenHash).

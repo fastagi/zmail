@@ -23,11 +23,13 @@ type MailboxPO struct {
 	// Origin is "zmail" or "connected".
 	Origin string `gorm:"size:16;not null;default:'zmail'"`
 	// ConnectedSend lets a connected mailbox send through its account's SMTP server.
-	ConnectedSend   bool `gorm:"not null;default:false"`
-	OwnerUserID     *uint
-	OwnerLeftAt     *time.Time
-	SealedBefore    *time.Time
-	WebhooksEnabled bool `gorm:"not null;default:false"`
+	ConnectedSend bool `gorm:"not null;default:false"`
+	OwnerUserID   *uint
+	// PendingOwnerEmail reserves a personal mailbox without an owner for an invited email.
+	PendingOwnerEmail *string `gorm:"size:320"`
+	OwnerLeftAt       *time.Time
+	SealedBefore      *time.Time
+	WebhooksEnabled   bool `gorm:"not null;default:false"`
 	// RoleID is the mail role the mailbox is grouped under; nil when it is ungrouped.
 	RoleID *uint
 	// AITriageEnabled queues the mailbox's inbound mail for AI triage.
@@ -67,7 +69,9 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		ConnectedSend:  po.ConnectedSend,
 		OwnerUserID:    po.OwnerUserID,
 		OwnerLeftAt:    po.OwnerLeftAt,
-		SealedBefore:   po.SealedBefore,
+		// A reservation is only ever read back to match an invited email.
+		PendingOwnerEmail: derefPendingEmail(po.PendingOwnerEmail),
+		SealedBefore:      po.SealedBefore,
 		// WebhooksEnabled is only meaningful for shared mailboxes; the schema enforces it too.
 		WebhooksEnabled:  po.WebhooksEnabled,
 		RoleID:           po.RoleID,
@@ -834,4 +838,18 @@ func (po *MailBroadcastRecipientPO) toDomain() *domain.MailBroadcastRecipient {
 		recipient.MessageID = *po.MessageID
 	}
 	return recipient
+}
+
+func derefPendingEmail(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func optionalPendingEmail(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }

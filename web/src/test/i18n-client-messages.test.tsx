@@ -105,6 +105,7 @@ describe('client i18n message boundaries', () => {
     expect(organizationLayout).toContain('CLIENT_MESSAGE_NAMESPACES.setting');
     expect(organizationLayout).toContain('CLIENT_MESSAGE_NAMESPACES.usage');
     expect(organizationLayout).toContain('CLIENT_MESSAGE_NAMESPACES.webhook');
+    expect(organizationLayout).toContain('CLIENT_MESSAGE_NAMESPACES.mailbox');
     expect(usageLayout).toContain('CLIENT_MESSAGE_NAMESPACES.usage');
     expect(i18nTestLayout).toContain('CLIENT_MESSAGE_NAMESPACES.i18nTest');
   });
