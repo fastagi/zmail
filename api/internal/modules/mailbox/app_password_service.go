@@ -36,6 +36,9 @@ const (
 	appPasswordGroup   = 4
 	// MailClientIMAPSecurity is the IMAP connection security shown to members: TLS from the start.
 	MailClientIMAPSecurity = "ssl_tls"
+	// MailClientSMTPSecurity is the security of the SMTP port shown first: TLS from the start. The
+	// STARTTLS port is shown beside it.
+	MailClientSMTPSecurity = "ssl_tls"
 )
 
 // Reasons a member's mail apps cannot sign in, in the order they are checked.
@@ -59,11 +62,16 @@ type MailClientAccess struct {
 	Reason  string
 }
 
-// MailClientServer is the public IMAP server mail apps connect to.
+// MailClientServer is the public IMAP and SMTP servers mail apps connect to.
 type MailClientServer struct {
 	IMAPHost     string
 	IMAPPort     int
 	IMAPSecurity string
+	SMTPHost     string
+	SMTPPort     int
+	SMTPSecurity string
+	// SMTPStartTLSPort is the submission port that upgrades with STARTTLS.
+	SMTPStartTLSPort int
 }
 
 // AppPasswordList is the viewer's own passwords with where and whether mail apps sign in.
@@ -114,7 +122,11 @@ func (s *service) ListAppPasswords(ctx context.Context, viewer domain.Organizati
 	}
 	return &AppPasswordList{
 		Items: items, Limit: MaxAppPasswordsPerMember, Access: access,
-		Server: MailClientServer{IMAPHost: s.settings.ClientIMAPHost, IMAPPort: s.settings.ClientIMAPPort, IMAPSecurity: MailClientIMAPSecurity},
+		Server: MailClientServer{
+			IMAPHost: s.settings.ClientIMAPHost, IMAPPort: s.settings.ClientIMAPPort, IMAPSecurity: MailClientIMAPSecurity,
+			SMTPHost: s.settings.ClientSMTPHost, SMTPPort: s.settings.ClientSMTPPort, SMTPSecurity: MailClientSMTPSecurity,
+			SMTPStartTLSPort: s.settings.ClientSubmissionPort,
+		},
 	}, nil
 }
 

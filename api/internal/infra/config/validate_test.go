@@ -849,6 +849,9 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 		{name: "mail app password pepper", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.AppPasswordPepper = strings.Repeat("p", 32) }},
 		{name: "IMAP port out of range", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.ClientIMAPPort = 70000 }, wantErr: "MAIL_GATEWAY_PUBLIC_IMAP_PORT"},
 		{name: "IMAP host with a space", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.ClientIMAPHost = "imap host" }, wantErr: "MAIL_GATEWAY_PUBLIC_IMAP_HOST"},
+		{name: "SMTP host with a colon", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.ClientSMTPHost = "smtp.example.com:465" }, wantErr: "MAIL_GATEWAY_PUBLIC_SMTP_HOST"},
+		{name: "SMTP port out of range", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.ClientSMTPPort = 70000 }, wantErr: "MAIL_GATEWAY_PUBLIC_SMTP_PORT"},
+		{name: "submission port negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.ClientSubmissionPort = -1 }, wantErr: "MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT"},
 		{name: "send limit must be positive", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailySendLimit = 0 }, wantErr: "MAILBOX_DAILY_SEND_LIMIT"},
 		{name: "lane limits inherit the send limit", environment: "development", edit: func(cfg *Config) {
 			cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit = 0, 0

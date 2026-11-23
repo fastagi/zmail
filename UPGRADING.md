@@ -26,6 +26,25 @@ behind running queries and blocks new ones while it waits. Run it off-peak and w
 queueing traffic behind it. Down drops the four columns and forgets blind copies and inline
 placement.
 
+### Medium — SMTP submission in `fastbuild mail:gateway`
+
+- `MAIL_GATEWAY_SMTPS_ADDR` (implicit TLS) and `MAIL_GATEWAY_SUBMISSION_ADDR` (STARTTLS; AUTH only
+  after STARTTLS) turn on SMTP submission in the existing gateway process; each stays off when
+  empty, and the gateway now starts when any of the three listen addresses is set. In a container
+  bind unprivileged ports such as `:1465` and `:1587` and publish `465:1465` and `587:1587`. The
+  listeners reuse `MAIL_GATEWAY_TLS_CERT_FILE`/`KEY_FILE`, the connection caps, the health address,
+  and one sign-in limiter shared with IMAP, so failures over either protocol lock both.
+- Point DNS `smtp.zmail.im` (or your `MAIL_GATEWAY_PUBLIC_SMTP_HOST`) at the gateway and make sure
+  its certificate covers that name. `MAIL_GATEWAY_PUBLIC_SMTP_HOST`, `MAIL_GATEWAY_PUBLIC_SMTP_PORT`,
+  and `MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT` (default `smtp.zmail.im`, `465`, `587`) are what the
+  console shows.
+- Mail client passwords now accept the `smtp` scope; `GET /v1/mail-app-passwords` reports
+  `server.smtp_host`, `smtp_port`, `smtp_security`, and `smtp_starttls_port`. Messages a mail app
+  submits count in the personal send lane and queue at its limit like console sends.
+- `imapgateway.Config` gains `Limiter`; the sign-in limiter moved to package
+  `mailbox/mailclientauth`. `domain.MailSubmissionStore` is bound to the mailbox service and exposed
+  as `app.Application.MailSubmissions`; run `make wire` in a fork with its own injector.
+
 ## Unreleased — Mail client access, part 1
 
 ### High — Deploy the Web before the API

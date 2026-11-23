@@ -88,6 +88,11 @@ type Settings struct {
 	// ClientIMAPHost and ClientIMAPPort are the public IMAP server the console shows members.
 	ClientIMAPHost string
 	ClientIMAPPort int
+	// ClientSMTPHost, ClientSMTPPort (implicit TLS), and ClientSubmissionPort (STARTTLS) are the
+	// public SMTP server the console shows members.
+	ClientSMTPHost       string
+	ClientSMTPPort       int
+	ClientSubmissionPort int
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -672,6 +677,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.AppPasswordPepper = resolved.AppPasswordPepper
 	settings.ClientIMAPHost = resolved.ClientIMAPHost
 	settings.ClientIMAPPort = resolved.ClientIMAPPort
+	settings.ClientSMTPHost = resolved.ClientSMTPHost
+	settings.ClientSMTPPort = resolved.ClientSMTPPort
+	settings.ClientSubmissionPort = resolved.ClientSubmissionPort
 	return settings
 }
 

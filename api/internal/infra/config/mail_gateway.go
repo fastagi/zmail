@@ -21,10 +21,15 @@ const (
 )
 
 // MailGatewayConfig configures `fastbuild mail:gateway`, the process that serves mailboxes to
-// mail apps over IMAP. An empty IMAPAddr leaves the gateway off.
+// mail apps over IMAP and lets them send over SMTP submission. Each listener with an empty address
+// stays off; with all three empty the gateway is off.
 type MailGatewayConfig struct {
 	// IMAPAddr is the implicit-TLS IMAP listen address, such as ":993".
 	IMAPAddr string
+	// SMTPSAddr is the implicit-TLS SMTP submission listen address, such as ":465".
+	SMTPSAddr string
+	// SubmissionAddr is the STARTTLS SMTP submission listen address, such as ":587".
+	SubmissionAddr string
 	// TLSCertFile and TLSKeyFile are PEM files, re-read when they change on disk.
 	TLSCertFile string
 	TLSKeyFile  string
@@ -38,11 +43,24 @@ type MailGatewayConfig struct {
 }
 
 // Enabled reports whether the gateway has a listen address.
-func (c MailGatewayConfig) Enabled() bool { return strings.TrimSpace(c.IMAPAddr) != "" }
+func (c MailGatewayConfig) Enabled() bool { return c.IMAPEnabled() || c.SMTPEnabled() }
+
+// IMAPEnabled reports whether the gateway serves IMAP.
+func (c MailGatewayConfig) IMAPEnabled() bool { return strings.TrimSpace(c.IMAPAddr) != "" }
+
+// SMTPEnabled reports whether the gateway accepts SMTP submission on either port.
+func (c MailGatewayConfig) SMTPEnabled() bool {
+	return strings.TrimSpace(c.SMTPSAddr) != "" || strings.TrimSpace(c.SubmissionAddr) != ""
+}
+
+// mailGatewayAddrVars names the listen address variables in messages.
+const mailGatewayAddrVars = "MAIL_GATEWAY_IMAP_ADDR, MAIL_GATEWAY_SMTPS_ADDR, or MAIL_GATEWAY_SUBMISSION_ADDR"
 
 // Resolved trims the settings and fills the defaults of unset ones.
 func (c MailGatewayConfig) Resolved() MailGatewayConfig {
 	c.IMAPAddr = strings.TrimSpace(c.IMAPAddr)
+	c.SMTPSAddr = strings.TrimSpace(c.SMTPSAddr)
+	c.SubmissionAddr = strings.TrimSpace(c.SubmissionAddr)
 	c.TLSCertFile = strings.TrimSpace(c.TLSCertFile)
 	c.TLSKeyFile = strings.TrimSpace(c.TLSKeyFile)
 	c.HealthAddr = strings.TrimSpace(c.HealthAddr)
@@ -68,24 +86,38 @@ func validateMailGatewayConfig(gateway MailGatewayConfig, mailbox MailboxConfig,
 	resolved := gateway.Resolved()
 	if !resolved.Enabled() {
 		if resolved.TLSCertFile != "" || resolved.TLSKeyFile != "" {
-			return fmt.Errorf("MAIL_GATEWAY_IMAP_ADDR must be set when MAIL_GATEWAY_TLS_CERT_FILE or MAIL_GATEWAY_TLS_KEY_FILE is")
+			return fmt.Errorf("%s must be set when MAIL_GATEWAY_TLS_CERT_FILE or MAIL_GATEWAY_TLS_KEY_FILE is", mailGatewayAddrVars)
 		}
 		return nil
 	}
 	if !mailboxSelected {
-		return fmt.Errorf("MAIL_GATEWAY_IMAP_ADDR requires the mailbox starter")
+		return fmt.Errorf("%s requires the mailbox starter", mailGatewayAddrVars)
 	}
 	if strings.TrimSpace(mailbox.AppPasswordPepper) == "" {
-		return fmt.Errorf("MAIL_APP_PASSWORD_PEPPER must be set when MAIL_GATEWAY_IMAP_ADDR is")
+		return fmt.Errorf("MAIL_APP_PASSWORD_PEPPER must be set when %s is", mailGatewayAddrVars)
 	}
 	if resolved.TLSCertFile == "" {
-		return fmt.Errorf("MAIL_GATEWAY_TLS_CERT_FILE must be set when MAIL_GATEWAY_IMAP_ADDR is")
+		return fmt.Errorf("MAIL_GATEWAY_TLS_CERT_FILE must be set when %s is", mailGatewayAddrVars)
 	}
 	if resolved.TLSKeyFile == "" {
-		return fmt.Errorf("MAIL_GATEWAY_TLS_KEY_FILE must be set when MAIL_GATEWAY_IMAP_ADDR is")
+		return fmt.Errorf("MAIL_GATEWAY_TLS_KEY_FILE must be set when %s is", mailGatewayAddrVars)
 	}
-	if _, _, err := net.SplitHostPort(resolved.IMAPAddr); err != nil {
-		return fmt.Errorf("MAIL_GATEWAY_IMAP_ADDR must be host:port, such as :993")
+	listeners := map[string]bool{}
+	for _, listen := range []struct{ name, addr, example string }{
+		{"MAIL_GATEWAY_IMAP_ADDR", resolved.IMAPAddr, ":993"},
+		{"MAIL_GATEWAY_SMTPS_ADDR", resolved.SMTPSAddr, ":465"},
+		{"MAIL_GATEWAY_SUBMISSION_ADDR", resolved.SubmissionAddr, ":587"},
+	} {
+		if listen.addr == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(listen.addr); err != nil {
+			return fmt.Errorf("%s must be host:port, such as %s", listen.name, listen.example)
+		}
+		if listeners[listen.addr] {
+			return fmt.Errorf("%s repeats another mail gateway listen address", listen.name)
+		}
+		listeners[listen.addr] = true
 	}
 	if _, _, err := net.SplitHostPort(resolved.HealthAddr); err != nil {
 		return fmt.Errorf("MAIL_GATEWAY_HEALTH_ADDR must be host:port, such as %s", DefaultMailGatewayHealthAddr)

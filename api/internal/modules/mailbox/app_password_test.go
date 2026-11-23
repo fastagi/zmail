@@ -85,6 +85,7 @@ func newAppPasswordFixture(t *testing.T) *appPasswordFixture {
 	settings := accessSettings()
 	settings.AppPasswordPepper = testAppPasswordPepper
 	settings.ClientIMAPHost, settings.ClientIMAPPort = "imap.example.test", 993
+	settings.ClientSMTPHost, settings.ClientSMTPPort, settings.ClientSubmissionPort = "smtp.example.test", 465, 587
 	svc := NewService(repo, newAccessMemberships(), repo, repo, repo, repo, nil, nil, nil, &fakeTransport{},
 		&fakeNotifier{}, settings, nil, ratelimit.NewMemoryStores(), nil, nil)
 	reverifier := &fakeReverifier{}
@@ -149,7 +150,8 @@ func TestCreateAppPasswordReturnsSecretOnce(t *testing.T) {
 	if err != nil || len(list.Items) != 1 || list.Items[0].ID != created.ID {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
-	if !list.Access.Enabled || list.Access.Reason != "" || list.Server.IMAPHost != "imap.example.test" || list.Limit != MaxAppPasswordsPerMember {
+	if !list.Access.Enabled || list.Access.Reason != "" || list.Server.IMAPHost != "imap.example.test" ||
+		list.Server.SMTPHost != "smtp.example.test" || list.Server.SMTPPort != 465 || list.Server.SMTPSecurity != "ssl_tls" || list.Server.SMTPStartTLSPort != 587 || list.Limit != MaxAppPasswordsPerMember {
 		t.Fatalf("list access and server = %+v %+v", list.Access, list.Server)
 	}
 	encoded, _ := json.Marshal(toMailAppPasswordListResponse(list))
@@ -460,7 +462,8 @@ func TestAppPasswordRoutesAnswerTheContract(t *testing.T) {
 	id := int(data["id"].(float64))
 	recorder, body = do(http.MethodGet, "/mail-app-passwords", "")
 	data, _ = body["data"].(map[string]any)
-	if recorder.Code != http.StatusOK || len(data["items"].([]any)) != 2 || strings.Contains(recorder.Body.String(), "secret") {
+	if recorder.Code != http.StatusOK || len(data["items"].([]any)) != 2 || strings.Contains(recorder.Body.String(), "secret") ||
+		!strings.Contains(recorder.Body.String(), `"smtp_host":"smtp.example.test","smtp_port":465,"smtp_security":"ssl_tls","smtp_starttls_port":587`) {
 		t.Fatalf("list = %d %s", recorder.Code, recorder.Body.String())
 	}
 	for range 5 {
