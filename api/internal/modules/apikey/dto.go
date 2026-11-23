@@ -12,6 +12,10 @@ type APIKeyCreateRequest struct {
 	Scopes    []string   `json:"scopes" binding:"max=32,dive,required,max=65"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	Mode      string     `json:"mode,omitempty" binding:"omitempty,oneof=live test"`
+	// OrganizationID binds the key to one organization of its owner; omitted leaves it unrestricted.
+	OrganizationID *uint `json:"organization_id,omitempty"`
+	// SendingDomains limits sending to these domains of the organization; omitted allows every one.
+	SendingDomains []string `json:"sending_domains,omitempty" binding:"omitempty,max=50,dive,required,max=253"`
 }
 
 // APIKeyResponse is the standard API key response DTO.
@@ -27,6 +31,10 @@ type APIKeyResponse struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
+	// OrganizationID is present only on an organization-bound key.
+	OrganizationID *uint `json:"organization_id,omitempty"`
+	// SendingDomains is present only on a domain-restricted key.
+	SendingDomains []string `json:"sending_domains,omitempty"`
 }
 
 // APIKeyCreateResponse returns the one-time plaintext key plus metadata.
@@ -41,18 +49,35 @@ func toResponse(key *domain.APIKey) *APIKeyResponse {
 	}
 
 	return &APIKeyResponse{
-		ID:         key.ID,
-		UserID:     key.UserID,
-		Name:       key.Name,
-		KeyPrefix:  key.KeyPrefix,
-		Scopes:     append([]string(nil), key.Scopes...),
-		Mode:       string(storedMode(string(key.Mode))),
-		LastUsedAt: key.LastUsedAt,
-		ExpiresAt:  key.ExpiresAt,
-		RevokedAt:  key.RevokedAt,
-		CreatedAt:  key.CreatedAt,
-		UpdatedAt:  key.UpdatedAt,
+		ID:             key.ID,
+		UserID:         key.UserID,
+		Name:           key.Name,
+		KeyPrefix:      key.KeyPrefix,
+		Scopes:         append([]string(nil), key.Scopes...),
+		Mode:           string(storedMode(string(key.Mode))),
+		LastUsedAt:     key.LastUsedAt,
+		ExpiresAt:      key.ExpiresAt,
+		RevokedAt:      key.RevokedAt,
+		CreatedAt:      key.CreatedAt,
+		UpdatedAt:      key.UpdatedAt,
+		OrganizationID: cloneUint(key.OrganizationID),
+		SendingDomains: cloneDomains(key.SendingDomains),
 	}
+}
+
+func cloneUint(value *uint) *uint {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
+func cloneDomains(domains []string) []string {
+	if domains == nil {
+		return nil
+	}
+	return append([]string{}, domains...)
 }
 
 func toCreateResponse(result *CreateResult) *APIKeyCreateResponse {

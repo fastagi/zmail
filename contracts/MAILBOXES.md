@@ -3129,6 +3129,16 @@ the membership's `api_keys` grant (owners and admins always have it): a member's
 `403 ORGANIZATION.FEATURE_NOT_GRANTED` in that organization, though the key itself stays valid.
 Keys owned by an organization are not defined.
 
+A key may be [restricted](API_KEYS.md#restrictions) when it is created. A key bound to an
+organization may omit `Organization-Id` on every route below and then acts in that organization;
+naming any other organization is `403 API_KEY.ORGANIZATION_MISMATCH`, checked before membership.
+A key restricted to sending domains is checked on both sending routes before anything else about the
+sender: `POST /v1/outbound-mail-messages` compares the domain of `from`, and
+`POST /v1/transactional-messages` the domain of the template's `from_address`, ignoring case. Any
+other domain is `403 API_KEY.DOMAIN_NOT_ALLOWED`; nothing is stored, sent, or counted in a send
+limit. The restriction does not change what the key may read, and it does not apply to agent drafts,
+which never send. Unrestricted keys behave exactly as before.
+
 | Route | Required scope |
 |---|---|
 | `POST /v1/outbound-mail-messages` | `mail:send` |

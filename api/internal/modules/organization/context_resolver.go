@@ -42,6 +42,7 @@ func (r *ContextResolver) Middleware() gin.HandlerFunc {
 		}
 
 		organizationID, err := parseOrganizationIDHeader(c.Request.Header.Values(OrganizationIDHeader))
+		organizationID, err = applyAPIKeyBinding(c, organizationID, err)
 		if err != nil {
 			abortOrganizationContext(c, err)
 			return
@@ -74,6 +75,24 @@ func (r *ContextResolver) Middleware() gin.HandlerFunc {
 	}
 }
 
+// applyAPIKeyBinding lets an organization-bound API key omit the header and refuses it in any
+// other organization. A malformed header stays invalid; sessions and unrestricted keys pass through.
+func applyAPIKeyBinding(c *gin.Context, organizationID uint, err error) (uint, error) {
+	bound := domain.APIKeyRestrictionFromContext(c.Request.Context()).OrganizationID
+	if bound == 0 {
+		return organizationID, err
+	}
+	switch {
+	case errors.Is(err, domain.ErrOrganizationContextRequired):
+		return bound, nil
+	case err != nil:
+		return 0, err
+	case organizationID != bound:
+		return 0, domain.ErrAPIKeyOrganizationMismatch
+	}
+	return organizationID, nil
+}
+
 func parseOrganizationIDHeader(values []string) (uint, error) {
 	if len(values) == 0 {
 		return 0, domain.ErrOrganizationContextRequired
@@ -103,6 +122,8 @@ func abortOrganizationContext(c *gin.Context, err error) {
 		message = "Invalid organization context"
 	case errors.Is(err, domain.ErrOrganizationNotFound):
 		message = "Organization not found"
+	case errors.Is(err, domain.ErrAPIKeyOrganizationMismatch):
+		message = "API key is bound to another organization"
 	}
 	response.AbortWithCode(c, descriptor.StatusCode, descriptor.ErrorCode, message)
 }
