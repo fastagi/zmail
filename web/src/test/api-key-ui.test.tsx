@@ -75,40 +75,176 @@ describe('API key settings workflow', () => {
     expect(screen.queryByText(/sk_demo/)).not.toBeInTheDocument();
   });
 
-  it('creates a key from scope checkboxes, sending mail by default', async () => {
+  it('creates a sending key by default, with no expiry unless one is chosen', async () => {
     const plaintextKey = 'zmail_abcdef123456.0123456789abcdef0123456789abcdef0123456789abcdef';
     state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: plaintextKey });
     renderWithMessages(<ApiKeyPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
     expect(screen.queryByPlaceholderText(/models:/)).not.toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /Send mail/ })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: /Read sent mail/ })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Send mail (mail:send)' })).toBeChecked();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Never' })).toBeChecked();
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: /Read sent mail/ }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
 
     await waitFor(() => expect(screen.getByDisplayValue(plaintextKey)).toBeInTheDocument());
-    expect(state.create.mutateAsync).toHaveBeenCalledWith({
-      name: 'Deploy',
-      scopes: ['mail:send', 'mail:read'],
-    });
+    expect(state.create.mutateAsync).toHaveBeenCalledWith({ name: 'Deploy', scopes: ['mail:send'] });
     expect(state.create.reset).toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.queryByDisplayValue(plaintextKey)).not.toBeInTheDocument();
   });
 
-  it('refuses a key without any scope', async () => {
+  it('offers sending plus status lookups as one purpose', async () => {
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: 'x'.repeat(32) });
     renderWithMessages(<ApiKeyPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(
+      screen.getByRole('radio', { name: 'Send mail and check status (mail:send + mail:read)' })
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    await waitFor(() =>
+      expect(state.create.mutateAsync).toHaveBeenCalledWith({
+        name: 'Deploy',
+        scopes: ['mail:send', 'mail:read'],
+      })
+    );
+  });
+
+  it('reveals only the scopes the API accepts when the purpose is custom', async () => {
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: 'x'.repeat(32) });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(4);
+    expect(screen.getByRole('checkbox', { name: /Send mail/ })).toBeChecked();
+    expect(screen.queryByRole('textbox', { name: /scope/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Transactional mail/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    await waitFor(() =>
+      expect(state.create.mutateAsync).toHaveBeenCalledWith({
+        name: 'Deploy',
+        scopes: ['mail:send', 'mail:transactional'],
+      })
+    );
+  });
+
+  it('refuses a custom key without any scope, next to the permissions', async () => {
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Send mail/ }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Choose at least one permission.');
+    expect(await screen.findByText('Choose at least one permission.')).toBeInTheDocument();
     expect(state.create.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing name on the name field', async () => {
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    expect(await screen.findByText('Enter a name of up to 100 characters.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true');
+    expect(state.create.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['30 days', '2026-12-23T12:00:00.000Z'],
+    ['90 days', '2027-02-21T12:00:00.000Z'],
+  ])('turns the %s preset into an expiry', async (preset, expected) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-23T12:00:00Z'));
+    try {
+      state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: 'x'.repeat(32) });
+      renderWithMessages(<ApiKeyPanel />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+      fireEvent.click(screen.getByRole('radio', { name: preset }));
+      fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+      await waitFor(() =>
+        expect(state.create.mutateAsync).toHaveBeenCalledWith({
+          name: 'Deploy',
+          scopes: ['mail:send'],
+          expires_at: expected,
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks for a future custom expiry on the date field', async () => {
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom date' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+    expect(await screen.findByText('Choose an expiry date.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Expiry date'), {
+      target: { value: '2020-01-01T00:00' },
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+    expect(await screen.findByText('Choose a time in the future.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Expiry date')).toHaveAttribute('aria-invalid', 'true');
+    expect(state.create.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plaintext key dialog open until the key is copied or saved', async () => {
+    const plaintextKey = 'zmail_abcdef123456.0123456789abcdef0123456789abcdef0123456789abcdef';
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: plaintextKey });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.getByDisplayValue(plaintextKey)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(screen.getByDisplayValue(plaintextKey)).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('Copy the key, or confirm you have stored it, before closing.')
+    ).toHaveAttribute('role', 'alert');
+
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'I have stored this key safely' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByDisplayValue(plaintextKey)).not.toBeInTheDocument();
+  });
+
+  it('lets the plaintext key dialog close once the key is copied', async () => {
+    const plaintextKey = 'zmail_abcdef123456.0123456789abcdef0123456789abcdef0123456789abcdef';
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    state.create.mutateAsync.mockResolvedValue({ api_key: apiKey, plaintext_key: plaintextKey });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy key' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(plaintextKey));
+    await waitFor(() =>
+      expect(within(dialog).getByRole('checkbox', { name: 'I have stored this key safely' })).toBeChecked()
+    );
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByDisplayValue(plaintextKey)).not.toBeInTheDocument());
   });
 
   it('shows a ready-to-run send snippet with the new key, organization, and own mailbox', async () => {
@@ -175,15 +311,28 @@ describe('API key settings workflow', () => {
     expect(screen.queryByRole('link', { name: 'Create mailbox' })).not.toBeInTheDocument();
   });
 
-  it('requires confirmation before revoking an active key', async () => {
+  it('names the key it is about to revoke', async () => {
     state.revoke.mutateAsync.mockResolvedValue(undefined);
     renderWithMessages(<ApiKeyPanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke Deployment' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Deployment');
+    expect(dialog).toHaveTextContent('zmail_abcdef123456');
     expect(state.revoke.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Revoke' }).at(-1)!);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Revoke' }));
 
     await waitFor(() => expect(state.revoke.mutateAsync).toHaveBeenCalledWith(42));
+  });
+
+  it('offers to create the first key from the empty state', () => {
+    state.apiKeys.data = { items: [], meta: { total: 0 } };
+    renderWithMessages(<ApiKeyPanel />);
+
+    const buttons = screen.getAllByRole('button', { name: 'Create key' });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[1]!);
+    expect(screen.getByRole('dialog')).toHaveTextContent('Create API key');
   });
 
   it('allows an expired key to be explicitly revoked', () => {
@@ -193,7 +342,7 @@ describe('API key settings workflow', () => {
     };
     renderWithMessages(<ApiKeyPanel />);
 
-    expect(screen.getByRole('button', { name: 'Revoke' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Revoke Deployment' })).toBeEnabled();
   });
 });
 
