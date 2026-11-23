@@ -4477,6 +4477,7 @@ export interface components {
         CreateMailAppPasswordRequest: {
             current_password: string;
             name: string;
+            /** @description Only `imap` is accepted until mail submission ships; `smtp` is a validation error on `scopes`. */
             scopes: components["schemas"]["MailClientProtocol"][];
             /** @description Required when the account has two-factor sign-in on. */
             totp_code?: string;

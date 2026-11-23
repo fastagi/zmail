@@ -18901,6 +18901,8 @@ components:
           maxLength: 64
         scopes:
           type: array
+          description: Only `imap` is accepted until mail submission ships; `smtp` is a validation
+            error on `scopes`.
           minItems: 1
           maxItems: 2
           uniqueItems: true
