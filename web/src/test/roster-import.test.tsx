@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
+import { createTranslator, NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { memberImportResultSchema } from '@/features/mailbox/schemas';
@@ -10,18 +10,23 @@ import type { MemberImportResult, MemberImportRowResult } from '@/features/mailb
 import { readRosterRows, ROSTER_IMPORT_TEMPLATE } from '@/features/mailbox/utils/roster-csv';
 import { MockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import { messages } from '@/i18n/modules';
+import zhMailbox from '@/i18n/modules/mailbox/zh-Hans';
 
 const service = vi.hoisted(() => ({ domains: vi.fn() }));
 const admin = vi.hoisted(() => ({ importMembers: vi.fn() }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
+const welcome = vi.hoisted(() => ({ setting: vi.fn() }));
 
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/features/mailbox/services/mailbox-service', () => ({ mailboxService: service }));
 vi.mock('@/features/mailbox/services/mailbox-admin-service', () => ({
   mailboxAdminService: admin,
 }));
+vi.mock('@/features/mailbox/services/member-welcome-service', () => ({
+  memberWelcomeService: welcome,
+}));
 
-const { RosterImportDialog, mergeRetry, rosterSummary } =
+const { RosterImportDialog, mergeRetry, rosterSummary, rosterToast } =
   await import('@/features/mailbox/components/admin/roster-import-dialog');
 
 describe('roster CSV', () => {
@@ -343,10 +348,47 @@ function domainEntry(domain: string, kind: 'shared' | 'organization') {
   };
 }
 
+describe('rosterToast', () => {
+  type Translate = Parameters<typeof rosterToast>[0];
+  const translator = (locale: 'en-US' | 'zh-Hans') =>
+    createTranslator({
+      locale,
+      messages: (locale === 'en-US'
+        ? messages
+        : { ...messages, mailbox: zhMailbox }) as unknown as AbstractIntlMessages,
+      namespace: 'mailbox',
+    }) as unknown as Translate;
+
+  it('names only what happened, in either language', () => {
+    const counts = { invited: 1, reserved: 1, created: 0, attention: 0 };
+    expect(rosterToast(translator('zh-Hans'), counts)).toBe('已邀请 1 人，已为他们预留 1 个邮箱');
+    expect(rosterToast(translator('en-US'), counts)).toBe(
+      'Invited 1 person. Reserved 1 mailbox for them.'
+    );
+    expect(
+      rosterToast(translator('en-US'), { invited: 0, reserved: 0, created: 2, attention: 1 })
+    ).toBe('2 existing members got a mailbox. 1 row needs attention.');
+    expect(
+      rosterToast(translator('zh-Hans'), { invited: 0, reserved: 0, created: 0, attention: 0 })
+    ).toBe('没有需要导入的新内容');
+    expect(
+      rosterToast(
+        translator('zh-Hans'),
+        { invited: 2, reserved: 0, created: 0, attention: 3 },
+        {
+          retried: true,
+        }
+      )
+    ).toBe('重试完成，已邀请 2 人，3 行需要处理');
+  });
+});
+
 describe('roster import dialog', () => {
   beforeEach(() => {
     service.domains.mockReset();
     admin.importMembers.mockReset();
+    welcome.setting.mockReset();
+    welcome.setting.mockResolvedValue({ ...mockMemberWelcomeStore.setting(1), language: 'en-US' });
     for (const fn of Object.values(toast)) fn.mockReset();
   });
 
@@ -448,6 +490,18 @@ describe('roster import dialog', () => {
     // A bad email is not fixed by another prefix, so the row offers none.
     expect(screen.queryByLabelText('New mailbox prefix for bad')).toBeNull();
 
+    // Before importing, the admin learns that the new members get a welcome email, and where to
+    // change it.
+    expect(
+      await screen.findByText(
+        'After import, each of the 2 new members gets a welcome email on how to sign in and set up a mail app.'
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Edit or turn off in Invitations' })).toHaveAttribute(
+      'href',
+      '/console/organizations/1?tab=invitations'
+    );
+
     fireEvent.click(screen.getByRole('button', { name: 'Import 2 rows' }));
     expect(
       await screen.findByText(
@@ -460,7 +514,7 @@ describe('roster import dialog', () => {
     );
 
     expect(toast.warning).toHaveBeenLastCalledWith(
-      'Invited 1 person and reserved 1 mailbox for them. 0 existing members got a mailbox; 2 rows need attention.'
+      'Invited 1 person. Reserved 1 mailbox for them. 2 rows need attention.'
     );
     expect(
       screen.getByText('Welcome emails: 1 sent to new members, 0 could not be sent.')
@@ -571,7 +625,7 @@ describe('roster import dialog', () => {
       )
     ).toBeInTheDocument();
     expect(toast.warning).toHaveBeenLastCalledWith(
-      'Invited 1 person and reserved 1 mailbox for them. 0 existing members got a mailbox; 1 row needs attention.'
+      'Invited 1 person. Reserved 1 mailbox for them. 1 row needs attention.'
     );
 
     fireEvent.change(screen.getByLabelText('New mailbox prefix for carol@example.com'), {
@@ -590,7 +644,27 @@ describe('roster import dialog', () => {
       )
     ).toBeInTheDocument();
     expect(toast.success).toHaveBeenLastCalledWith(
-      'Retried: 1 invited, 1 mailbox reserved, 0 created, 0 still need attention.'
+      'Retried. Invited 1 person. Reserved 1 mailbox for them.'
+    );
+  });
+
+  it('says before importing that welcome emails are off', async () => {
+    service.domains.mockResolvedValue([domainEntry('news.example.com', 'organization')]);
+    welcome.setting.mockResolvedValue({ ...mockMemberWelcomeStore.setting(1), enabled: false });
+    admin.importMembers.mockResolvedValueOnce(
+      result([row(1, 'valid', { email: 'alice@example.com' })], true)
+    );
+    renderDialog();
+    fireEvent.change(await screen.findByLabelText('Or paste rows'), {
+      target: { value: 'email\nalice@example.com\n' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Check rows' }));
+    expect(
+      await screen.findByText('Welcome emails are turned off, so importing sends none.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Turn on in Invitations' })).toHaveAttribute(
+      'href',
+      '/console/organizations/1?tab=invitations'
     );
   });
 

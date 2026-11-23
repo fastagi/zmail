@@ -3,6 +3,7 @@ import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { OrganizationDirectory } from '@/features/organization/components/organization-directory';
+import { OrganizationMembers } from '@/features/organization/components/organization-members';
 import { OrganizationOverview } from '@/features/organization/components/organization-overview';
 import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -291,6 +292,22 @@ describe('organization browser workflow', () => {
     expect(screen.queryByText('alex@example.com')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Change role: alex' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Actions: alex' })).toBeInTheDocument();
+  });
+
+  it('shows a detail line, such as mailbox addresses, under each member', () => {
+    state.context.data = organizationContext('owner');
+    state.members.data = {
+      items: [memberView({ id: 92, user_id: 18, username: 'alex', role: 'member' })],
+      meta: { total: 1 },
+    };
+    renderWithMessages(
+      <OrganizationMembers
+        context={organizationContext('owner')}
+        memberDetail={member => <span>{`mailbox of ${member.user_id}`}</span>}
+      />
+    );
+    expect(screen.getByText('@alex')).toBeInTheDocument();
+    expect(screen.getByText('mailbox of 18')).toBeInTheDocument();
   });
 
   it('puts the role under the name on a phone and hides generated usernames', async () => {

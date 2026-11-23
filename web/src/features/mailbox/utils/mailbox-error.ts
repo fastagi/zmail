@@ -75,6 +75,9 @@ export type MailboxErrorKey =
   | 'errors.labelLimitReached'
   | 'errors.searchTooBroad'
   | 'errors.sessionEnded'
+  | 'errors.welcomeNotEligible'
+  | 'errors.welcomeDisabled'
+  | 'errors.welcomeResendLimited'
   | 'errors.roleNotFound'
   | 'errors.roleNameTaken'
   | 'errors.roleLimitReached'
@@ -153,6 +156,9 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_FOLDER_LIMIT_REACHED]: 'errors.folderLimitReached',
   [ApiErrorCode.MAILBOX_LABEL_LIMIT_REACHED]: 'errors.labelLimitReached',
   [ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD]: 'errors.searchTooBroad',
+  [ApiErrorCode.MAILBOX_WELCOME_NOT_ELIGIBLE]: 'errors.welcomeNotEligible',
+  [ApiErrorCode.MAILBOX_WELCOME_DISABLED]: 'errors.welcomeDisabled',
+  [ApiErrorCode.MAILBOX_WELCOME_RESEND_LIMITED]: 'errors.welcomeResendLimited',
   [ApiErrorCode.MAILBOX_ROLE_NOT_FOUND]: 'errors.roleNotFound',
   [ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN]: 'errors.roleNameTaken',
   [ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED]: 'errors.roleLimitReached',
