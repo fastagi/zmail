@@ -73,9 +73,11 @@ export function ApiKeyPanel() {
   const createApiKey = useCreateApiKey();
   const revokeApiKey = useRevokeApiKey();
   const readiness = useSendReadiness();
+  const [created, setCreated] = useState<CreateApiKeyResult | null>(null);
+  // The example for a key bound to an organization uses that organization's mailboxes.
+  const createdReadiness = useSendReadiness(created?.api_key.organization_id);
   const restrictionOrganizations = useRestrictionOrganizations();
   const [createOpen, setCreateOpen] = useState(false);
-  const [created, setCreated] = useState<CreateApiKeyResult | null>(null);
   const [name, setName] = useState('');
   const [purpose, setPurpose] = useState<ApiKeyPurpose>('send');
   const [scopes, setScopes] = useState<readonly ApiKeyScope[]>(DEFAULT_API_KEY_SCOPES);
@@ -359,7 +361,7 @@ export function ApiKeyPanel() {
                     </Button>
                   </div>
                 </div>
-                {canSend(created.api_key.scopes) && readiness.status !== 'unavailable' ? (
+                {canSend(created.api_key.scopes) && createdReadiness.status !== 'unavailable' ? (
                   <section className="space-y-3 border-t pt-4">
                     <div className="space-y-1">
                       <h3 className="text-sm font-semibold">{t('quickStart.title')}</h3>
@@ -368,9 +370,13 @@ export function ApiKeyPanel() {
                       </p>
                     </div>
                     <SendQuickStart
-                      readiness={readiness}
+                      readiness={createdReadiness}
                       apiKey={created.plaintext_key}
                       idPrefix="created-key"
+                      restriction={{
+                        organizationId: created.api_key.organization_id,
+                        sendingDomains: created.api_key.sending_domains,
+                      }}
                     />
                   </section>
                 ) : null}

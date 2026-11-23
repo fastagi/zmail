@@ -216,6 +216,10 @@ const messages = {
       fromHint: '"from" must be a mailbox you may send from: {from}.',
       organizationHeader:
         'says which organization the key acts in ({organization}). A key belongs to you, so one key works in every organization you are a member of.',
+      boundOrganization:
+        'This key only works in {organization}, so the example sends no Organization-Id header.',
+      noAllowedSender:
+        'This key only sends from {domains}, and you have no mailbox there yet. Change "from" to an address on one of those domains before running it.',
       recipientHint: 'The example sends to you. Every message it sends shows up in',
       emailLog: 'Emails',
       language: 'Language',

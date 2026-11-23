@@ -5,6 +5,8 @@ export interface SendSnippetInput {
   /** The public API origin; empty falls back to a placeholder. */
   apiOrigin: string;
   organizationId: number;
+  /** A key bound to its organization acts there without the `Organization-Id` header. */
+  omitOrganizationHeader?: boolean;
   /** The plaintext key, or a placeholder once it is no longer shown. */
   apiKey: string;
   /** A mailbox of the organization the key's owner may send from. */
@@ -45,6 +47,7 @@ function indentLines(text: string, indent: string): string {
 export function buildSendSnippets({
   apiOrigin,
   organizationId,
+  omitOrganizationHeader = false,
   apiKey,
   from,
   to,
@@ -57,11 +60,12 @@ export function buildSendSnippets({
     2
   );
   const organization = String(organizationId);
+  const withOrganization = (line: string) => (omitOrganizationHeader ? [] : [line]);
 
   const curl = [
     `curl -X POST ${shellQuote(url)} \\`,
     `  -H ${shellQuote(`X-API-Key: ${apiKey}`)} \\`,
-    `  -H ${shellQuote(`Organization-Id: ${organization}`)} \\`,
+    ...withOrganization(`  -H ${shellQuote(`Organization-Id: ${organization}`)} \\`),
     `  -H 'Content-Type: application/json' \\`,
     `  -d ${shellQuote(json)}`,
   ].join('\n');
@@ -72,7 +76,7 @@ export function buildSendSnippets({
     `  method: 'POST',`,
     `  headers: {`,
     `    'X-API-Key': ${literal(apiKey)},`,
-    `    'Organization-Id': ${literal(organization)},`,
+    ...withOrganization(`    'Organization-Id': ${literal(organization)},`),
     `    'Content-Type': 'application/json',`,
     `  },`,
     `  body: JSON.stringify(${indentLines(json, '  ')}),`,
@@ -91,7 +95,7 @@ export function buildSendSnippets({
     `    method="POST",`,
     `    headers={`,
     `        "X-API-Key": ${literal(apiKey)},`,
-    `        "Organization-Id": ${literal(organization)},`,
+    ...withOrganization(`        "Organization-Id": ${literal(organization)},`),
     `        "Content-Type": "application/json",`,
     `    },`,
     `)`,

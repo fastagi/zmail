@@ -213,6 +213,8 @@ const messages = {
       fromHint: '“from” 必须是你有发信权限的邮箱：{from}。',
       organizationHeader:
         '指定密钥以哪个组织的身份操作（{organization}）。密钥属于你本人，同一把密钥可以在你加入的每个组织使用。',
+      boundOrganization: '这把密钥只能在 {organization} 里使用，所以示例不带 Organization-Id 请求头。',
+      noAllowedSender: '这把密钥只能从 {domains} 发信，但你在这些域名下还没有邮箱。运行前请把 "from" 改成这些域名下的地址。',
       recipientHint: '示例发给你自己。发出的每封邮件都能在这里查看：',
       emailLog: '收发记录',
       language: '语言',

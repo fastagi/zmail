@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
     mutateAsync: vi.fn(),
   },
   readiness: { status: 'loading' } as unknown,
+  readinessRequests: [] as (number | undefined)[],
   organizations: { status: 'ready', organizations: [] } as unknown,
   domains: {} as Record<number, unknown>,
 }));
@@ -36,7 +37,10 @@ vi.mock('@/features/api-key/hooks/use-restriction-options', () => ({
 }));
 
 vi.mock('@/features/api-key/hooks/use-send-readiness', () => ({
-  useSendReadiness: () => state.readiness,
+  useSendReadiness: (organizationId?: number) => {
+    state.readinessRequests.push(organizationId);
+    return state.readiness;
+  },
 }));
 
 vi.mock('@/features/api-key/hooks/use-api-keys', () => ({
@@ -75,6 +79,7 @@ describe('API key settings workflow', () => {
     state.revoke.isPending = false;
     state.revoke.mutateAsync.mockReset();
     state.readiness = ready;
+    state.readinessRequests = [];
     state.organizations = {
       status: 'ready',
       organizations: [
@@ -397,6 +402,71 @@ describe('API key settings workflow', () => {
       'href',
       '/console/emails?org=12'
     );
+  });
+
+  it('drops the Organization-Id header from the example of an organization-bound key', async () => {
+    const plaintextKey = 'zmail_abcdef123456.0123456789abcdef0123456789abcdef0123456789abcdef';
+    state.create.mutateAsync.mockResolvedValue({
+      api_key: { ...apiKey, organization_id: 12 },
+      plaintext_key: plaintextKey,
+    });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(state.readinessRequests).toContain(12);
+    for (const language of ['curl', 'Node.js', 'Python']) {
+      fireEvent.click(within(dialog).getByRole('button', { name: language }));
+      const sample = within(dialog).getByLabelText('Code sample');
+      expect(sample).toHaveTextContent(plaintextKey);
+      expect(sample).not.toHaveTextContent('Organization-Id');
+    }
+    expect(
+      within(dialog).getByText(
+        'This key only works in Acme, so the example sends no Organization-Id header.'
+      )
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/one key works in every organization/)).not.toBeInTheDocument();
+  });
+
+  it('sends the example of a domain-restricted key from an allowed domain', async () => {
+    state.readiness = { ...ready, senders: ['dev@acme.zmail.im', 'billing@mail.acme.example'] };
+    state.create.mutateAsync.mockResolvedValue({
+      api_key: { ...apiKey, organization_id: 12, sending_domains: ['mail.acme.example'] },
+      plaintext_key: 'x'.repeat(32),
+    });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    const dialog = await screen.findByRole('dialog');
+    const sample = within(dialog).getByLabelText('Code sample');
+    expect(sample).toHaveTextContent('billing@mail.acme.example');
+    expect(sample).not.toHaveTextContent('dev@acme.zmail.im');
+    expect(within(dialog).queryByText(/you have no mailbox there yet/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the own mailbox with a hint when no mailbox is on an allowed domain', async () => {
+    state.create.mutateAsync.mockResolvedValue({
+      api_key: { ...apiKey, organization_id: 12, sending_domains: ['mail.acme.example'] },
+      plaintext_key: 'x'.repeat(32),
+    });
+    renderWithMessages(<ApiKeyPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Code sample')).toHaveTextContent('dev@acme.zmail.im');
+    expect(
+      within(dialog).getByText(/This key only sends from mail\.acme\.example, and you have no mailbox there yet/)
+    ).toBeInTheDocument();
   });
 
   it('keeps the plaintext key out of the page once the dialog closes', () => {
