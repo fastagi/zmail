@@ -345,11 +345,11 @@ func TestCreateKeyAcceptsOnlyCatalogScopes(t *testing.T) {
 	repo := newFakeRepository()
 	created, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
 		Name:   "everything",
-		Scopes: []string{"MAIL:TRANSACTIONAL", "mail:agent", "mail:read", "mail:send"},
+		Scopes: []string{"MAIL:TRANSACTIONAL", "mail:agent", "mail:read", "mail:send", "templates:create"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"mail:agent", "mail:read", "mail:send", "mail:transactional"}, created.APIKey.Scopes)
-	assert.Equal(t, []string{"mail:agent", "mail:read", "mail:send", "mail:transactional"}, KnownScopes())
+	assert.Equal(t, []string{"mail:agent", "mail:read", "mail:send", "mail:transactional", "templates:create"}, created.APIKey.Scopes)
+	assert.Equal(t, []string{"mail:agent", "mail:read", "mail:send", "mail:transactional", "templates:create"}, KnownScopes())
 }
 
 func TestCreateKeyUsesZmailPrefixAndOldPrefixStillValidates(t *testing.T) {

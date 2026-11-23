@@ -30,16 +30,21 @@ const (
 	testKeyPrefix = "zmail_test_"
 )
 
-// The scopes a new key may carry: Zmail's mail scopes, or the `*` wildcard.
+// The scopes a new key may carry: Zmail's mail and template scopes, or the `*` wildcard.
 const (
 	ScopeMailAgent         = "mail:agent"
 	ScopeMailRead          = "mail:read"
 	ScopeMailSend          = "mail:send"
 	ScopeMailTransactional = "mail:transactional"
-	ScopeAll               = "*"
+	// ScopeTemplatesCreate lets an AI tool save organization templates; it never sends, edits,
+	// or deletes.
+	ScopeTemplatesCreate = "templates:create"
+	ScopeAll             = "*"
 )
 
-var knownScopes = []string{ScopeMailAgent, ScopeMailRead, ScopeMailSend, ScopeMailTransactional}
+var knownScopes = []string{
+	ScopeMailAgent, ScopeMailRead, ScopeMailSend, ScopeMailTransactional, ScopeTemplatesCreate,
+}
 
 // KnownScopes lists the named scopes a new key may carry, sorted.
 func KnownScopes() []string {

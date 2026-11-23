@@ -164,6 +164,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agent-mail-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an organization template with an API key
+         * @description For AI tools and agents. The key must hold the `templates:create` scope (`*` also grants it); test keys are refused. The key's owner must be a member of the organization named by `Organization-Id` and, as a member, hold both the `api_keys` and the `templates` grant. The body, validation, and response are those of `createMailTemplate`. Creates a reusable template and sends no email. See MAILBOXES.md, Create a template from an AI tool.
+         */
+        post: operations["createAgentMailTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/api-keys": {
         parameters: {
             query?: never;
@@ -4448,8 +4468,8 @@ export interface components {
             expires_at?: string;
             mode?: components["schemas"]["APIKeyMode"];
             name: string;
-            /** @description At least one of Zmail's mail scopes, or `*` for all of them. */
-            scopes: ("mail:send" | "mail:read" | "mail:transactional" | "mail:agent" | "*")[];
+            /** @description At least one of Zmail's scopes, or `*` for all of them. */
+            scopes: ("mail:send" | "mail:read" | "mail:transactional" | "mail:agent" | "templates:create" | "*")[];
         };
         CreateAPIKeyResponse: {
             /** @constant */
@@ -8837,6 +8857,65 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createAgentMailTemplate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created template. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailTemplateResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The key lacks `templates:create` or is a test key, or a member owner tried to write a transactional template (`PERMISSION.DENIED`); or the owner's membership lacks the `api_keys` or `templates` grant (`ORGANIZATION.FEATURE_NOT_GRANTED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`), the key is taken in the organization (`MAILBOX.TEMPLATE_KEY_TAKEN`), or the organization has 200 templates (`MAILBOX.TEMPLATE_LIMIT_REACHED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation; the name, subject, body, sample values, or placeholder syntax is unusable, or a transactional template's key, sender, or variable definitions break the template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
             503: components["responses"]["ServiceUnavailable"];
