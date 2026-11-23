@@ -52,7 +52,7 @@ const messages = {
     name: 'Name',
     namePlaceholder: 'For example, Order processor',
     url: 'Target URL',
-    urlPlaceholder: 'https://hooks.example.com/fastbuild',
+    urlPlaceholder: 'https://hooks.example.com/zmail',
     eventTypes: 'Event types',
     invalid: 'Check the name, HTTPS target, and event selection.',
   },
