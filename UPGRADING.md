@@ -11,6 +11,34 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail client access, part 1
+
+### Medium — Migrations `2026_12_24_090000` to `2026_12_24_120000`
+
+- `2026_12_24_090000_add_mail_message_sources` (mailbox starter) creates `mail_message_sources`; no
+  existing table is locked.
+- `2026_12_24_100000_add_mail_imap_uids` (mailbox starter) creates `mail_imap_folders` and
+  `mail_imap_uids`, numbers every existing message in one `INSERT … SELECT` over all of
+  `mail_messages`, and adds an `AFTER INSERT OR UPDATE OF placement, folder_id, status, mailbox_id`
+  trigger on `mail_messages` and an `AFTER DELETE` trigger on `mail_folders`. `CREATE TRIGGER` takes a
+  `SHARE ROW EXCLUSIVE` lock on both tables for the rest of the migration's transaction, which blocks
+  inbound delivery, sending, and organizing while the backfill scans the table, so run it outside
+  peak mail traffic on large mail stores. Afterwards every insert and every placement or status
+  change of a message also writes one row to each UID table; two writers filing mail into the same
+  folder wait for each other's commit.
+- `2026_12_24_110000_add_mail_client_feature_grants` (organization starter) adds
+  `can_use_mail_clients boolean NOT NULL DEFAULT true` to `organization_memberships` and
+  `organization_invitations`. A constant default does not rewrite either table; each `ALTER TABLE`
+  takes a brief `ACCESS EXCLUSIVE` lock.
+- `2026_12_24_120000_add_mail_app_passwords` (mailbox starter) creates `mail_app_passwords` and
+  `mail_client_settings`.
+
+The golden schema now also pins functions (by signature and body digest) and triggers; a fork that
+adds its own functions or triggers regenerates `testdata/schema.golden.sql` with
+`FASTBUILD_UPDATE_GOLDEN_SCHEMA=1`. A fork test that rolls back `2026_11_21_090000_add_mail_organize`
+must first roll back `2026_12_24_100000_add_mail_imap_uids`, whose trigger depends on
+`mail_messages.placement` and `folder_id`.
+
 ## Unreleased — Web push and new-mail notifications
 
 ### High — Deploy the Web before the API

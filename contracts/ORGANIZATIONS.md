@@ -218,17 +218,18 @@ A member view contains the relationship ID and a deliberately small public ident
 ## Member Feature Grants
 
 An organization decides, per member, which console features the member may use. The catalog is
-fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`.
+fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clients`.
 
 - `owner` and `admin` always have every feature. Grants are stored on every membership but only
   take effect for the `member` role, so member views and the context view report the effective
   value: `true` for every feature of an owner or admin.
 - A new membership starts with the grants its invitation carries. `POST /v1/organizations/:id/invitations`
-  always carries the defaults, `contacts` and `templates`; `broadcasts` and `api_keys`, which send
-  mail at scale, wait for an owner or admin. A [roster import](MAILBOXES.md#roster-import) may
+  always carries the defaults, `contacts`, `templates`, and `mail_clients`; `broadcasts` and
+  `api_keys`, which send mail at scale, wait for an owner or admin. A [roster import](MAILBOXES.md#roster-import) may
   carry other grants, chosen by the owner or admin who imports. Invitations created before grants
   were stored carry the defaults, and memberships that existed before grants were introduced keep
-  all four. Invitation views do not show the grants.
+  all four. Every membership and invitation that existed before `mail_clients` was added has it.
+  Invitation views do not show the grants.
 - `PATCH /v1/organizations/:id/members/:member_id/features` changes only the features the body
   names; omitted features keep their value. A body naming none returns
   `422 COMMON.VALIDATION_FAILED`. Only an `owner` or `admin` may call it (`403 PERMISSION.DENIED`

@@ -13,7 +13,7 @@ selected; optional starters are enabled with `OPTIONAL_STARTERS`.
 | `audit` | default | - | 4 | Write-request audit logging, history reads, and bounded retention. |
 | `apikey` | default | - | 2 | Personal API keys with one-time secrets, revocation, and request authentication. |
 | `user` | default | - | 8 | Registration with email codes, sign-in, revocable sessions, profile, and password reset. |
-| `organization` | optional | - | 5 | Organization ownership, membership, invitations, active context, and ownership transfer. |
+| `organization` | optional | - | 6 | Organization ownership, membership, invitations, active context, and ownership transfer. |
 | `permission` | optional | `organization` | 1 | Organization-scoped access roles, exact permission keys, member assignments, and fail-closed checks. |
 | `notification` | optional | `user`, `audit` | 3 | User-scoped in-app notifications and durable email delivery with preferences and leases. |
 | `asset` | optional | `user`, `audit` | 1 | User-owned private objects with bounded transfer grants and inspection. |
@@ -21,7 +21,7 @@ selected; optional starters are enabled with `OPTIONAL_STARTERS`.
 | `usage` | optional | `user`, `audit`, `organization` | 1 | Trusted idempotent metering, atomic quota decisions, and private summaries. |
 | `webhook` | optional | `user`, `audit`, `organization` | 1 | Organization-owned outbound endpoints with signed durable delivery, retries, and replay. |
 | `operator` | optional | `user`, `audit` | 3 | Platform operators: CLI-managed grants and the Admin Console cookie session. |
-| `mailbox` | optional | `user`, `audit`, `apikey`, `organization` | 50 | Organization mailboxes that send through Cloudflare Email Service and receive from its Email Worker. |
+| `mailbox` | optional | `user`, `audit`, `apikey`, `organization` | 53 | Organization mailboxes that send through Cloudflare Email Service and receive from its Email Worker. |
 <!-- starter-catalog:end -->
 
 ## Standard Starter Structure (8 files)
