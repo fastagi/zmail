@@ -305,6 +305,12 @@ type Service interface {
 	MailClientSettings(ctx context.Context, viewer domain.OrganizationContext) (MailClientSettings, error)
 	// UpdateMailClientSettings sets the organization's mail app sign-in switch; owners and admins only.
 	UpdateMailClientSettings(ctx context.Context, viewer domain.OrganizationContext, enabled bool) (MailClientSettings, error)
+	// MemberWelcomeSetting reads the organization's welcome mail setting; owners and admins only.
+	MemberWelcomeSetting(ctx context.Context, viewer domain.OrganizationContext) (MemberWelcomeSetting, error)
+	// UpdateMemberWelcomeSetting replaces the welcome mail setting; owners and admins only.
+	UpdateMemberWelcomeSetting(ctx context.Context, viewer domain.OrganizationContext, input MemberWelcomeInput) (MemberWelcomeSetting, error)
+	// PreviewMemberWelcome renders welcome copy with sample values; owners and admins only.
+	PreviewMemberWelcome(ctx context.Context, viewer domain.OrganizationContext, input MemberWelcomePreviewInput) (MemberWelcomePreview, error)
 	// MailSignature reads the viewer's own signature for a mailbox they may send from.
 	MailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailSignature, error)
 	// SaveMailSignature replaces the viewer's own signature for a mailbox they may send from; an
@@ -489,6 +495,9 @@ type service struct {
 	reverifier domain.CredentialReverifier
 	// appPasswordAttempts bounds the credential checks of creating mail client passwords per user.
 	appPasswordAttempts ratelimit.Store
+	// welcome stores the welcome mail setting and the record of welcomed mailboxes; nil when repo
+	// does not implement it, which sends no welcome mails.
+	welcome memberWelcomeStore
 }
 
 var _ Service = (*service)(nil)
@@ -572,6 +581,10 @@ func NewService(
 	if seam, ok := repo.(appPasswordStore); ok {
 		appPasswords = seam
 	}
+	var welcome memberWelcomeStore
+	if seam, ok := repo.(memberWelcomeStore); ok {
+		welcome = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -600,6 +613,7 @@ func NewService(
 		pushRefusalLog: &pushRefusalLog{}, releases: releases,
 		roster:       roster,
 		appPasswords: appPasswords, appPasswordAttempts: newAppPasswordAttempts(limits),
+		welcome: welcome,
 	}
 }
 

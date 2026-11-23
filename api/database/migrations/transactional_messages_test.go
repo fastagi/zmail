@@ -74,6 +74,8 @@ func TestTransactionalMigrationsUpDown(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT count(*) FROM transactional_message_events`).Scan(&events).Error)
 	require.Zero(t, events)
 
+	// Welcome mails reference transactional messages, so they roll back first.
+	require.NoError(t, (&addMemberWelcomeMail{}).Down(db))
 	require.NoError(t, (&createMailSuppressions{}).Down(db))
 	require.NoError(t, (&createTransactionalMessages{}).Down(db))
 	var tables int64
@@ -82,6 +84,7 @@ func TestTransactionalMigrationsUpDown(t *testing.T) {
 	require.Zero(t, tables)
 	require.NoError(t, (&createTransactionalMessages{}).Up(db))
 	require.NoError(t, (&createMailSuppressions{}).Up(db))
+	require.NoError(t, (&addMemberWelcomeMail{}).Up(db))
 }
 
 // TestTerminalRowRejectsCiphertext keeps the payload only while a message is queued, and the

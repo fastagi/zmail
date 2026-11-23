@@ -330,7 +330,28 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 	if err != nil {
 		return nil, err
 	}
-	return s.commitMailbox(ctx, viewer, plan)
+	mailbox, err := s.commitMailbox(ctx, viewer, plan)
+	if err != nil {
+		return nil, err
+	}
+	s.welcomeMailboxOwner(ctx, viewer, plan, mailbox)
+	return mailbox, nil
+}
+
+// welcomeMailboxOwner sends the welcome mail when a manager gives another member, typically one
+// who joined by invitation, a personal mailbox on a verified organization domain. It goes to the
+// member's account email, where they already read mail. The outcome is only logged: the mailbox
+// exists either way.
+func (s *service) welcomeMailboxOwner(ctx context.Context, viewer domain.OrganizationContext, plan *mailboxPlan, mailbox *domain.Mailbox) {
+	if plan.owner == nil || plan.owner.UserID == viewer.UserID || plan.connected == nil || s.accounts == nil ||
+		mailbox.Type != domain.MailboxTypePersonal || addressDomain(mailbox.Address) == s.settings.Domain {
+		return
+	}
+	account, err := s.accounts.FindByID(ctx, plan.owner.UserID)
+	if err != nil || account == nil || account.Email == "" {
+		return
+	}
+	s.welcomeMember(ctx, viewer, mailbox, account.Email, mailbox.DisplayName)
 }
 
 // mailboxPlan is a checked mailbox not stored yet: its row, its connected domain (nil on the

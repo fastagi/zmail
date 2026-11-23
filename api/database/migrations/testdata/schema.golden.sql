@@ -649,6 +649,24 @@ TABLE mailboxes
   COLUMN external_mail_tenant_id bigint
   COLUMN pending_owner_email character varying(320)
 
+TABLE member_welcome_mails
+  COLUMN id bigint NOT NULL DEFAULT nextval('member_welcome_mails_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN recipient character varying(320) NOT NULL
+  COLUMN transactional_message_id bigint
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE member_welcome_settings
+  COLUMN organization_id bigint NOT NULL
+  COLUMN enabled boolean NOT NULL DEFAULT true
+  COLUMN language character varying(8) NOT NULL DEFAULT 'zh-Hans'::character varying
+  COLUMN subject character varying(200) NOT NULL DEFAULT ''::character varying
+  COLUMN body text NOT NULL DEFAULT ''::text
+  COLUMN updated_by bigint
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
   COLUMN migration character varying(255) NOT NULL
@@ -1286,6 +1304,15 @@ CONSTRAINT mailboxes.mailboxes_external_mail_tenant_id_fkey FOREIGN KEY (externa
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
+CONSTRAINT member_welcome_mails.fk_member_welcome_mails_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT member_welcome_mails.fk_member_welcome_mails_message FOREIGN KEY (transactional_message_id) REFERENCES transactional_messages(id) ON DELETE SET NULL
+CONSTRAINT member_welcome_mails.fk_member_welcome_mails_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT member_welcome_mails.member_welcome_mails_pkey PRIMARY KEY (id)
+CONSTRAINT member_welcome_settings.chk_member_welcome_settings_body CHECK ((char_length(body) <= 5000))
+CONSTRAINT member_welcome_settings.chk_member_welcome_settings_language CHECK (((language)::text = ANY ((ARRAY['en-US'::character varying, 'zh-Hans'::character varying])::text[])))
+CONSTRAINT member_welcome_settings.fk_member_welcome_settings_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT member_welcome_settings.fk_member_welcome_settings_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT member_welcome_settings.member_welcome_settings_pkey PRIMARY KEY (organization_id)
 CONSTRAINT migrations.migrations_pkey PRIMARY KEY (id)
 CONSTRAINT notification_deliveries.fk_notifications_deliveries FOREIGN KEY (notification_id) REFERENCES notifications(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT notification_deliveries.notification_deliveries_channel_check CHECK (((channel)::text = ANY ((ARRAY['in_app'::character varying, 'email'::character varying, 'web_push'::character varying])::text[])))
@@ -1620,6 +1647,11 @@ INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id
 INDEX CREATE INDEX idx_mailboxes_pending_owner ON mailboxes USING btree (organization_id, pending_owner_email) WHERE ((pending_owner_email IS NOT NULL) AND (deleted_at IS NULL))
 INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_member_welcome_mails_mailbox ON member_welcome_mails USING btree (mailbox_id)
+INDEX CREATE INDEX idx_member_welcome_mails_message ON member_welcome_mails USING btree (transactional_message_id) WHERE (transactional_message_id IS NOT NULL)
+INDEX CREATE INDEX idx_member_welcome_mails_organization ON member_welcome_mails USING btree (organization_id)
+INDEX CREATE UNIQUE INDEX member_welcome_mails_pkey ON member_welcome_mails USING btree (id)
+INDEX CREATE UNIQUE INDEX member_welcome_settings_pkey ON member_welcome_settings USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX migrations_pkey ON migrations USING btree (id)
 INDEX CREATE INDEX idx_notification_deliveries_leased ON notification_deliveries USING btree (channel, status, lease_expires_at)
 INDEX CREATE UNIQUE INDEX idx_notification_deliveries_notification_channel ON notification_deliveries USING btree (notification_id, channel)

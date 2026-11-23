@@ -11,6 +11,36 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Member welcome mail
+
+### High — Deploy the Web before the API
+
+Roster import results gain required fields (`welcome_mail_status` and `welcome_mail_error_code` on
+each row, `welcome_mails_queued` and `welcome_mails_failed` on the result). The Web parses responses
+with strict schemas, so an older Web rejects the new API response. Ship the Web first: the new Web
+reads an older API's import result as having sent no welcome mail.
+
+### Medium — Two new tables
+
+Migration `2026_12_26_090000_add_member_welcome_mail` creates `member_welcome_settings` (one row per
+organization: on or off, language, subject, body) and `member_welcome_mails` (one row per welcomed
+mailbox, unique on `mailbox_id`, with a nullable foreign key to `transactional_messages`). It only
+creates tables and takes no lock on existing ones. Because of that foreign key, roll this migration
+back before rolling back `create_transactional_messages`.
+
+### Medium — Welcome mail on new member mailboxes
+
+When a roster import or an admin creates a personal mailbox for a member, the API queues one welcome
+email through the transactional mail pipeline, so it appears in the send log with the template key
+`member-welcome` and the idempotency key `member-welcome:<mailbox id>`. It needs
+`MAILBOX_SECRET_ENCRYPTION_KEY`, `MAILBOX_PUBLIC_URL`, and a verified organization domain for the
+`no-reply@` sender; without them the row reports `not_configured` and nothing is sent. It does not
+need `MAILBOX_TRANSACTIONAL_ENABLED`, which still governs API-key sends only. New routes:
+`GET`/`PUT /v1/member-welcome-mail-setting` and `POST /v1/member-welcome-mail-previews` (owners and
+admins). A fork that calls the transactional dispatch tail directly should use
+`dispatchTransactionalSoon`, which now holds it. See "Member Welcome Mail" in
+`contracts/MAILBOXES.md`.
+
 ## Unreleased — Template creation with an API key
 
 ### Medium — New `templates:create` scope and `POST /v1/agent-mail-templates`

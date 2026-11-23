@@ -74,6 +74,10 @@ type MemberImportRowResult struct {
 	InvitationID uint
 	// EmailSendStatus is the invitation email outcome when the row sent one.
 	EmailSendStatus string
+	// WelcomeStatus is the welcome mail outcome of a row whose mailbox is provisioned; empty for a
+	// dry run and for rows that provisioned nothing. WelcomeErrorCode says why one failed.
+	WelcomeStatus    MemberWelcomeStatus
+	WelcomeErrorCode string
 }
 
 // MemberImportResult counts the rows by outcome.
@@ -85,7 +89,11 @@ type MemberImportResult struct {
 	Created int
 	Skipped int
 	Failed  int
-	Rows    []MemberImportRowResult
+	// WelcomeQueued counts rows whose welcome mail was queued now; WelcomeFailed counts rows whose
+	// welcome mail failed or was suppressed. Neither changes a row's status.
+	WelcomeQueued int
+	WelcomeFailed int
+	Rows          []MemberImportRowResult
 }
 
 // preparedMemberRow is a roster row after the checks that load nothing.
@@ -144,6 +152,15 @@ func (s *service) ImportMembers(ctx context.Context, viewer domain.OrganizationC
 		if outcome.Address == "" {
 			outcome.Address = row.address()
 		}
+		if !input.DryRun {
+			s.welcomeImportedMember(ctx, viewer, row, &outcome)
+			switch outcome.WelcomeStatus {
+			case MemberWelcomeQueued:
+				result.WelcomeQueued++
+			case MemberWelcomeFailed, MemberWelcomeSuppressed:
+				result.WelcomeFailed++
+			}
+		}
 		switch outcome.Status {
 		case MemberImportValid:
 			result.Valid++
@@ -159,6 +176,21 @@ func (s *service) ImportMembers(ctx context.Context, viewer domain.OrganizationC
 		result.Rows = append(result.Rows, outcome)
 	}
 	return result, nil
+}
+
+// welcomeImportedMember sends the welcome mail of a row whose mailbox is provisioned: invited,
+// created, or already invited by an earlier upload, which completes a welcome that failed then.
+// The mail goes to the row's email, the address the person reads until they first sign in. A
+// welcome failure is reported on the row and never changes its status.
+func (s *service) welcomeImportedMember(ctx context.Context, viewer domain.OrganizationContext, row preparedMemberRow, outcome *MemberImportRowResult) {
+	provisioned := outcome.Status == MemberImportInvited || outcome.Status == MemberImportCreated ||
+		(outcome.Status == MemberImportSkipped && outcome.SkipReason == SkipAlreadyInvited)
+	if !provisioned || outcome.MailboxID == 0 {
+		return
+	}
+	mailbox := &domain.Mailbox{ID: outcome.MailboxID, OrganizationID: viewer.OrganizationID, Address: outcome.Address, DisplayName: row.displayName}
+	welcome := s.welcomeMember(ctx, viewer, mailbox, outcome.Email, row.displayName)
+	outcome.WelcomeStatus, outcome.WelcomeErrorCode = welcome.Status, welcome.ErrorCode
 }
 
 // importMemberRow reconciles one row. counted carries the organization's mailboxes plus the

@@ -79,6 +79,7 @@ import type {
   SendMailMessageInput,
 } from '@/features/mailbox/types';
 import { mockTransactionalStore } from '@/features/developer/server/mock-transactional-store';
+import { mockMemberWelcomeStore } from '@/features/mailbox/server/mock-member-welcome-store';
 import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import {
@@ -807,6 +808,8 @@ export class MockMailboxStore {
       created: 0,
       skipped: 0,
       failed: 0,
+      welcome_mails_queued: 0,
+      welcome_mails_failed: 0,
       rows: [],
     };
 
@@ -817,6 +820,16 @@ export class MockMailboxStore {
         status: MemberImportRowResult['status'],
         extra: Partial<MemberImportRowResult> = {}
       ) => {
+        const mailboxId = extra.mailbox_id ?? null;
+        const provisioned =
+          !input.dryRun &&
+          mailboxId !== null &&
+          (status === 'invited' ||
+            status === 'created' ||
+            (status === 'skipped' && extra.skip_reason === 'already_invited'));
+        const welcome = provisioned
+          ? mockMemberWelcomeStore.welcome(organizationId, mailboxId)
+          : null;
         result.rows.push({
           row: index + 1,
           email,
@@ -827,9 +840,12 @@ export class MockMailboxStore {
           mailbox_id: null,
           invitation_id: null,
           email_send_status: null,
+          welcome_mail_status: welcome,
+          welcome_mail_error_code: null,
           ...extra,
         });
         result[status] += 1;
+        if (welcome === 'queued') result.welcome_mails_queued += 1;
       };
       const fail = (code: string) => push('failed', { error_code: code });
 

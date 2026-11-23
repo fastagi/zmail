@@ -177,6 +177,11 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/mailbox-exports", h.ExportMailboxes).Name("mailbox_exports.index")
 		auth.POST("/member-imports", h.ImportMembers).Name("member_imports.store").
 			Middleware(middleware.BodyLimit(maxImportBodyBytes))
+		auth.GET("/member-welcome-mail-setting", h.GetMemberWelcomeSetting).Name("member_welcome_mail_setting.show")
+		auth.PUT("/member-welcome-mail-setting", h.UpdateMemberWelcomeSetting).Name("member_welcome_mail_setting.update").
+			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
+		auth.POST("/member-welcome-mail-previews", h.PreviewMemberWelcome).Name("member_welcome_mail_previews.store").
+			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
 
 		auth.GET("/mailboxes/:mailbox_id/members", h.ListMailboxMembers).
 			Name("mailboxes.members.index").WhereNumber("mailbox_id")

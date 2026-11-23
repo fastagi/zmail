@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { memberImportResultSchema } from '@/features/mailbox/schemas';
 import { MockMailboxStore } from '@/features/mailbox/server/mock-mailbox-store';
+import { mockMemberWelcomeStore } from '@/features/mailbox/server/mock-member-welcome-store';
 import type { MemberImportResult, MemberImportRowResult } from '@/features/mailbox/types';
 import { readRosterRows, ROSTER_IMPORT_TEMPLATE } from '@/features/mailbox/utils/roster-csv';
 import { MockOrganizationStore } from '@/features/organization/server/mock-organization-store';
@@ -71,6 +73,8 @@ function row(
     mailbox_id: null,
     invitation_id: null,
     email_send_status: null,
+    welcome_mail_status: null,
+    welcome_mail_error_code: null,
     ...extra,
   };
 }
@@ -86,6 +90,10 @@ function result(rows: MemberImportRowResult[], dryRun = false): MemberImportResu
     created: count('created'),
     skipped: count('skipped'),
     failed: count('failed'),
+    welcome_mails_queued: rows.filter(item => item.welcome_mail_status === 'queued').length,
+    welcome_mails_failed: rows.filter(
+      item => item.welcome_mail_status === 'failed' || item.welcome_mail_status === 'suppressed'
+    ).length,
     rows,
   };
 }
@@ -138,6 +146,44 @@ describe('rosterSummary', () => {
   });
 });
 
+describe('welcome email failures', () => {
+  it('reads an import result from an API without welcome mail as none sent', () => {
+    const legacy = {
+      ...result([row(1, 'invited', { mailbox_id: 11 })]),
+      welcome_mails_queued: undefined,
+      welcome_mails_failed: undefined,
+      rows: [
+        {
+          ...row(1, 'invited'),
+          welcome_mail_status: undefined,
+          welcome_mail_error_code: undefined,
+        },
+      ],
+    };
+    const parsed = memberImportResultSchema.parse(JSON.parse(JSON.stringify(legacy)));
+    expect(parsed).toMatchObject({ welcome_mails_queued: 0, welcome_mails_failed: 0 });
+    expect(parsed.rows[0]?.welcome_mail_status).toBeNull();
+  });
+
+  it('need attention and are recounted after a retry', () => {
+    const previous = result([
+      row(1, 'invited', { mailbox_id: 11, welcome_mail_status: 'failed' }),
+      row(2, 'invited', { mailbox_id: 12, welcome_mail_status: 'queued' }),
+    ]);
+    expect(rosterSummary(previous).attention).toBe(1);
+    const retried = result([
+      row(1, 'skipped', {
+        skip_reason: 'already_invited',
+        mailbox_id: 11,
+        welcome_mail_status: 'queued',
+      }),
+    ]);
+    const merged = mergeRetry(previous, [0], retried);
+    expect(merged).toMatchObject({ welcome_mails_queued: 2, welcome_mails_failed: 0 });
+    expect(rosterSummary(merged).attention).toBe(0);
+  });
+});
+
 describe('roster import mock', () => {
   const features = {
     broadcasts: true,
@@ -153,6 +199,7 @@ describe('roster import mock', () => {
       : ({ ok: false, error: 'not_found' } as const);
 
   function stores() {
+    mockMemberWelcomeStore.reset();
     const organization = new MockOrganizationStore({
       now: () => new Date('2026-11-23T10:00:00Z'),
       invitationToken: () => 'oinv_test.roster',
@@ -205,6 +252,8 @@ describe('roster import mock', () => {
       domain
     );
     if (!first.ok) throw new Error('import refused');
+    // Each new mailbox gets one welcome email.
+    expect(first.value).toMatchObject({ welcome_mails_queued: 2, welcome_mails_failed: 0 });
     expect(first.value.rows.map(item => [item.address, item.status, item.error_code])).toEqual([
       ['erin@news.example.com', 'invited', null],
       ['riley@news.example.com', 'created', null],
@@ -233,6 +282,7 @@ describe('roster import mock', () => {
       'already_invited',
       'already_member',
     ]);
+    expect(again.ok && again.value.rows[0]?.welcome_mail_status).toBe('already_sent');
 
     const joined = organization.acceptInvitation(
       { id: 'erin', email: 'erin+hr@gmail.com', name: 'Erin' },
@@ -341,6 +391,7 @@ describe('roster import dialog', () => {
             email: rows[0].email,
             mailbox_id: 11,
             email_send_status: 'accepted_by_provider',
+            welcome_mail_status: 'queued',
           }),
           row(2, 'failed', {
             email: 'bad',
@@ -411,6 +462,9 @@ describe('roster import dialog', () => {
     expect(toast.warning).toHaveBeenLastCalledWith(
       'Invited 1 person and reserved 1 mailbox for them. 0 existing members got a mailbox; 2 rows need attention.'
     );
+    expect(
+      screen.getByText('Welcome emails: 1 sent to new members, 0 could not be sent.')
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry 2 rows that need attention' }));
     await waitFor(() =>
