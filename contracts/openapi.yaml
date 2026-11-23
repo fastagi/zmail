@@ -15039,7 +15039,7 @@ components:
         type:
           $ref: '#/components/schemas/MailboxType'
         owner_user_id:
-          description: Required for a personal mailbox; must be absent for a shared one.
+          description: The owner of a personal mailbox; absent means the caller. Must be absent for a shared one.
           allOf:
             - $ref: '#/components/schemas/PositiveID'
         members:

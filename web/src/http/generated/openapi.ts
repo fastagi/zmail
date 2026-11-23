@@ -4316,7 +4316,7 @@ export interface components {
             local_part: string;
             /** @description Required for a shared mailbox, 1 to 100 distinct users; must be absent for a personal one. */
             members?: components["schemas"]["MailboxMemberRequest"][];
-            /** @description Required for a personal mailbox; must be absent for a shared one. */
+            /** @description The owner of a personal mailbox; absent means the caller. Must be absent for a shared one. */
             owner_user_id?: components["schemas"]["PositiveID"];
             type?: components["schemas"]["MailboxType"];
         };

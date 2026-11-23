@@ -522,8 +522,8 @@ mailbox (removed as a member, handed over as the former owner, or gone from the 
 their read records and stars for it, so access granted again starts with everything unread and
 nothing starred.
 
-Only owners and admins create mailboxes. At creation, a personal mailbox needs `owner_user_id` and
-no `members`; a shared one needs 1 to 100 `members`, each a different `user_id` with `view`,
+Only owners and admins create mailboxes. At creation, a personal mailbox takes an optional
+`owner_user_id` (without it the mailbox belongs to the caller) and no `members`; a shared one needs 1 to 100 `members`, each a different `user_id` with `view`,
 `send`, or `manage`, and no `owner_user_id`. Every owner and member must be a current member of the
 organization. Anything else, including a missing or unknown `type`, is
 `422 MAILBOX.ACCESS_INVALID`, and nothing is created. A member who tries is `403 PERMISSION.DENIED`.
