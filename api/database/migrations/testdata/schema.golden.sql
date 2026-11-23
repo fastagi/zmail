@@ -658,6 +658,10 @@ TABLE member_welcome_mails
   COLUMN recipient character varying(320) NOT NULL
   COLUMN transactional_message_id bigint
   COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN last_sent_at timestamp with time zone
+  COLUMN resend_count integer NOT NULL DEFAULT 0
+  COLUMN resend_window_started_at timestamp with time zone
+  COLUMN resend_window_count integer NOT NULL DEFAULT 0
 
 TABLE member_welcome_settings
   COLUMN organization_id bigint NOT NULL
@@ -1307,6 +1311,7 @@ CONSTRAINT mailboxes.mailboxes_external_mail_tenant_id_fkey FOREIGN KEY (externa
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
+CONSTRAINT member_welcome_mails.chk_member_welcome_mails_resends CHECK (((resend_count >= 0) AND (resend_window_count >= 0)))
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_message FOREIGN KEY (transactional_message_id) REFERENCES transactional_messages(id) ON DELETE SET NULL
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE

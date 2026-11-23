@@ -16,6 +16,9 @@ var mailboxErrorCodes = []struct {
 	code   string
 }{
 	{ErrMailboxNotFound, http.StatusNotFound, domain.CodeMailboxNotFound},
+	{ErrMemberWelcomeNotEligible, http.StatusConflict, domain.CodeMailWelcomeNotEligible},
+	{ErrMemberWelcomeDisabled, http.StatusConflict, domain.CodeMailWelcomeDisabled},
+	{ErrMemberWelcomeResendLimited, http.StatusTooManyRequests, domain.CodeMailWelcomeResendLimited},
 	{ErrMailboxAddressTaken, http.StatusConflict, domain.CodeMailboxAddressTaken},
 	{ErrMailboxAddressInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAddressInvalid},
 	{ErrMailboxAddressReserved, http.StatusUnprocessableEntity, domain.CodeMailboxAddressReserved},

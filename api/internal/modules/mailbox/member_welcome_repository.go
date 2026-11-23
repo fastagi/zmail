@@ -26,7 +26,8 @@ type MemberWelcomeSettingPO struct {
 
 func (MemberWelcomeSettingPO) TableName() string { return "member_welcome_settings" }
 
-// MemberWelcomeMailPO records the one welcome mail of a mailbox.
+// MemberWelcomeMailPO records a mailbox's welcome mail: one row per mailbox, pointing at the latest
+// welcome sent. The resend columns are owned by 2026_12_27_100000_add_member_welcome_resends.
 type MemberWelcomeMailPO struct {
 	ID                     uint `gorm:"primaryKey"`
 	OrganizationID         uint
@@ -34,6 +35,11 @@ type MemberWelcomeMailPO struct {
 	Recipient              string
 	TransactionalMessageID *uint
 	CreatedAt              time.Time
+	// LastSentAt is when the latest welcome was stored; nil means CreatedAt.
+	LastSentAt            *time.Time
+	ResendCount           int `gorm:"not null;default:0"`
+	ResendWindowStartedAt *time.Time
+	ResendWindowCount     int `gorm:"not null;default:0"`
 }
 
 func (MemberWelcomeMailPO) TableName() string { return "member_welcome_mails" }
@@ -46,6 +52,30 @@ type memberWelcomeStore interface {
 	ClaimMemberWelcome(ctx context.Context, organizationID, mailboxID uint, recipient string, at time.Time) (bool, error)
 	// LinkMemberWelcomeMessage points the mailbox's welcome record at its transactional message.
 	LinkMemberWelcomeMessage(ctx context.Context, mailboxID, messageID uint) error
+	// LockMemberWelcome locks the mailbox's welcome record for a resend, first creating it with
+	// recipient and at when the mailbox was never welcomed; created says it did. Call it in a
+	// transaction: a resend that fails rolls the new record back.
+	LockMemberWelcome(ctx context.Context, organizationID, mailboxID uint, recipient string, at time.Time) (MemberWelcomeMailPO, bool, error)
+	// SaveMemberWelcomeResend stores the record of a resend locked by LockMemberWelcome.
+	SaveMemberWelcomeResend(ctx context.Context, record MemberWelcomeMailPO) error
+	// ListWelcomeCandidates lists the organization's Zmail personal mailboxes whose owner has not
+	// left, oldest first, bounded by the mailbox ceiling; mailboxID > 0 narrows it to one.
+	ListWelcomeCandidates(ctx context.Context, organizationID, mailboxID uint) ([]*domain.Mailbox, error)
+	// ListMemberWelcomeDeliveries reads the latest welcome of each welcomed mailbox of the
+	// organization with its send log state; mailboxID > 0 narrows it to one.
+	ListMemberWelcomeDeliveries(ctx context.Context, organizationID, mailboxID uint) ([]memberWelcomeDelivery, error)
+}
+
+// memberWelcomeDelivery is a mailbox's welcome record joined with its latest message; the message
+// columns are nil once the message is past retention.
+type memberWelcomeDelivery struct {
+	MailboxID     uint
+	CreatedAt     time.Time
+	LastSentAt    *time.Time
+	ResendCount   int
+	MessageStatus *string
+	FailureCode   *string
+	SentAt        *time.Time
 }
 
 var _ memberWelcomeStore = (*repository)(nil)
@@ -110,6 +140,86 @@ func (r *repository) LinkMemberWelcomeMessage(ctx context.Context, mailboxID, me
 	}
 	return r.conn(ctx).Model(&MemberWelcomeMailPO{}).Where("mailbox_id = ?", mailboxID).
 		Update("transactional_message_id", messageID).Error
+}
+
+func (r *repository) LockMemberWelcome(
+	ctx context.Context,
+	organizationID, mailboxID uint,
+	recipient string,
+	at time.Time,
+) (MemberWelcomeMailPO, bool, error) {
+	if r.db == nil {
+		return MemberWelcomeMailPO{}, false, domain.ErrServiceUnavailable
+	}
+	inserted := r.conn(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "mailbox_id"}},
+		DoNothing: true,
+	}).Create(&MemberWelcomeMailPO{OrganizationID: organizationID, MailboxID: mailboxID, Recipient: recipient, CreatedAt: at})
+	if inserted.Error != nil {
+		return MemberWelcomeMailPO{}, false, inserted.Error
+	}
+	var record MemberWelcomeMailPO
+	err := r.conn(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("mailbox_id = ? AND organization_id = ?", mailboxID, organizationID).Take(&record).Error
+	if err != nil {
+		return MemberWelcomeMailPO{}, false, err
+	}
+	return record, inserted.RowsAffected == 1, nil
+}
+
+func (r *repository) SaveMemberWelcomeResend(ctx context.Context, record MemberWelcomeMailPO) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Model(&MemberWelcomeMailPO{}).Where("id = ?", record.ID).Updates(map[string]any{
+		"recipient":                record.Recipient,
+		"transactional_message_id": record.TransactionalMessageID,
+		"last_sent_at":             record.LastSentAt,
+		"resend_count":             record.ResendCount,
+		"resend_window_started_at": record.ResendWindowStartedAt,
+		"resend_window_count":      record.ResendWindowCount,
+	}).Error
+}
+
+func (r *repository) ListWelcomeCandidates(ctx context.Context, organizationID, mailboxID uint) ([]*domain.Mailbox, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	query := r.conn(ctx).
+		Where("organization_id = ? AND type = ? AND origin <> ? AND owner_left_at IS NULL",
+			organizationID, string(domain.MailboxTypePersonal), string(domain.MailboxOriginConnected))
+	if mailboxID > 0 {
+		query = query.Where("id = ?", mailboxID)
+	}
+	var rows []MailboxPO
+	if err := query.Order("id asc").Limit(domain.MailboxesPerOrganizationCeiling).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	mailboxes := make([]*domain.Mailbox, 0, len(rows))
+	for i := range rows {
+		mailboxes = append(mailboxes, rows[i].toDomain())
+	}
+	return mailboxes, nil
+}
+
+func (r *repository) ListMemberWelcomeDeliveries(ctx context.Context, organizationID, mailboxID uint) ([]memberWelcomeDelivery, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	query := r.conn(ctx).Table("member_welcome_mails AS w").
+		Select(`w.mailbox_id, w.created_at, w.last_sent_at, w.resend_count,
+			t.status AS message_status, t.failure_code, t.sent_at`).
+		Joins("JOIN mailboxes AS m ON m.id = w.mailbox_id AND m.deleted_at IS NULL").
+		Joins("LEFT JOIN transactional_messages AS t ON t.id = w.transactional_message_id").
+		Where("w.organization_id = ?", organizationID)
+	if mailboxID > 0 {
+		query = query.Where("w.mailbox_id = ?", mailboxID)
+	}
+	var rows []memberWelcomeDelivery
+	if err := query.Limit(domain.MailboxesPerOrganizationCeiling).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (po MemberWelcomeSettingPO) toDomain() MemberWelcomeSetting {
