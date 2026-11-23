@@ -310,6 +310,42 @@ describe('mail broadcasts console', () => {
     ).toBeInTheDocument();
   });
 
+  it('keeps a clean finished broadcast to the counts that matter', () => {
+    state.broadcast.data = broadcast({
+      id: 9,
+      name: 'Launch',
+      status: 'sent',
+      counts: counts({ total: 3, sent: 3 }),
+    });
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Launch' }));
+
+    const stats = screen.getByTestId('broadcast-stats');
+    for (const label of ['Queue progress', 'Send success rate', 'Recipients', 'Sent']) {
+      expect(within(stats).getByText(label)).toBeInTheDocument();
+    }
+    for (const label of ['Failed', 'Skipped', 'Pending', 'Canceled', 'Bounced', 'Spam reports']) {
+      expect(within(stats).queryByText(label)).not.toBeInTheDocument();
+    }
+    expect(screen.getByText('No failures, bounces, or spam reports.')).toBeInTheDocument();
+  });
+
+  it('shows a count once it is not zero', () => {
+    state.broadcast.data = broadcast({
+      id: 9,
+      name: 'Launch',
+      status: 'sent',
+      counts: counts({ total: 3, sent: 3, bounced: 1 }),
+    });
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Launch' }));
+
+    const stats = screen.getByTestId('broadcast-stats');
+    expect(within(stats).getByText('Bounced').nextElementSibling).toHaveTextContent('1');
+    expect(within(stats).queryByText('Spam reports')).not.toBeInTheDocument();
+    expect(screen.queryByText('No failures, bounces, or spam reports.')).not.toBeInTheDocument();
+  });
+
   it('shows progress, a paused send, recipients, and cancels a running broadcast', async () => {
     state.broadcast.data = broadcast({
       id: 9,
@@ -642,7 +678,17 @@ function domain(broadcastsEnabled: boolean) {
 }
 
 function counts(overrides: Record<string, number> = {}) {
-  return { total: 0, pending: 0, sent: 0, failed: 0, skipped: 0, canceled: 0, ...overrides };
+  return {
+    total: 0,
+    pending: 0,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+    canceled: 0,
+    bounced: 0,
+    complained: 0,
+    ...overrides,
+  };
 }
 
 function broadcast(overrides: Record<string, unknown> = {}) {

@@ -1292,18 +1292,26 @@ function BroadcastDetail({
           value / total
         )
       : '—';
+  // The core counts always show; the rest only once they are not zero (pending also while it
+  // runs), so a clean finished broadcast is not a wall of zeros on a phone.
+  const optionalStats: [string, number, boolean][] = [
+    [t('broadcasts.failed'), counts.failed, false],
+    [t('broadcasts.skipped'), counts.skipped, false],
+    [t('broadcasts.pending'), counts.pending, running],
+    [t('broadcasts.canceledCount'), counts.canceled, false],
+    [t('broadcasts.bounced'), counts.bounced, false],
+    [t('broadcasts.complained'), counts.complained, false],
+  ];
   const stats: [string, number | string][] = [
     [t('broadcasts.queueProgress'), percentage(counts.total - counts.pending, counts.total)],
     [t('broadcasts.sendSuccessRate'), percentage(counts.sent, attempted)],
     [t('broadcasts.total'), counts.total],
     [t('broadcasts.sent'), counts.sent],
-    [t('broadcasts.failed'), counts.failed],
-    [t('broadcasts.skipped'), counts.skipped],
-    [t('broadcasts.pending'), counts.pending],
-    [t('broadcasts.canceledCount'), counts.canceled],
-    [t('broadcasts.bounced'), counts.bounced],
-    [t('broadcasts.complained'), counts.complained],
+    ...optionalStats
+      .filter(([, value, always]) => always || value > 0)
+      .map(([label, value]): [string, number] => [label, value]),
   ];
+  const clean = counts.sent > 0 && counts.failed + counts.bounced + counts.complained === 0;
 
   return (
     <div className="space-y-4">
@@ -1417,7 +1425,10 @@ function BroadcastDetail({
       {broadcast.safety_override ? (
         <p className="text-sm text-warning">{t('broadcasts.overrideNote')}</p>
       ) : null}
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+      <dl
+        data-testid="broadcast-stats"
+        className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5"
+      >
         {stats.map(([label, value]) => (
           <div key={label} className="rounded-md border px-3 py-2">
             <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -1425,6 +1436,9 @@ function BroadcastDetail({
           </div>
         ))}
       </dl>
+      {clean ? (
+        <p className="text-sm text-muted-foreground">{t('broadcasts.noProblems')}</p>
+      ) : null}
       {running ? <ProgressSummary broadcast={broadcast} /> : null}
       <Progress broadcast={broadcast} />
       <RecipientTable broadcastId={broadcast.id} counts={counts} live={running} />
