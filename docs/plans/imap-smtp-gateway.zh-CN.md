@@ -1,7 +1,7 @@
 # IMAP/SMTP 网关：产品与技术方案
 
 2026-11-23 · 草案，待负责人拍板
-上游文档：[external-accounts-and-clients.zh-CN.md](external-accounts-and-clients.zh-CN.md) §4.2「B：客户端」中的 IMAP + SMTP 网关（该文档排为 P2，本文按"客户端 P1"展开）。
+上游文档：`external-accounts-and-clients.zh-CN.md`（尚未合入本仓库） §4.2「B：客户端」中的 IMAP + SMTP 网关（该文档排为 P2，本文按"客户端 P1"展开）。
 代码依据：`origin/main` `4a1d3105`（本工作树落后于 main，引用的文件以 main 为准）。
 本文只是方案，不包含代码、DNS、端口或部署变更。
 
@@ -467,27 +467,27 @@ Thunderbird 按以下顺序查找[^tb-ac]：本地 ISP 文件 → `https://autoc
 
 来源（访问日期均为 2026-11-23）：
 
-[^fm-app]: [Fastmail：App passwords](https://www.fastmail.help/hc/articles/360058752854)
-[^fm-blog]: [Fastmail：What's up with app passwords?](https://www.fastmail.com/blog/whats-up-with-app-passwords/)
-[^fm-jmap]: [Fastmail API 文档（JMAP）](https://fastmail.com/dev/)
-[^fm-ios]: [Fastmail：Set up iOS devices](https://www.fastmail.help/hc/en-us/articles/7908267139215)
-[^g-lsa]: [Google Workspace：Transition from less secure apps to OAuth](https://knowledge.workspace.google.com/admin/sync/transition-from-less-secure-apps-to-oauth)
-[^g-imap]: [Google Workspace：Turn POP & IMAP on or off for users](https://support.google.com/a/answer/105694)
-[^ms-basic]: [Microsoft Learn：Deprecation of Basic authentication in Exchange Online](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-basic-authentication-exchange-online)
-[^ms-smtp]: [Microsoft Exchange Team：Updated SMTP AUTH Basic Authentication deprecation timeline](https://techcommunity.microsoft.com/blog/Exchange/updated-exchange-online-smtp-auth-basic-authentication-deprecation-timeline/4489835)
-[^ms-cloud]: [Microsoft：Sync your account in Outlook to the Microsoft Cloud](https://support.microsoft.com/en-us/outlook/getstarted/sync-your-account-in-outlook-to-the-microsoft-cloud)
-[^ms-ad]: [Microsoft：Outlook 2016 implementation of Autodiscover](https://support.microsoft.com/en-us/help/3211279)
-[^ad-srv]: [DirectAdmin：Autodiscover（含新版 Outlook 所需的 SRV 记录）](https://docs.directadmin.com/other-hosting-services/email/autodiscover.html)
-[^zoho-asp]: [Zoho：Application Specific Password](https://help.zoho.com/portal/en/kb/mail/access-from-external-mail-clients/articles/authentication-error-during-outlook-iphone-imap-configuration)
-[^zoho-imap]: [Zoho Mail：IMAP Access](https://www.zoho.com/mail/help/faq/imap-access1.html)
-[^zoho-ad]: [Zoho Mail：Autodiscovery Settings](https://www.zoho.com.cn/mail/help/adminconsole/autodiscovery-settings.html)
-[^exmail]: [腾讯企业邮客户端设置](https://open.work.weixin.qq.com/help2/pc/19886)
-[^ali-3p]: [阿里邮箱：三方客户端访问与安全设置（含腾讯企业邮客户端专用密码说明）](https://help.aliyun.com/zh/document_detail/606337.html)
-[^fs]: [飞书邮箱：通过第三方客户端登录](https://feishu.cn/hc/en-US/articles/902478147400-log-in-to-feishu-mail-through-a-third-party-email-client)
-[^ali-fs]: [阿里邮箱：原飞书邮箱用户搬家须知（管理员开启第三方客户端、三方客户端安全密码）](https://www.alibabacloud.com/help/zh/alibaba-mail/latest/precautions-for-users-of-original-flying-book-mailbox-moving-1)
-[^ali-163]: [阿里邮箱：网易企业邮迁移说明（客户端授权密码）](https://help.aliyun.com/document_detail/444380.html)
-[^goimap]: [pkg.go.dev：github.com/emersion/go-imap/v2/imapserver](https://pkg.go.dev/github.com/emersion/go-imap/v2/imapserver)
-[^spectrum]: [Cloudflare Spectrum 文档](https://developers.cloudflare.com/spectrum/)
-[^apple-mail]: [Apple Developer：Mail payload（com.apple.mail.managed）](https://developer.apple.com/documentation/devicemanagement/mail)
-[^tb-ac]: [Mozilla Wiki：Thunderbird Autoconfiguration](https://wiki.mozilla.org/Thunderbird:Autoconfiguration)
-[^rfc6186]: [RFC 6186：Use of SRV Records for Locating Email Submission/Access Services](https://www.rfc-editor.org/rfc/rfc6186)；隐式 TLS 端口见 [RFC 8314](https://www.rfc-editor.org/rfc/rfc8314)
+[^fm-app]: https://www.fastmail.help/hc/articles/360058752854 （Fastmail：App passwords）
+[^fm-blog]: https://www.fastmail.com/blog/whats-up-with-app-passwords/ （Fastmail：What's up with app passwords?）
+[^fm-jmap]: https://fastmail.com/dev/ （Fastmail API 文档（JMAP））
+[^fm-ios]: https://www.fastmail.help/hc/en-us/articles/7908267139215 （Fastmail：Set up iOS devices）
+[^g-lsa]: https://knowledge.workspace.google.com/admin/sync/transition-from-less-secure-apps-to-oauth （Google Workspace：Transition from less secure apps to OAuth）
+[^g-imap]: https://support.google.com/a/answer/105694 （Google Workspace：Turn POP & IMAP on or off for users）
+[^ms-basic]: https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-basic-authentication-exchange-online （Microsoft Learn：Deprecation of Basic authentication in Exchange Online）
+[^ms-smtp]: https://techcommunity.microsoft.com/blog/Exchange/updated-exchange-online-smtp-auth-basic-authentication-deprecation-timeline/4489835 （Microsoft Exchange Team：Updated SMTP AUTH Basic Authentication deprecation timeline）
+[^ms-cloud]: https://support.microsoft.com/en-us/outlook/getstarted/sync-your-account-in-outlook-to-the-microsoft-cloud （Microsoft：Sync your account in Outlook to the Microsoft Cloud）
+[^ms-ad]: https://support.microsoft.com/en-us/help/3211279 （Microsoft：Outlook 2016 implementation of Autodiscover）
+[^ad-srv]: https://docs.directadmin.com/other-hosting-services/email/autodiscover.html （DirectAdmin：Autodiscover（含新版 Outlook 所需的 SRV 记录））
+[^zoho-asp]: https://help.zoho.com/portal/en/kb/mail/access-from-external-mail-clients/articles/authentication-error-during-outlook-iphone-imap-configuration （Zoho：Application Specific Password）
+[^zoho-imap]: https://www.zoho.com/mail/help/faq/imap-access1.html （Zoho Mail：IMAP Access）
+[^zoho-ad]: https://www.zoho.com.cn/mail/help/adminconsole/autodiscovery-settings.html （Zoho Mail：Autodiscovery Settings）
+[^exmail]: https://open.work.weixin.qq.com/help2/pc/19886 （腾讯企业邮客户端设置）
+[^ali-3p]: https://help.aliyun.com/zh/document_detail/606337.html （阿里邮箱：三方客户端访问与安全设置（含腾讯企业邮客户端专用密码说明））
+[^fs]: https://feishu.cn/hc/en-US/articles/902478147400-log-in-to-feishu-mail-through-a-third-party-email-client （飞书邮箱：通过第三方客户端登录）
+[^ali-fs]: https://www.alibabacloud.com/help/zh/alibaba-mail/latest/precautions-for-users-of-original-flying-book-mailbox-moving-1 （阿里邮箱：原飞书邮箱用户搬家须知（管理员开启第三方客户端、三方客户端安全密码））
+[^ali-163]: https://help.aliyun.com/document_detail/444380.html （阿里邮箱：网易企业邮迁移说明（客户端授权密码））
+[^goimap]: https://pkg.go.dev/github.com/emersion/go-imap/v2/imapserver （pkg.go.dev：github.com/emersion/go-imap/v2/imapserver）
+[^spectrum]: https://developers.cloudflare.com/spectrum/ （Cloudflare Spectrum 文档）
+[^apple-mail]: https://developer.apple.com/documentation/devicemanagement/mail （Apple Developer：Mail payload（com.apple.mail.managed））
+[^tb-ac]: https://wiki.mozilla.org/Thunderbird:Autoconfiguration （Mozilla Wiki：Thunderbird Autoconfiguration）
+[^rfc6186]: https://www.rfc-editor.org/rfc/rfc6186 （RFC 6186：Use of SRV Records for Locating Email Submission/Access Services；隐式 TLS 端口见 RFC 8314 https://www.rfc-editor.org/rfc/rfc8314）
