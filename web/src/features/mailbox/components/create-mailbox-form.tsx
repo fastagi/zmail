@@ -53,6 +53,7 @@ export function CreateMailboxForm({
   mailboxCount,
   fixedType,
   initialDomain,
+  initialType,
   onCreated,
 }: {
   domain: MailboxDomain;
@@ -67,6 +68,8 @@ export function CreateMailboxForm({
   fixedType?: MailboxType;
   /** The address domain chosen when the form opens; defaults to `domain`. */
   initialDomain?: string;
+  /** The type chosen when the form opens; defaults to shared. */
+  initialType?: MailboxType;
   onCreated: (mailbox: Mailbox) => void;
 }) {
   const t = useT('mailbox');
@@ -77,7 +80,7 @@ export function CreateMailboxForm({
   const [localPart, setLocalPart] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [addressDomain, setAddressDomain] = useState(initialDomain ?? domain.domain);
-  const [chosenType, setType] = useState<MailboxType>('shared');
+  const [chosenType, setType] = useState<MailboxType>(initialType ?? 'shared');
   const type = fixedType ?? chosenType;
   const [owner, setOwner] = useState('');
   const [nextKey, setNextKey] = useState(2);

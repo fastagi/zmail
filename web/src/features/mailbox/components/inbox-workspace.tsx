@@ -173,6 +173,7 @@ const TRIAGE_PARAM = 'triage';
 const DATE_PARAM = 'date';
 /** `new=mailbox`: the team was just created, so mailbox creation opens at once. */
 const NEW_PARAM = 'new';
+const NEW_TYPE_PARAM = 'type';
 
 // Only someone without a team sees it, so it loads on demand.
 const TeamSetupCard = lazy(async () => {
@@ -530,6 +531,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const returnFocus = useRef<HTMLElement | null>(null);
   const [paletteMounted, setPaletteMounted] = useState(false);
   const [managingMailboxes, setManagingMailboxes] = useState(false);
+  const [newMailboxType, setNewMailboxType] = useState<'personal' | undefined>(undefined);
   const paneActions = useRef<InboxPaneActions | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   /** `j` on the last loaded row asked for the next page: that row, whose successor opens next. */
@@ -546,7 +548,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     [pathname, router]
   );
   const dropNewParam = useCallback(
-    () => replaceParams(next => next.delete(NEW_PARAM)),
+    () =>
+      replaceParams(next => {
+        next.delete(NEW_PARAM);
+        next.delete(NEW_TYPE_PARAM);
+      }),
     [replaceParams]
   );
   // Back from signing in again after a refused send: the composer opens on the kept draft.
@@ -555,12 +561,17 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   // `new=mailbox` from the console home's setup guide: open mailbox creation here too, once the
   // team has mailboxes (without any, the empty state's own action opens it).
   const createRequested = searchParams.get(NEW_PARAM) === 'mailbox';
+  // `type=personal` comes with it from "give colleagues a mailbox".
+  const requestedType = searchParams.get(NEW_TYPE_PARAM) === 'personal' ? 'personal' : undefined;
   const hasReadable = mailboxList?.some(mailbox => mailbox.access.view) ?? false;
   useEffect(() => {
     if (!createRequested || !hasReadable) return;
-    if (canManage) setManagingMailboxes(true);
+    if (canManage) {
+      setNewMailboxType(requestedType);
+      setManagingMailboxes(true);
+    }
     dropNewParam();
-  }, [createRequested, hasReadable, canManage, dropNewParam]);
+  }, [createRequested, hasReadable, canManage, requestedType, dropNewParam]);
   useEffect(() => {
     if (!resumeCompose || !mailboxList) return;
     const sendable = mailboxList.filter(canComposeFrom);
@@ -1291,7 +1302,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       {canManage ? (
         <ManageMailboxesFlow
           open={managingMailboxes}
-          onOpenChange={setManagingMailboxes}
+          initialType={newMailboxType}
+          onOpenChange={open => {
+            setManagingMailboxes(open);
+            if (!open) setNewMailboxType(undefined);
+          }}
           mailboxes={mailboxes.data}
           onRefresh={() => void mailboxes.refetch()}
         />
@@ -1394,8 +1409,10 @@ function ManageMailboxesFlow({
   onOpenChange,
   mailboxes,
   onRefresh,
+  initialType,
 }: {
   open: boolean;
+  initialType?: 'personal';
   onOpenChange: (open: boolean) => void;
   mailboxes: Mailbox[];
   onRefresh: () => void;
@@ -1415,6 +1432,7 @@ function ManageMailboxesFlow({
           mailboxes={mailboxes}
           domain={domain}
           domains={domainList}
+          initialType={initialType}
           onClose={() => onOpenChange(false)}
           onCreated={() => onOpenChange(false)}
           onOpenAccess={mailbox => {
