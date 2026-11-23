@@ -101,3 +101,39 @@ type TOTPCodeRequest struct {
 type TOTPRecoveryCodesResponse struct {
 	RecoveryCodes []string `json:"recovery_codes"`
 }
+
+// AuthProvidersResponse lists which external sign-in providers the instance offers.
+type AuthProvidersResponse struct {
+	Google AuthProviderStatus `json:"google"`
+}
+
+// AuthProviderStatus says whether one external sign-in provider is configured.
+type AuthProviderStatus struct {
+	Enabled bool `json:"enabled"`
+}
+
+// GoogleAuthorizationRequest starts "Sign in with Google". RedirectURI is the browser callback
+// registered with the OAuth client; ReturnURL is the same-origin path to land on afterwards.
+type GoogleAuthorizationRequest struct {
+	RedirectURI string `json:"redirect_uri" binding:"required,max=2048"`
+	ReturnURL   string `json:"return_url" binding:"omitempty,max=2048"`
+}
+
+// GoogleAuthorizationResponse is where to send the browser and the state to bind to it.
+type GoogleAuthorizationResponse struct {
+	AuthorizationURL string `json:"authorization_url"`
+	State            string `json:"state"`
+	ExpiresIn        int64  `json:"expires_in"`
+}
+
+// GoogleSessionRequest completes "Sign in with Google" with what Google sent back.
+type GoogleSessionRequest struct {
+	State string `json:"state" binding:"required,max=128"`
+	Code  string `json:"code" binding:"required,max=2048"`
+}
+
+// GoogleSessionResponse is a login response plus the checked return URL stored at the start.
+type GoogleSessionResponse struct {
+	UserLoginResponse
+	ReturnURL string `json:"return_url"`
+}

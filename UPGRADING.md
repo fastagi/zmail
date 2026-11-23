@@ -11,6 +11,46 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Sign in with Google
+
+### Medium — Migration `2026_12_29_090000_add_user_identities`
+
+It adds the nullable column `users.email_verified_at` and two new tables, `user_identities` (one row
+per linked Google subject, unique on `(provider, subject)`, deleted with its account) and
+`oauth_sign_in_states` (pending sign-ins, 10 minutes each). Adding a nullable column without a
+default only changes the catalog, but the `ALTER TABLE` takes a short `ACCESS EXCLUSIVE` lock on
+`users`, which every authenticated request reads; run it off-peak with a `lock_timeout` (for example
+`SET lock_timeout = '5s'`) and retry if it times out. The new tables are created empty and lock
+nothing else. Down drops both tables and the column: Google links and pending sign-ins are lost,
+and linked accounts keep signing in with a password or password reset.
+
+### Medium — Configure the Google OAuth client to turn it on
+
+"Continue with Google" stays hidden until the API has `GOOGLE_OAUTH_CLIENT_ID` and
+`GOOGLE_OAUTH_CLIENT_SECRET` (set both or neither; one alone fails startup). In Google Cloud Console
+create an OAuth client of type "Web application" and add the authorized redirect URI
+`<NEXT_PUBLIC_APP_URL>/api/auth/google/callback` (for example
+`https://mail.example.com/api/auth/google/callback`, and `http://localhost:3000/api/auth/google/callback`
+for local development). The consent screen needs only the `openid`, `email`, and `profile` scopes.
+The self-hosting compose file passes both variables to the API. This client is separate from
+`EXTERNAL_MAIL_GMAIL_CLIENT_*`; reusing one Google client for both works when it lists both
+redirect URIs.
+
+### Medium — New routes and error codes
+
+`GET /v1/auth/providers`, `POST /v1/auth/google/authorizations`, and `POST /v1/auth/google/sessions`
+are public; the two Google routes share the login per-IP quota. New error codes:
+`AUTH.GOOGLE_NOT_CONFIGURED`, `AUTH.GOOGLE_STATE_INVALID`, `AUTH.GOOGLE_EMAIL_UNVERIFIED`,
+`AUTH.GOOGLE_REGISTRATION_CLOSED`, and `AUTH.GOOGLE_SIGN_IN_FAILED`. The Web adds
+`GET /api/auth/google` and `GET /api/auth/google/callback`. See "Sign in with Google" in
+`contracts/AUTHENTICATION.md`.
+
+### Low — `user.NewHandler` takes a `GoogleSignInService`
+
+`user.NewHandler` gains a final `GoogleSignInService` argument (the user service implements it; nil
+disables the routes' Google behavior), and `domain.User` gains `EmailVerifiedAt`, which stays out of
+JSON. A fork that builds the handler by hand or copies users field by field updates those call sites.
+
 ## Unreleased — Default mail domain
 
 ### High — Deploy the Web before the API

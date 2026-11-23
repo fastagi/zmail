@@ -97,6 +97,15 @@ Then run `docker compose up -d --wait` again. Copies of a disconnected account a
 `broadcast-worker` once `EXTERNAL_MAIL_REVOKED_RETENTION` (default `720h`) has passed, whether or
 not connectors are on.
 
+## Sign in with Google
+
+To offer "Continue with Google" on the sign-in and sign-up pages, create an OAuth client of type
+"Web application" in Google Cloud Console, add `https://<host>/api/auth/google/callback` as an
+authorized redirect URI, and set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in
+`.env`. With registration closed (the default here), only people who already have an account (same
+email) can use it. See "Sign in with Google" in
+[`contracts/AUTHENTICATION.md`](../../contracts/AUTHENTICATION.md).
+
 ## Backups
 
 `backup.sh` writes a `pg_dump` archive of the database, checked with `pg_restore --list`, and a

@@ -26,4 +26,9 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(domain.ErrRegistrationDisabled, http.StatusForbidden, response.ErrorCodeForbidden)
 	mapper.Register(domain.ErrEmailAlreadyExists, http.StatusConflict, domain.CodeEmailAlreadyExists)
 	mapper.Register(domain.ErrUsernameAlreadyExists, http.StatusConflict, domain.CodeUsernameAlreadyExists)
+	mapper.Register(domain.ErrGoogleNotConfigured, http.StatusServiceUnavailable, domain.CodeGoogleNotConfigured)
+	mapper.Register(domain.ErrGoogleStateInvalid, http.StatusBadRequest, domain.CodeGoogleStateInvalid)
+	mapper.Register(domain.ErrGoogleEmailUnverified, http.StatusForbidden, domain.CodeGoogleEmailUnverified)
+	mapper.Register(domain.ErrGoogleRegistrationClosed, http.StatusForbidden, domain.CodeGoogleRegistrationClosed)
+	mapper.Register(domain.ErrGoogleSignInFailed, http.StatusBadGateway, domain.CodeGoogleSignInFailed)
 }

@@ -38,6 +38,12 @@ const (
 	CodeRegistrationEmailCodeInvalid  = "AUTH.REGISTRATION_EMAIL_CODE_INVALID"
 	CodeRegistrationEmailCodeExpired  = "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED"
 
+	CodeGoogleNotConfigured      = "AUTH.GOOGLE_NOT_CONFIGURED"
+	CodeGoogleStateInvalid       = "AUTH.GOOGLE_STATE_INVALID"
+	CodeGoogleEmailUnverified    = "AUTH.GOOGLE_EMAIL_UNVERIFIED"
+	CodeGoogleRegistrationClosed = "AUTH.GOOGLE_REGISTRATION_CLOSED"
+	CodeGoogleSignInFailed       = "AUTH.GOOGLE_SIGN_IN_FAILED"
+
 	CodePermissionDenied            = "PERMISSION.DENIED"
 	CodePermissionUnknown           = "PERMISSION.UNKNOWN"
 	CodeAccessRoleNotFound          = "PERMISSION.ROLE_NOT_FOUND"

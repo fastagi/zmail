@@ -157,6 +157,141 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/auth/providers:
+    get:
+      operationId: listAuthenticationProviders
+      summary: Report which external sign-in providers are configured
+      description: Clients show a "Sign in with Google" button only when `google.enabled` is true.
+      tags:
+        - Authentication
+      security: []
+      responses:
+        '200':
+          description: The configured external sign-in providers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationProvidersResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/auth/google/authorizations:
+    post:
+      operationId: startGoogleSignIn
+      summary: Start a Google sign-in
+      description: Stores a pending sign-in for ten minutes (digests of the state and nonce, the PKCE
+        verifier, the redirect URI, and the checked return URL) and returns Google's authorization URL.
+        The caller binds `state` to the browser and sends it back with Google's code. A `return_url`
+        that is not a same-origin path (one leading `/`, not `//`, no scheme) becomes `/console`. Shares
+        the login per-IP quota.
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleAuthorizationRequest'
+      responses:
+        '201':
+          description: Where to send the browser and the state to bind to it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleAuthorizationResponse'
+        '400':
+          description: '`COMMON.INVALID_INPUT` when `redirect_uri` is not an absolute https URL (http is
+            accepted outside production) or carries credentials or a fragment.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          description: '`AUTH.GOOGLE_NOT_CONFIGURED` when `GOOGLE_OAUTH_CLIENT_ID` and
+            `GOOGLE_OAUTH_CLIENT_SECRET` are unset, or `COMMON.SERVICE_UNAVAILABLE`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/auth/google/sessions:
+    post:
+      operationId: completeGoogleSignIn
+      summary: Complete a Google sign-in and issue an opaque session credential
+      description: Consumes the state (once, whatever the outcome), exchanges the code with PKCE,
+        verifies the ID token (Google's keys, issuer, audience, expiry, nonce), and requires
+        `email_verified`. The account is found by Google subject, then by email (linking it and marking
+        the email verified), else created when registration is open. The session is issued exactly like
+        `POST /v1/login`. Shares the login per-IP quota.
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleSessionRequest'
+      responses:
+        '200':
+          description: A new server-side session, the signed-in user, and the stored return URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleSessionResponse'
+        '400':
+          description: '`AUTH.GOOGLE_STATE_INVALID` for an unknown, used, or expired state or an ID token
+            whose nonce does not match.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: '`AUTH.INVALID_CREDENTIALS` for a disabled account (the password login failure);
+            `AUTH.TOTP_REQUIRED` for an account with two-factor sign-in, which signs in with its password
+            and authenticator code instead.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: '`AUTH.GOOGLE_EMAIL_UNVERIFIED` when Google does not vouch for the email;
+            `AUTH.GOOGLE_REGISTRATION_CLOSED` when the Google account has no Zmail account and
+            `AUTH_REGISTRATION_ENABLED=false`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: '`USER.EMAIL_ALREADY_EXISTS` when the email belongs to a deleted account.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          description: '`AUTH.GOOGLE_SIGN_IN_FAILED` when Google refuses the code or its ID token fails
+            verification.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`AUTH.GOOGLE_NOT_CONFIGURED` or `COMMON.SERVICE_UNAVAILABLE`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/logout:
     post:
       operationId: logout
@@ -12189,6 +12324,11 @@ components:
         - AUTH.TOTP_INVALID
         - AUTH.TOTP_ALREADY_ENABLED
         - AUTH.TOTP_NOT_ENABLED
+        - AUTH.GOOGLE_NOT_CONFIGURED
+        - AUTH.GOOGLE_STATE_INVALID
+        - AUTH.GOOGLE_EMAIL_UNVERIFIED
+        - AUTH.GOOGLE_REGISTRATION_CLOSED
+        - AUTH.GOOGLE_SIGN_IN_FAILED
         - USER.NOT_FOUND
         - USER.EMAIL_ALREADY_EXISTS
         - USER.USERNAME_ALREADY_EXISTS
@@ -12857,6 +12997,117 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/AuthenticationSession'
+    AuthenticationProvidersResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - google
+          properties:
+            google:
+              type: object
+              additionalProperties: false
+              required:
+                - enabled
+              properties:
+                enabled:
+                  type: boolean
+    GoogleAuthorizationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - redirect_uri
+      properties:
+        redirect_uri:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: The browser callback registered with the Google OAuth client, for the Web adapter
+            `<NEXT_PUBLIC_APP_URL>/api/auth/google/callback`.
+        return_url:
+          type: string
+          maxLength: 2048
+          description: Same-origin path to land on after sign-in; anything else becomes `/console`.
+    GoogleAuthorizationResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - authorization_url
+            - state
+            - expires_in
+          properties:
+            authorization_url:
+              type: string
+              format: uri
+            state:
+              type: string
+              minLength: 1
+              maxLength: 128
+            expires_in:
+              type: integer
+              format: int64
+              minimum: 1
+              description: Seconds until the pending sign-in expires.
+    GoogleSessionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - code
+      properties:
+        state:
+          type: string
+          minLength: 1
+          maxLength: 128
+        code:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    GoogleSessionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          allOf:
+            - $ref: '#/components/schemas/AuthenticationSession'
+            - type: object
+              required:
+                - return_url
+              properties:
+                return_url:
+                  type: string
+                  description: The checked return URL stored when the sign-in started.
     AuthenticationLogoutResponse:
       type: object
       additionalProperties: false

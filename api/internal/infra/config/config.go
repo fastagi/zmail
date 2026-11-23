@@ -387,6 +387,15 @@ type AuthenticationConfig struct {
 	// TOTPEncryptionKey encrypts authenticator secrets (AUTH_TOTP_ENCRYPTION_KEY); empty turns
 	// two-factor enrollment off.
 	TOTPEncryptionKey string
+	// GoogleClientID and GoogleClientSecret are the OAuth client of "Sign in with Google"
+	// (GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET). Both empty turn it off.
+	GoogleClientID     string
+	GoogleClientSecret string
+}
+
+// GoogleSignInConfigured reports whether both halves of the Google OAuth client are set.
+func (c AuthenticationConfig) GoogleSignInConfigured() bool {
+	return strings.TrimSpace(c.GoogleClientID) != "" && strings.TrimSpace(c.GoogleClientSecret) != ""
 }
 
 type LogConfig struct {
@@ -767,6 +776,8 @@ func Load() (*Config, error) {
 			RegistrationDisabled:          !env.GetBool("AUTH_REGISTRATION_ENABLED", true),
 			RegistrationEmailCodeRequired: env.GetBool("AUTH_REGISTRATION_EMAIL_CODE_REQUIRED", true),
 			TOTPEncryptionKey:             env.Get("AUTH_TOTP_ENCRYPTION_KEY", ""),
+			GoogleClientID:                env.Get("GOOGLE_OAUTH_CLIENT_ID", ""),
+			GoogleClientSecret:            env.Get("GOOGLE_OAUTH_CLIENT_SECRET", ""),
 		},
 		Log: LogConfig{
 			Level:       env.Get("LOG_LEVEL", defaultLogLevel(isProd)),
@@ -1359,6 +1370,12 @@ func validateAuthenticationConfig(cfg AuthenticationConfig) error {
 	)
 	if key := strings.TrimSpace(cfg.TOTPEncryptionKey); key != "" && len(key) < MinMailboxSecretEncryptionKeyLength {
 		return fmt.Errorf("AUTH_TOTP_ENCRYPTION_KEY must be at least %d characters when set", MinMailboxSecretEncryptionKeyLength)
+	}
+	if (strings.TrimSpace(cfg.GoogleClientID) == "") != (strings.TrimSpace(cfg.GoogleClientSecret) == "") {
+		return fmt.Errorf("GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET are set together")
+	}
+	if len(cfg.GoogleClientID) > 255 || len(cfg.GoogleClientSecret) > 255 {
+		return fmt.Errorf("GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be at most 255 characters")
 	}
 
 	if cfg.SessionTTL < minSessionTTL || cfg.SessionTTL > maxSessionTTL {

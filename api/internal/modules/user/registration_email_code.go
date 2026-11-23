@@ -165,7 +165,9 @@ func (s *service) registerWithEmailCode(ctx context.Context, req *UserRegisterRe
 	err = s.emailCodes.RegisterWithEmailCode(
 		ctx, email, registrationEmailCodeHash(email, code), time.Now(), registrationEmailCodeMaxAttempts,
 		func(transactionContext context.Context) error {
-			created, createErr := s.createAccount(transactionContext, req, hashedPassword)
+			// The code proved the address.
+			verifiedAt := time.Now()
+			created, createErr := s.createAccount(transactionContext, req, hashedPassword, &verifiedAt)
 			user = created
 			return createErr
 		},
