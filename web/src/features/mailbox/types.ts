@@ -60,6 +60,7 @@ import type {
   mailBroadcastPageEnvelopeSchema,
   mailBroadcastRecipientPageEnvelopeSchema,
   mailBroadcastRecipientSchema,
+  mailBroadcastProgressSchema,
   mailBroadcastSchema,
   mailBroadcastSendInputSchema,
   mailBroadcastStatusSchema,
@@ -305,6 +306,7 @@ export interface InboxPage {
 export type MailBroadcastStatus = Infer<typeof mailBroadcastStatusSchema>;
 export type MailRecipientStatus = Infer<typeof mailRecipientStatusSchema>;
 export type MailBroadcast = Infer<typeof mailBroadcastSchema>;
+export type MailBroadcastProgress = Infer<typeof mailBroadcastProgressSchema>;
 export type MailBroadcastStatusOnly = Infer<typeof mailBroadcastStatusOnlySchema>;
 export type MailBroadcastRecipient = Infer<typeof mailBroadcastRecipientSchema>;
 export type MailBroadcastInput = Infer<typeof mailBroadcastInputSchema>;

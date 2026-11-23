@@ -22,7 +22,7 @@ func newTriageFixture(t *testing.T) *accessFixture {
 	settings := accessSettings()
 	settings.Triage = config.AITriageConfig{Provider: config.AITriageProviderFake, DailyCap: 100}
 	svc := NewService(repo, memberships, repo, repo, repo, repo,
-		nil, nil, nil, transport, &fakeNotifier{}, settings, nil, nil, nil)
+		nil, nil, nil, transport, &fakeNotifier{}, settings, nil, nil, nil, nil)
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 

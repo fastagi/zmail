@@ -251,6 +251,7 @@ func (s *service) SendBroadcast(ctx context.Context, viewer domain.OrganizationC
 		return nil, err
 	}
 	now := s.now().UTC()
+	broadcast.StartedBy = viewer.UserID
 	broadcast.Subject, broadcast.HTMLBody, broadcast.TextBody = template.Subject, template.HTMLBody, template.TextBody
 	switch {
 	case scheduledAt == nil || !scheduledAt.After(now):
@@ -471,6 +472,10 @@ func (s *service) DispatchBroadcasts(ctx context.Context, limit int) (int, error
 	}
 	if _, err := s.broadcasts.FinishBroadcasts(ctx, s.now().UTC(), stopReasonAllFailed); err != nil {
 		return processed, err
+	}
+	// Telling people is never a reason to stop sending.
+	if err := s.notifyBroadcastOutcomes(ctx); err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "mailbox broadcast notices skipped this round", slog.String("error", err.Error()))
 	}
 	return processed, nil
 }

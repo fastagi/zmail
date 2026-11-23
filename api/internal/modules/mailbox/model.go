@@ -755,8 +755,13 @@ type MailBroadcastPO struct {
 	ResumeAt         *time.Time
 	SafetyOverride   bool `gorm:"not null;default:false"`
 	CreatedBy        uint `gorm:"not null"`
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// StartedBy is who sent or scheduled the broadcast; null for a draft.
+	StartedBy *uint
+	// NoticeState is the last state its starter was told about; NoticeCount counts the notices.
+	NoticeState string `gorm:"size:32;not null;default:''"`
+	NoticeCount int    `gorm:"not null;default:0"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (MailBroadcastPO) TableName() string {
@@ -787,9 +792,17 @@ func (po *MailBroadcastPO) toDomain() *domain.MailBroadcast {
 		ResumeAt:         po.ResumeAt,
 		SafetyOverride:   po.SafetyOverride,
 		CreatedBy:        po.CreatedBy,
+		StartedBy:        derefUint(po.StartedBy),
 		CreatedAt:        po.CreatedAt,
 		UpdatedAt:        po.UpdatedAt,
 	}
+}
+
+func derefUint(value *uint) uint {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // MailBroadcastRecipientPO is the persistent object for one recipient of a broadcast.

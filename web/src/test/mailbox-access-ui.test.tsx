@@ -373,7 +373,9 @@ describe('mailbox access in the console', () => {
         ],
       })
     );
-    expect(toast.success).toHaveBeenCalledWith('Mailbox created');
+    expect(toast.success).toHaveBeenCalledWith('Mailbox created', {
+      description: 'It starts receiving mail in a minute or two.',
+    });
   });
 
   it('lists members, edits a permission, removes one, and adds one', async () => {

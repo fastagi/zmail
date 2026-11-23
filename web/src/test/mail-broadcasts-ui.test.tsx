@@ -28,6 +28,7 @@ const state = vi.hoisted(() => {
     broadcast: query(),
     recipients: query(),
     recipientCalls: [] as { status: unknown; live: boolean }[],
+    searchParams: new URLSearchParams(),
     save: mutation(),
     send: mutation(),
     cancel: mutation(),
@@ -41,7 +42,7 @@ vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
   usePathname: () => '/console/mail-broadcasts',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => state.searchParams,
 }));
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
@@ -166,6 +167,7 @@ describe('mail broadcasts console', () => {
       }),
     ]);
     state.recipientCalls = [];
+    state.searchParams = new URLSearchParams();
     for (const mutation of [state.save, state.send, state.cancel, state.remove]) {
       mutation.isPending = false;
       mutation.mutateAsync.mockReset();
@@ -183,7 +185,10 @@ describe('mail broadcasts console', () => {
   it('explains missing configuration and blocks new broadcasts', () => {
     state.domains.data = [domain(false)];
     renderBroadcasts();
-    expect(screen.getByText('Broadcasts are not set up')).toBeInTheDocument();
+    expect(screen.getByText("Broadcasts aren't available yet")).toBeInTheDocument();
+    expect(screen.getByText(/Ask them to finish broadcast setup/u)).toBeInTheDocument();
+    // Setup names belong to the administrator's runbook, not to the console.
+    expect(document.body.textContent).not.toMatch(/MAILBOX_|_SECRET|_URL/u);
     expect(screen.getByRole('button', { name: 'New broadcast' })).toBeDisabled();
   });
 
@@ -317,20 +322,30 @@ describe('mail broadcasts console', () => {
     renderBroadcasts();
     fireEvent.click(screen.getByRole('button', { name: 'Open Launch' }));
 
-    expect(
-      screen.getByText(/Paused: the organization reached its 24-hour send limit/u)
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('broadcast-limit')).toHaveTextContent(
+      /Waiting for the daily send limit.*nothing is lost.*once the 24-hour window has room/u
+    );
     expect(state.recipientCalls.at(-1)).toEqual({ status: undefined, live: true });
     expect(screen.getByText('Queue progress').nextElementSibling).toHaveTextContent('100%');
     expect(screen.getByText('Send success rate').nextElementSibling).toHaveTextContent('50%');
     const bob = screen.getByText('bob@example.com').closest('tr') as HTMLElement;
-    expect(within(bob).getByText('Bounced')).toBeInTheDocument();
-    expect(screen.getByText('provider.custom')).toBeInTheDocument();
+    expect(within(bob).getByText("The address doesn't exist or refuses mail")).toBeInTheDocument();
+    // A provider's own code is not translated: it says "Not sent" and keeps the code for support.
+    const eve = screen.getByText('eve@example.com').closest('tr') as HTMLElement;
+    expect(within(eve).getByText('Not sent')).toBeInTheDocument();
+    expect(within(eve).getByText('provider.custom')).toBeInTheDocument();
     const ann = screen.getByText('ann@example.com').closest('tr') as HTMLElement;
     expect(within(ann).getByText('Delivered')).toBeInTheDocument();
     expect(within(ann).getByText('Unsubscribed')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Recipient status'), { target: { value: 'failed' } });
+    const filters = screen.getByRole('tablist', { name: 'Recipient status' });
+    expect(within(filters).getByRole('tab', { name: 'All 3' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    // Canceled appears only once a recipient was canceled.
+    expect(within(filters).queryByRole('tab', { name: /Canceled/u })).not.toBeInTheDocument();
+    fireEvent.mouseDown(within(filters).getByRole('tab', { name: 'Failed 1' }));
     expect(state.recipientCalls.at(-1)).toEqual({ status: 'failed', live: true });
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel broadcast' }));
@@ -338,6 +353,87 @@ describe('mail broadcasts console', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel broadcast' }));
     await waitFor(() => expect(state.cancel.mutateAsync).toHaveBeenCalledWith(9));
     expect(toast.success).toHaveBeenCalledWith('Broadcast canceled');
+  });
+
+  it('shows the send rate, the estimated finish, and when the limit lets it continue', () => {
+    state.broadcast.data = broadcast({
+      id: 9,
+      name: 'Launch',
+      status: 'sending',
+      started_at: '2026-11-23T07:50:00Z',
+      counts: counts({ total: 500, sent: 200, pending: 300 }),
+      progress: {
+        rate_per_minute: 42.25,
+        rate_window_minutes: 10,
+        estimated_finish_at: '2026-11-24T08:39:00Z',
+        send_limit_pauses: true,
+        send_limit_resumes_at: '2026-11-24T08:00:00Z',
+        computed_at: '2026-11-23T08:00:00Z',
+      },
+    });
+    state.searchParams = new URLSearchParams('org=1&open=9');
+    renderBroadcasts();
+
+    // The notice link opened the broadcast directly.
+    expect(screen.getByRole('heading', { name: 'Launch' })).toBeInTheDocument();
+    expect(screen.getByTestId('broadcast-rate')).toHaveTextContent('42.3 per minute');
+    expect(screen.getByTestId('broadcast-eta')).toHaveTextContent(/Nov 24, 2026.*\(tomorrow\)/u);
+    expect(screen.getByTestId('broadcast-limit-ahead')).toHaveTextContent(
+      /The daily send limit will pause this broadcast before it finishes/u
+    );
+    expect(screen.getByText(/in-app notice and an email/u)).toBeInTheDocument();
+  });
+
+  it('says when a broadcast held by the limit continues', () => {
+    state.broadcast.data = broadcast({
+      id: 9,
+      name: 'Launch',
+      status: 'sending',
+      stop_reason: 'send_limit_reached',
+      counts: counts({ total: 5, sent: 3, pending: 2 }),
+      progress: {
+        rate_per_minute: null,
+        rate_window_minutes: 10,
+        estimated_finish_at: '2026-11-24T08:00:05Z',
+        send_limit_pauses: true,
+        send_limit_resumes_at: '2026-11-24T08:00:00Z',
+        computed_at: '2026-11-23T08:00:00Z',
+      },
+    });
+    state.searchParams = new URLSearchParams('open=9');
+    renderBroadcasts();
+    expect(screen.getByTestId('broadcast-limit')).toHaveTextContent(
+      /2 recipients are waiting and nothing is lost: sending continues on its own at about/u
+    );
+    expect(screen.queryByTestId('broadcast-limit-ahead')).not.toBeInTheDocument();
+    expect(screen.getByTestId('broadcast-rate')).toHaveTextContent('Measuring');
+  });
+
+  it('has no estimate while a person holds the broadcast', () => {
+    state.broadcast.data = broadcast({
+      id: 9,
+      name: 'Launch',
+      status: 'paused',
+      stop_reason: 'paused_by_owner',
+      counts: counts({ total: 5, sent: 3, pending: 2 }),
+      progress: {
+        rate_per_minute: null,
+        rate_window_minutes: 10,
+        estimated_finish_at: null,
+        send_limit_pauses: false,
+        send_limit_resumes_at: null,
+        computed_at: '2026-11-23T08:00:00Z',
+      },
+    });
+    state.searchParams = new URLSearchParams('open=9');
+    renderBroadcasts();
+    expect(screen.getByTestId('broadcast-eta')).toHaveTextContent('None while paused');
+  });
+
+  it('ignores an open parameter that is not an id', () => {
+    state.searchParams = new URLSearchParams('open=abc');
+    renderBroadcasts();
+    expect(screen.getByRole('button', { name: 'Open Launch' })).toBeInTheDocument();
   });
 
   // Issue #143: a resumed test wave waiting on its window is not shown as paused.

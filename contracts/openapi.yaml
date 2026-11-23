@@ -18838,6 +18838,7 @@ components:
         - resume_at
         - safety_override
         - counts
+        - progress
         - created_at
         - updated_at
       properties:
@@ -18907,10 +18908,57 @@ components:
             automatically again.
         counts:
           $ref: '#/components/schemas/MailBroadcastCounts'
+        progress:
+          description: Send rate and estimated finish, set when one scheduled, sending, or paused broadcast
+            is read; null in the listing, in answers to writes, and for any other status.
+          oneOf:
+            - $ref: '#/components/schemas/MailBroadcastProgress'
+            - type: 'null'
         created_at:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+    MailBroadcastProgress:
+      type: object
+      additionalProperties: false
+      required:
+        - rate_per_minute
+        - rate_window_minutes
+        - estimated_finish_at
+        - send_limit_pauses
+        - send_limit_resumes_at
+        - computed_at
+      properties:
+        rate_per_minute:
+          description: Recipients finished per minute over the rate window, two decimals; null when none
+            finished in it or the broadcast is not sending.
+          type:
+            - number
+            - 'null'
+          minimum: 0
+        rate_window_minutes:
+          type: integer
+          const: 10
+        estimated_finish_at:
+          description: When the last pending recipient should be finished; null when it cannot be told,
+            such as while a person or the health check holds the broadcast.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        send_limit_pauses:
+          type: boolean
+          description: The organization's 24-hour broadcast limit holds the broadcast now or will before
+            every pending recipient is sent.
+        send_limit_resumes_at:
+          description: When the broadcast limit has room again; null when send_limit_pauses is false.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        computed_at:
           type: string
           format: date-time
     MailBroadcastResponse:

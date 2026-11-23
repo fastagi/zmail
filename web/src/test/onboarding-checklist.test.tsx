@@ -149,7 +149,7 @@ describe('setup guide on the console home', () => {
     expect(mailbox).toHaveAttribute('data-state', 'current');
     expect(within(mailbox).getByRole('link', { name: /@acme\.com/u })).toHaveAttribute(
       'href',
-      '/console/mailboxes?org=4&new=mailbox'
+      '/console/mailboxes?org=4&new=mailbox&type=personal'
     );
   });
 

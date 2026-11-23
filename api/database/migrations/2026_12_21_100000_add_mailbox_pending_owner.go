@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	register("2026_12_20_100000_add_mailbox_pending_owner", &addMailboxPendingOwner{
+	register("2026_12_21_100000_add_mailbox_pending_owner", &addMailboxPendingOwner{
 		BaseMigration: migration.BaseMigration{UseTransaction: true},
 	})
 }

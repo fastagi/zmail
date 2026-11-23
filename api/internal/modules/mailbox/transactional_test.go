@@ -66,7 +66,7 @@ func newTxFixture(t *testing.T, edit func(*Settings)) *txFixture {
 		}
 	}
 	f.service = NewService(repo, &fakeMemberships{}, repo, repo, repo, repo, repo, nil, nil, f.transport, f.notifier, settings,
-		repo, ratelimit.NewMemoryStores(), fakeAccounts{txUser: "Owner.Account@Example.COM"})
+		repo, ratelimit.NewMemoryStores(), fakeAccounts{txUser: "Owner.Account@Example.COM"}, nil)
 	f.service.now = func() time.Time { return f.clock }
 	f.service.background = func(run func()) { run() }
 	if _, err := f.service.CreateTemplate(context.Background(), viewerOf(10, txUser, domain.OrganizationRoleOwner), TemplateInput{

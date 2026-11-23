@@ -859,6 +859,33 @@ describe('unified inbox', () => {
     expect(new URLSearchParams(window.location.search).has('new')).toBe(false);
   });
 
+  it('gives a colleague a personal mailbox on the verified company domain from the setup guide', async () => {
+    state.domains.data = [
+      domain(),
+      { ...domain(), domain: 'acme.test', kind: 'organization', max_mailboxes: 200 },
+    ];
+    window.history.replaceState(null, '', '/console/mailboxes?new=mailbox&type=personal');
+    renderRoute();
+
+    const dialog = await screen.findByRole('dialog', { name: 'Manage mailboxes' });
+    expect(within(dialog).getByRole('combobox', { name: /domain/iu })).toHaveValue('acme.test');
+    expect(within(dialog).getByRole('radio', { name: /^Personal/u })).toBeChecked();
+    expect(new URLSearchParams(window.location.search).has('type')).toBe(false);
+  });
+
+  it('starts a new mailbox on the company domain once one is verified', async () => {
+    state.domains.data = [
+      domain(),
+      { ...domain(), domain: 'acme.test', kind: 'organization', max_mailboxes: 200 },
+    ];
+    window.history.replaceState(null, '', '/console/mailboxes?new=mailbox');
+    renderRoute();
+
+    const dialog = await screen.findByRole('dialog', { name: 'Manage mailboxes' });
+    expect(within(dialog).getByRole('combobox', { name: /domain/iu })).toHaveValue('acme.test');
+    expect(within(dialog).getByRole('radio', { name: /^Shared/u })).toBeChecked();
+  });
+
   it('offers to name a team when the user has none', async () => {
     state.organizations.data = page([]);
     renderRoute();

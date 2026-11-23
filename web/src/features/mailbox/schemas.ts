@@ -923,6 +923,16 @@ export const mailBroadcastStatusOnlySchema = strictObject({
   status: mailBroadcastStatusSchema,
 });
 
+/** How fast a running broadcast sends and when it should finish, estimated by the API. */
+export const mailBroadcastProgressSchema = strictObject({
+  rate_per_minute: nullable(number().check(nonnegative())),
+  rate_window_minutes: positiveIntegerSchema,
+  estimated_finish_at: nullable(timestampSchema),
+  send_limit_pauses: boolean(),
+  send_limit_resumes_at: nullable(timestampSchema),
+  computed_at: timestampSchema,
+});
+
 export const mailBroadcastSchema = strictObject({
   id: safeIdSchema,
   name: string(),
@@ -954,6 +964,9 @@ export const mailBroadcastSchema = strictObject({
     bounced: nonnegativeIntegerSchema,
     complained: nonnegativeIntegerSchema,
   }),
+  // Send rate and estimated finish of one running broadcast; null in the listing. Optional so the
+  // console keeps working against an API that predates it.
+  progress: optional(nullable(mailBroadcastProgressSchema)),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });

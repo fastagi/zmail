@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"math"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -68,8 +69,47 @@ type MailBroadcastResponse struct {
 	ResumeAt         *time.Time                  `json:"resume_at"`
 	SafetyOverride   bool                        `json:"safety_override"`
 	Counts           MailBroadcastCountsResponse `json:"counts"`
-	CreatedAt        time.Time                   `json:"created_at"`
-	UpdatedAt        time.Time                   `json:"updated_at"`
+	// Progress is set when one scheduled, sending, or paused broadcast is read; null otherwise.
+	Progress  *MailBroadcastProgressResponse `json:"progress"`
+	CreatedAt time.Time                      `json:"created_at"`
+	UpdatedAt time.Time                      `json:"updated_at"`
+}
+
+// MailBroadcastProgressResponse is the send rate and estimated finish of a running broadcast.
+type MailBroadcastProgressResponse struct {
+	RatePerMinute      *float64   `json:"rate_per_minute"`
+	RateWindowMinutes  int        `json:"rate_window_minutes"`
+	EstimatedFinishAt  *time.Time `json:"estimated_finish_at"`
+	SendLimitPauses    bool       `json:"send_limit_pauses"`
+	SendLimitResumesAt *time.Time `json:"send_limit_resumes_at"`
+	ComputedAt         time.Time  `json:"computed_at"`
+}
+
+func toMailBroadcastProgressResponse(progress *domain.MailBroadcastProgress) *MailBroadcastProgressResponse {
+	if progress == nil {
+		return nil
+	}
+	response := &MailBroadcastProgressResponse{
+		RateWindowMinutes:  int(progress.RateWindow / time.Minute),
+		EstimatedFinishAt:  utcTime(progress.EstimatedFinishAt),
+		SendLimitPauses:    progress.SendLimitPauses,
+		SendLimitResumesAt: utcTime(progress.SendLimitResumesAt),
+		ComputedAt:         progress.ComputedAt.UTC(),
+	}
+	if progress.RatePerMinute != nil {
+		// Two decimals are plenty for a rate people read.
+		rounded := math.Round(*progress.RatePerMinute*100) / 100
+		response.RatePerMinute = &rounded
+	}
+	return response
+}
+
+func utcTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	at := value.UTC().Truncate(time.Second)
+	return &at
 }
 
 // MailBroadcastRecipientResponse is one recipient of a broadcast.
@@ -137,7 +177,19 @@ func (h *Handler) GetBroadcast(c *gin.Context) {
 		return
 	}
 	broadcast, err := h.service.GetBroadcast(c.Request.Context(), viewer, id)
-	respondBroadcast(c, broadcast, err, false)
+	if err != nil {
+		respondBroadcast(c, broadcast, err, false)
+		return
+	}
+	progress, err := h.service.BroadcastProgress(c.Request.Context(), broadcast)
+	if err != nil {
+		response.HandleError(c, "Failed to estimate mail broadcast progress", err)
+		return
+	}
+	body := toMailBroadcastResponse(broadcast)
+	body.Progress = toMailBroadcastProgressResponse(progress)
+	privateResponse(c)
+	response.Success(c, body)
 }
 
 func (h *Handler) CreateBroadcast(c *gin.Context) {

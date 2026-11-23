@@ -1168,6 +1168,7 @@ const messages = {
   },
   messages: {
     mailboxCreated: 'Mailbox created',
+    mailboxReceivingSoon: 'It starts receiving mail in a minute or two.',
     mailboxDeleted: 'Mailbox deleted',
     sent: 'Message sent',
     queued: 'Send limit reached. Your message is queued and will be sent automatically.',
@@ -1425,9 +1426,9 @@ const messages = {
     emptyTitle: 'No broadcasts yet',
     emptyDescription:
       'Pick a mailbox, a template, and a contact list, then send now or at a set time.',
-    disabledTitle: 'Broadcasts are not set up',
+    disabledTitle: "Broadcasts aren't available yet",
     disabledDescription:
-      'Broadcasts need unsubscribe links. Set MAILBOX_INBOUND_SECRET and MAILBOX_PUBLIC_URL on the API, then reload this page.',
+      'Every broadcast must carry an unsubscribe link, and your Zmail administrator still needs to turn those on. Ask them to finish broadcast setup. You can prepare drafts in the meantime.',
     needsSetup: 'Create a mailbox, a template, and a contact list first.',
     name: 'Name',
     status: 'Status',
@@ -1538,7 +1539,23 @@ const messages = {
     deleteDescription:
       '"{name}" and its recipient list are deleted. Messages already sent are kept.',
     limitPaused:
-      'Paused: the organization reached its 24-hour send limit. Sending continues when the window has room.',
+      'Waiting for the daily send limit. Your organization has sent as many broadcast messages as it may in 24 hours. {pending, plural, one {# recipient is} other {# recipients are}} waiting and nothing is lost: sending continues on its own at about {time}. You can still pause or cancel.',
+    limitPausedNoTime:
+      'Waiting for the daily send limit. Your organization has sent as many broadcast messages as it may in 24 hours. {pending, plural, one {# recipient is} other {# recipients are}} waiting and nothing is lost: sending continues on its own once the 24-hour window has room. You can still pause or cancel.',
+    limitAhead:
+      'The daily send limit will pause this broadcast before it finishes. It continues on its own at about {time}, so the last messages go out later.',
+    rateLabel: 'Send rate',
+    rateValue: '{rate} per minute',
+    rateMeasuring: 'Measuring',
+    etaLabel: 'Estimated finish',
+    etaValue: '{time} ({relative})',
+    etaPaused: 'None while paused',
+    etaNotStarted: 'Shown once sending starts',
+    etaMeasuring: 'Calculating',
+    etaHint:
+      'Estimated from the last {minutes} minutes and the daily send limit. Other broadcasts sending at the same time can make it later.',
+    noticeHint: 'You get an in-app notice and an email when it finishes or pauses on its own.',
+    filterAll: 'All',
     total: 'Recipients',
     sent: 'Sent',
     failed: 'Failed',
@@ -1555,10 +1572,20 @@ const messages = {
     reason: 'Reason',
     noRecipients: 'No recipients with this status.',
     reasonNotSubscribed: 'Unsubscribed before their turn',
-    reasonDeleted: 'Contact deleted',
-    reasonVariables: 'A template variable had no value',
-    reasonBounce: 'Bounced',
-    reasonSuppressed: 'On the provider suppression list',
+    reasonDeleted: 'The contact was deleted',
+    reasonSuppressedList: 'On your suppression list after an earlier bounce or spam report',
+    reasonVariables: "The template needs a value this contact doesn't have",
+    reasonMailbox: 'The sending mailbox was deleted',
+    reasonMessage: "The message couldn't be built for this address",
+    reasonBounce: "The address doesn't exist or refuses mail",
+    reasonSuppressed: 'The mail provider blocks this address after earlier bounces or complaints',
+    reasonUnreachable: "The mail provider couldn't be reached, so this message may not have gone out",
+    reasonProviderResponse: 'The mail provider gave an answer Zmail could not read',
+    reasonUnavailable: 'Sending was unavailable. Ask your Zmail administrator to check mail sending.',
+    reasonUnverified: "The sending domain isn't verified",
+    reasonCanceled: 'Canceled before it was sent',
+    reasonExpired: 'Waited too long and was not sent',
+    reasonOther: 'Not sent',
   },
   unsubscribe: {
     title: 'Unsubscribe',
@@ -1825,7 +1852,7 @@ const messages = {
     broadcastNotEditable: 'The broadcast changed state. Reload to see where it stands.',
     broadcastNoRecipients: 'The list has no subscribed contacts, so there is no one to send to.',
     broadcastDisabled:
-      'Broadcasts are not set up on this server. Set MAILBOX_INBOUND_SECRET and MAILBOX_PUBLIC_URL.',
+      "Broadcasts aren't available yet. Ask your Zmail administrator to finish broadcast setup.",
     contactNotFound: 'This contact does not exist or was deleted.',
     contactExists: 'A contact with this address already exists.',
     contactInvalid:

@@ -42,6 +42,9 @@ type broadcastFixture struct {
 	template  *domain.MailTemplate
 	list      *domain.MailContactList
 	now       time.Time
+	// notices keeps what the worker told the people who started broadcasts.
+	notices     *recordingNotices
+	memberships *fakeMemberships
 }
 
 func newBroadcastFixture(t *testing.T, dailyLimit int) *broadcastFixture {
@@ -51,18 +54,20 @@ func newBroadcastFixture(t *testing.T, dailyLimit int) *broadcastFixture {
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
 	fixture := &broadcastFixture{
-		repo:      repo,
-		transport: &scriptedTransport{bounces: map[string]bool{}},
-		mailbox:   createMailbox(t, repo, "news@mail.example"),
-		now:       time.Now().UTC(),
+		repo:        repo,
+		transport:   &scriptedTransport{bounces: map[string]bool{}},
+		mailbox:     createMailbox(t, repo, "news@mail.example"),
+		now:         time.Now().UTC(),
+		notices:     &recordingNotices{},
+		memberships: &fakeMemberships{},
 	}
-	fixture.service = NewService(repo, &fakeMemberships{}, repo, repo, repo, repo, nil, nil, nil, fixture.transport, &fakeNotifier{}, Settings{
+	fixture.service = NewService(repo, fixture.memberships, repo, repo, repo, repo, nil, nil, nil, fixture.transport, &fakeNotifier{}, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,
 		DailySendLimit:   dailyLimit,
 		PublicURL:        "https://app.example",
-	}, nil, nil, nil)
+	}, nil, nil, nil, fixture.notices)
 	fixture.service.now = func() time.Time { return fixture.now }
 	var err error
 	fixture.template, err = fixture.service.CreateTemplate(ctx, as(1), TemplateInput{
