@@ -1,10 +1,14 @@
-package imapgateway
+// Package mailclientauth holds what the mail gateways share to sign mail apps in: the sign-in
+// budgets and locks, and the IP buckets connection caps count under. IMAP and SMTP use one Limiter,
+// so a password guessed over one protocol locks the other too.
+package mailclientauth
 
 import (
 	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -30,9 +34,9 @@ const (
 	maxTrackedKeys = 10000
 )
 
-// authLimiter decides whether a sign-in may be tried. Locks are kept in this process: a bucket
+// Limiter decides whether a sign-in may be tried. Locks are kept in this process: a bucket
 // that runs out locks its key until the bucket's window ends, even for the right password.
-type authLimiter struct {
+type Limiter struct {
 	attempts ratelimit.Store
 	failIP   ratelimit.Store
 	failUser ratelimit.Store
@@ -43,14 +47,15 @@ type authLimiter struct {
 	known *expiringSet
 }
 
-func newAuthLimiter(stores *ratelimit.Stores, now func() time.Time) *authLimiter {
+// NewLimiter keeps its budgets in stores (in this process when nil).
+func NewLimiter(stores *ratelimit.Stores, now func() time.Time) *Limiter {
 	if stores == nil {
 		stores = ratelimit.NewMemoryStores()
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &authLimiter{
+	return &Limiter{
 		attempts: stores.New(ratelimit.Rule{Name: ruleAuthAttemptsIP, Max: authAttemptsPerIP, Window: authAttemptWindow}),
 		failIP:   stores.New(ratelimit.Rule{Name: ruleAuthFailIP, Max: authFailuresPerIP, Window: authFailureWindow}),
 		failUser: stores.New(ratelimit.Rule{Name: ruleAuthFailUser, Max: authFailuresUser, Window: authFailureWindow}),
@@ -67,12 +72,12 @@ func userKey(username string) string {
 	return "user:" + hex.EncodeToString(sum[:])[:16]
 }
 
-func ipKey(ip string) string { return "ip:" + ipBucket(ip) }
+func ipKey(ip string) string { return "ip:" + IPBucket(ip) }
 
-func knownKey(username, ip string) string { return userKey(username) + "|" + ipBucket(ip) }
+func knownKey(username, ip string) string { return userKey(username) + "|" + IPBucket(ip) }
 
 // Allow reports whether a sign-in may be tried now; it spends one attempt of the IP's budget.
-func (l *authLimiter) Allow(ctx context.Context, username, ip string) bool {
+func (l *Limiter) Allow(ctx context.Context, username, ip string) bool {
 	now := l.now()
 	l.mu.Lock()
 	lockedIP := l.locks.has(ipKey(ip), now)
@@ -87,7 +92,7 @@ func (l *authLimiter) Allow(ctx context.Context, username, ip string) bool {
 
 // Failed counts a refused sign-in against the IP and, from an IP the username never signed in
 // from, against the username; a budget that runs out locks its key.
-func (l *authLimiter) Failed(ctx context.Context, username, ip string) {
+func (l *Limiter) Failed(ctx context.Context, username, ip string) {
 	now := l.now()
 	if allowed, remaining, resetAt := l.failIP.Take(ctx, ipKey(ip)); !allowed || remaining == 0 {
 		l.lock(ipKey(ip), resetAt, now)
@@ -104,14 +109,14 @@ func (l *authLimiter) Failed(ctx context.Context, username, ip string) {
 }
 
 // Succeeded remembers that the username signed in from the IP.
-func (l *authLimiter) Succeeded(_ context.Context, username, ip string) {
+func (l *Limiter) Succeeded(_ context.Context, username, ip string) {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.known.add(knownKey(username, ip), now.Add(knownSignInTTL))
 }
 
-func (l *authLimiter) lock(key string, until, now time.Time) {
+func (l *Limiter) lock(key string, until, now time.Time) {
 	// A shared store's window is measured by its own clock; never lock for less than the window.
 	if until.Before(now.Add(authFailureWindow)) {
 		until = now.Add(authFailureWindow)
@@ -168,7 +173,26 @@ func (s *expiringSet) add(key string, expires time.Time) {
 func entryOf(element *list.Element) *expiringEntry {
 	entry, ok := element.Value.(*expiringEntry)
 	if !ok {
-		panic("imapgateway: a list element of another type")
+		panic("mailclientauth: a list element of another type")
 	}
 	return entry
+}
+
+// IPBucket is the key the per-IP caps and sign-in budgets count under: an IPv4 address as it is
+// (an IPv4-mapped IPv6 one as IPv4), and the /64 of an IPv6 address, since one subscriber is
+// handed a whole /64. Anything that does not parse stays as it is.
+func IPBucket(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.WithZone("").Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	prefix, err := addr.Prefix(64)
+	if err != nil {
+		return ip
+	}
+	return prefix.String()
 }

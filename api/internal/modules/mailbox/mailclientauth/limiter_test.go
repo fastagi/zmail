@@ -1,4 +1,4 @@
-package imapgateway
+package mailclientauth
 
 import (
 	"context"
@@ -11,8 +11,9 @@ import (
 
 func TestLimiterLocksIPAndUserIndependently(t *testing.T) {
 	ctx := context.Background()
-	now := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
-	limiter := newAuthLimiter(ratelimit.NewMemoryStores(), func() time.Time { return now })
+	// The in-process budgets run on the real clock, so the test clock starts there too.
+	now := time.Now()
+	limiter := NewLimiter(ratelimit.NewMemoryStores(), func() time.Time { return now })
 
 	// A username that signed in from an IP keeps working there after the username is locked.
 	limiter.Succeeded(ctx, "alice@mail.example", "10.0.0.1")
@@ -52,7 +53,7 @@ func TestLimiterLocksIPAndUserIndependently(t *testing.T) {
 
 func TestLimiterSlowsAttemptsPerIP(t *testing.T) {
 	ctx := context.Background()
-	limiter := newAuthLimiter(ratelimit.NewMemoryStores(), time.Now)
+	limiter := NewLimiter(ratelimit.NewMemoryStores(), time.Now)
 	for i := range 60 {
 		if !limiter.Allow(ctx, "alice@mail.example", "198.51.100.1") {
 			t.Fatalf("attempt %d refused", i)
@@ -72,7 +73,7 @@ func TestUserKeyHidesTheUsername(t *testing.T) {
 
 func TestLimiterFailureBudgetCoversAnIPv6Prefix(t *testing.T) {
 	ctx := context.Background()
-	limiter := newAuthLimiter(ratelimit.NewMemoryStores(), time.Now)
+	limiter := NewLimiter(ratelimit.NewMemoryStores(), time.Now)
 	// Twenty failures spread over one /64 lock the whole /64.
 	for i := range 20 {
 		limiter.Failed(ctx, "user"+string(rune('a'+i))+"@mail.example", "2001:db8:1:2::"+string(rune('a'+i%6)))
@@ -95,8 +96,8 @@ func TestIPBucket(t *testing.T) {
 		"not an address":       "not an address",
 		"":                     "",
 	} {
-		if got := ipBucket(ip); got != want {
-			t.Errorf("ipBucket(%q) = %q; want %q", ip, got, want)
+		if got := IPBucket(ip); got != want {
+			t.Errorf("IPBucket(%q) = %q; want %q", ip, got, want)
 		}
 	}
 }

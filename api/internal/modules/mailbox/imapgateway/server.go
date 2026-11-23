@@ -17,6 +17,7 @@ import (
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
+	"github.com/fastagi/zmail/api/internal/modules/mailbox/mailclientauth"
 )
 
 // Defaults of Config (spec §6.4 and the P1a plan).
@@ -56,6 +57,8 @@ type Config struct {
 	AuthTimeout time.Duration
 	// Limits backs the sign-in rate limits; nil keeps them in this process.
 	Limits *ratelimit.Stores
+	// Limiter, when set, is the sign-in limiter shared with the SMTP gateway; Limits is then unused.
+	Limiter *mailclientauth.Limiter
 	Now    func() time.Time
 }
 
@@ -92,6 +95,9 @@ func (c Config) withDefaults() Config {
 	if c.Now == nil {
 		c.Now = time.Now
 	}
+	if c.Limiter == nil {
+		c.Limiter = mailclientauth.NewLimiter(c.Limits, c.Now)
+	}
 	return c
 }
 
@@ -111,7 +117,7 @@ type Server struct {
 	store   domain.MailClientStore
 	cfg     Config
 	logger  *slog.Logger
-	limiter *authLimiter
+	limiter *mailclientauth.Limiter
 	cache   *sourceCache
 	// sourceSlots holds one token per message source a FETCH holds (Config.MaxSourceFetches).
 	sourceSlots chan struct{}
@@ -136,7 +142,7 @@ func NewServer(store domain.MailClientStore, cfg Config, logger *slog.Logger) *S
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		store: store, cfg: cfg, logger: logger,
-		limiter:     newAuthLimiter(cfg.Limits, cfg.Now),
+		limiter:     cfg.Limiter,
 		cache:       newSourceCache(cfg.SourceCacheBytes),
 		sourceSlots: make(chan struct{}, cfg.MaxSourceFetches),
 		registry:    newSessionRegistry(cfg.MaxConnections, cfg.MaxPerUser, cfg.MaxPerIP),
