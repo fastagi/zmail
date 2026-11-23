@@ -786,6 +786,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-app-password-directory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every mail client password of the organization
+         * @description Owners and admins only. Newest first, including passwords revoked in the last 90 days, with the owner's identity. Never carries a secret or anything about mail. The response is never cached.
+         */
+        get: operations["listMailAppPasswordDirectory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-app-password-directory/{password_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a member's mail client password
+         * @description Owners and admins only; records `revoke_reason` `admin`. An id outside the organization or already revoked is `404 MAILBOX.APP_PASSWORD_NOT_FOUND`.
+         */
+        delete: operations["forceRevokeMailAppPassword"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-app-passwords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's mail client passwords
+         * @description Lists the caller's own passwords that are not revoked, newest first, never with a secret, plus whether mail apps can sign in (`access`) and the IMAP server to configure (`server`). Works without the `mail_clients` feature so a member can always remove a device. See MAILBOXES.md, Mail Client Access. The response is never cached.
+         */
+        get: operations["listMailAppPasswords"];
+        put?: never;
+        /**
+         * Create a mail client password for one device
+         * @description Needs the `mail_clients` feature and the organization switch on, then the caller's account password and, with two-factor sign-in on, an authenticator or recovery code. A wrong credential is `422` with a field error, never `401`. The `secret` is returned only in this response; the API keeps only its keyed hash. At most 20 passwords that are not revoked per member and organization. The response is never cached.
+         */
+        post: operations["createMailAppPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-app-passwords/{password_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke one of the caller's mail client passwords
+         * @description Takes effect at once; open mail app sessions end within 60 seconds. Another member's password, or one already revoked, is `404 MAILBOX.APP_PASSWORD_NOT_FOUND`.
+         */
+        delete: operations["revokeMailAppPassword"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail-broadcasts": {
         parameters: {
             query?: never;
@@ -914,6 +998,30 @@ export interface paths {
          * @description Only owners and admins may.
          */
         post: operations["sendMailBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-client-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read whether the organization lets members use mail apps
+         * @description Any member may read it. An organization that never saved the switch allows mail apps.
+         */
+        get: operations["getMailClientSettings"];
+        /**
+         * Replace whether the organization lets members use mail apps
+         * @description Owners and admins only. Turning it off keeps every password but none can sign in, and open mail app sessions end within 60 seconds.
+         */
+        put: operations["updateMailClientSettings"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4426,6 +4534,13 @@ export interface components {
             /** @default false */
             reveal_secrets: boolean;
         };
+        CreateMailAppPasswordRequest: {
+            current_password: string;
+            name: string;
+            scopes: components["schemas"]["MailClientProtocol"][];
+            /** @description Required when the account has two-factor sign-in on. */
+            totp_code?: string;
+        };
         CreateMailboxRequest: {
             display_name?: string;
             /** @description A verified domain of the organization. Empty or absent means the shared domain. */
@@ -4472,7 +4587,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SUSPENDED" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "ORGANIZATION.FEATURE_NOT_GRANTED" | "ORGANIZATION.MEMBER_FEATURES_FIXED" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "NOTIFICATION.WEB_PUSH_DISABLED" | "NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID" | "NOTIFICATION.WEB_PUSH_KEYS_INVALID" | "NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.IMPORT_EMAIL_INVALID" | "MAILBOX.IMPORT_ROLE_INVALID" | "MAILBOX.IMPORT_DOMAIN_REQUIRED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.DRAFT_NOT_FOUND" | "MAILBOX.DRAFT_LIMIT_REACHED" | "MAILBOX.ASSIGNMENT_UNAVAILABLE" | "MAILBOX.NOTE_NOT_FOUND" | "MAILBOX.NOTE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SUSPENDED" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "ORGANIZATION.FEATURE_NOT_GRANTED" | "ORGANIZATION.MEMBER_FEATURES_FIXED" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "NOTIFICATION.WEB_PUSH_DISABLED" | "NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID" | "NOTIFICATION.WEB_PUSH_KEYS_INVALID" | "NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.IMPORT_EMAIL_INVALID" | "MAILBOX.IMPORT_ROLE_INVALID" | "MAILBOX.IMPORT_DOMAIN_REQUIRED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.DRAFT_NOT_FOUND" | "MAILBOX.DRAFT_LIMIT_REACHED" | "MAILBOX.ASSIGNMENT_UNAVAILABLE" | "MAILBOX.NOTE_NOT_FOUND" | "MAILBOX.NOTE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS" | "MAILBOX.APP_PASSWORD_NOT_FOUND" | "MAILBOX.APP_PASSWORD_LIMIT_REACHED" | "MAILBOX.MAIL_CLIENT_ACCESS_DISABLED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -4994,6 +5109,76 @@ export interface components {
             data: components["schemas"]["MailAgentGrant"];
             message: string;
         };
+        MailAppPassword: {
+            /** Format: date-time */
+            created_at: string;
+            /** @description The secret's last four letters. */
+            hint: string;
+            id: components["schemas"]["PositiveID"];
+            /** Format: date-time */
+            last_used_at: string | null;
+            last_used_protocol: components["schemas"]["MailClientProtocol"] | null;
+            name: string;
+            scopes: components["schemas"]["MailClientProtocol"][];
+        };
+        MailAppPasswordCreated: {
+            /** Format: date-time */
+            created_at: string;
+            hint: string;
+            id: components["schemas"]["PositiveID"];
+            /** Format: date-time */
+            last_used_at: string | null;
+            last_used_protocol: components["schemas"]["MailClientProtocol"] | null;
+            name: string;
+            scopes: components["schemas"]["MailClientProtocol"][];
+            /** @description Shown only in this response; four groups of four lowercase letters. */
+            secret: string;
+        };
+        MailAppPasswordCreatedResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailAppPasswordCreated"];
+            message: string;
+        };
+        MailAppPasswordDirectoryEntry: {
+            /** Format: date-time */
+            created_at: string;
+            hint: string;
+            id: components["schemas"]["PositiveID"];
+            /** Format: date-time */
+            last_used_at: string | null;
+            last_used_protocol: components["schemas"]["MailClientProtocol"] | null;
+            membership_id: components["schemas"]["PositiveID"];
+            name: string;
+            revoke_reason: ("user" | "admin") | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+            scopes: components["schemas"]["MailClientProtocol"][];
+            user_email: string;
+            user_id: components["schemas"]["PositiveID"];
+            user_name: string;
+        };
+        MailAppPasswordDirectoryPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailAppPasswordDirectoryEntry"][];
+            links: components["schemas"]["PaginationLinks"];
+            message: string;
+            meta: components["schemas"]["PaginationMeta"];
+        };
+        MailAppPasswordList: {
+            access: components["schemas"]["MailClientAccess"];
+            items: components["schemas"]["MailAppPassword"][];
+            /** @description The most passwords a member may hold that are not revoked. */
+            limit: number;
+            server: components["schemas"]["MailClientServer"];
+        };
+        MailAppPasswordListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailAppPasswordList"];
+            message: string;
+        };
         MailAttachment: {
             /** @description Media type the sender declared. It is untrusted and never used to serve the file. */
             content_type: string;
@@ -5382,6 +5567,34 @@ export interface components {
         /** @description Template values shared by every recipient, at most 100. A contact's properties override a value of the same name. `email`, `first_name`, `last_name`, and `unsubscribe_url` come from each contact and cannot be set here. Absent means none. */
         MailBroadcastVariables: {
             [key: string]: string;
+        };
+        MailClientAccess: {
+            /** @description Whether the caller's mail apps can sign in in this organization. */
+            enabled: boolean;
+            /** @description Why they cannot; null while `enabled` is true. */
+            reason: ("unavailable" | "organization_disabled" | "feature_not_granted") | null;
+        };
+        /** @enum {string} */
+        MailClientProtocol: "imap" | "smtp";
+        MailClientServer: {
+            imap_host: string;
+            imap_port: number;
+            /** @enum {string} */
+            imap_security: "ssl_tls";
+        };
+        MailClientSettings: {
+            access_enabled: boolean;
+            /**
+             * Format: date-time
+             * @description Null until an owner or admin saves the switch.
+             */
+            updated_at: string | null;
+        };
+        MailClientSettingsResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailClientSettings"];
+            message: string;
         };
         MailCloudflareChecksResponse: {
             /** @constant */
@@ -6391,6 +6604,8 @@ export interface components {
             api_keys?: boolean;
             broadcasts?: boolean;
             contacts?: boolean;
+            /** @description Granted when absent. */
+            mail_clients?: boolean;
             templates?: boolean;
         };
         MemberImportRequest: {
@@ -6398,7 +6613,7 @@ export interface components {
             domain: string;
             /** @description True only validates; false invites and reserves every row that passes. */
             dry_run: boolean;
-            /** @description Absent means the new-member defaults, contacts and templates. */
+            /** @description Absent means the new-member defaults, contacts, templates, and mail_clients. */
             features?: components["schemas"]["MemberImportFeatures"];
             rows: components["schemas"]["MemberImportRow"][];
         };
@@ -6927,6 +7142,8 @@ export interface components {
             broadcasts: boolean;
             /** @description Read and edit contacts and contact lists. */
             contacts: boolean;
+            /** @description Create mail client passwords and read mail in mail apps. */
+            mail_clients: boolean;
             /** @description Create and edit mail templates. */
             templates: boolean;
         };
@@ -6935,6 +7152,7 @@ export interface components {
             api_keys?: boolean;
             broadcasts?: boolean;
             contacts?: boolean;
+            mail_clients?: boolean;
             templates?: boolean;
         };
         OrganizationMemberPageResponse: {
@@ -7428,6 +7646,9 @@ export interface components {
         UpdateMailboxRequest: {
             /** @description The new display name; an empty string clears it. */
             display_name: string;
+        };
+        UpdateMailClientSettingsRequest: {
+            access_enabled: boolean;
         };
         /** @description Any field of a new record; an omitted field keeps its current value. */
         UpdateMailDNSRecordRequest: {
@@ -8185,6 +8406,8 @@ export interface components {
         IfMatch: string;
         /** @description Opaque position from `meta.next_cursor`, passed back unchanged; absent requests the newest page. A malformed cursor is `400 COMMON.INVALID_INPUT`. */
         InboxCursor: string;
+        /** @description Positive mail client password identifier. */
+        MailAppPasswordID: components["schemas"]["PositiveID"];
         /** @description Positive mail attachment identifier. */
         MailAttachmentID: components["schemas"]["PositiveID"];
         /** @description Positive mailbox identifier. */
@@ -10259,6 +10482,172 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listMailAppPasswordDirectory: {
+        parameters: {
+            query?: {
+                /** @description One-based page number. */
+                page?: components["parameters"]["Page"];
+                /** @description Requested page size, capped by the API. */
+                per_page?: components["parameters"]["PerPage"];
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated passwords of the organization. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAppPasswordDirectoryPageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    forceRevokeMailAppPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail client password identifier. */
+                password_id: components["parameters"]["MailAppPasswordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The password is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailAppPasswords: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's passwords, access state, and server settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAppPasswordListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailAppPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMailAppPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description The password with its one-time secret. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAppPasswordCreatedResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The membership lacks `mail_clients` (`ORGANIZATION.FEATURE_NOT_GRANTED`) or the organization turned mail apps off (`MAILBOX.MAIL_CLIENT_ACCESS_DISABLED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The member already holds 20 passwords (`MAILBOX.APP_PASSWORD_LIMIT_REACHED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            429: components["responses"]["RateLimited"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    revokeMailAppPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail client password identifier. */
+                password_id: components["parameters"]["MailAppPasswordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The password is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listMailBroadcasts: {
         parameters: {
             query?: {
@@ -10688,6 +11077,65 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    getMailClientSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The switch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailClientSettingsResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailClientSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailClientSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The switch after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailClientSettingsResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getCloudflareConnection: {

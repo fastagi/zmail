@@ -40,3 +40,8 @@ export function authenticateMockIdentity(email: string, password: string): AuthU
 
   return { ...mockUser };
 }
+
+/** Whether a password is the mock account's, for routes that confirm the signed-in user again. */
+export function verifyMockAccountPassword(password: string): boolean {
+  return password === mockLoginCredentials.password;
+}

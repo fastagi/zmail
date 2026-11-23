@@ -31,12 +31,14 @@ import {
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Resend quotas, matching the API: per invitation one per minute and five per 24 hours, and 30 per
 // organization per hour.
-// A new member starts with contacts and templates; broadcasts and API keys wait for a manager.
+// A new member starts with contacts, templates, and mail apps; broadcasts and API keys wait for a
+// manager.
 const NEW_MEMBER_FEATURES: MemberFeatures = {
   broadcasts: false,
   contacts: true,
   templates: true,
   api_keys: false,
+  mail_clients: true,
 };
 
 const RESEND_COOLDOWN_MS = 60 * 1000;

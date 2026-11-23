@@ -302,7 +302,13 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 		if err := startThread(tx, po); err != nil {
 			return err
 		}
-		return createAttachments(tx, po.ID, message.Attachments)
+		if err := createAttachments(tx, po.ID, message.Attachments); err != nil {
+			return err
+		}
+		if message.RawSource == nil {
+			return nil
+		}
+		return createMessageSource(tx, po.ID, message.RawSource, messageSourceInbound, po.CreatedAt)
 	})
 	if err != nil {
 		return false, err
@@ -493,7 +499,13 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 		if err := startThread(tx, po); err != nil {
 			return err
 		}
-		return createAttachments(tx, po.ID, message.Attachments)
+		if err := createAttachments(tx, po.ID, message.Attachments); err != nil {
+			return err
+		}
+		if message.RawSource == nil {
+			return nil
+		}
+		return createMessageSource(tx, po.ID, message.RawSource, messageSourceInbound, po.CreatedAt)
 	})
 	if err != nil {
 		return false, err

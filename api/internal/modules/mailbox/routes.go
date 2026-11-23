@@ -96,6 +96,18 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("external_mail_connection_directory.index")
 		auth.DELETE("/external-mail-connection-directory/:connection_id", h.ForceDisconnectExternalMailConnection).
 			Name("external_mail_connection_directory.destroy").WhereNumber("connection_id")
+		// Mail client passwords: listing and revoking need no feature, so a member can always
+		// remove a device; creating needs mail_clients.
+		auth.GET("/mail-app-passwords", h.ListAppPasswords).Name("mail_app_passwords.index")
+		auth.POST("/mail-app-passwords", h.CreateAppPassword).Name("mail_app_passwords.store").
+			Middleware(requireFeature(domain.MemberFeatureMailClients), middleware.BodyLimit(maxAppPasswordBodyBytes))
+		auth.DELETE("/mail-app-passwords/:password_id", h.RevokeAppPassword).
+			Name("mail_app_passwords.destroy").WhereNumber("password_id")
+		auth.GET("/mail-app-password-directory", h.ListAppPasswordDirectory).Name("mail_app_password_directory.index")
+		auth.DELETE("/mail-app-password-directory/:password_id", h.ForceRevokeAppPassword).
+			Name("mail_app_password_directory.destroy").WhereNumber("password_id")
+		auth.GET("/mail-client-settings", h.GetMailClientSettings).Name("mail_client_settings.show")
+		auth.PUT("/mail-client-settings", h.UpdateMailClientSettings).Name("mail_client_settings.update")
 		// Tenants are session-only: no API key, and so no agent, ever reaches tenant-level access.
 		auth.GET("/external-mail-tenants", h.ListExternalMailTenants).Name("external_mail_tenants.index")
 		auth.POST("/external-mail-tenants", h.AuthorizeExternalMailTenant).

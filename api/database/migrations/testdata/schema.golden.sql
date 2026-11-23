@@ -244,6 +244,25 @@ TABLE mail_agent_grants
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE mail_app_passwords
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_app_passwords_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN membership_id bigint NOT NULL
+  COLUMN user_id bigint NOT NULL
+  COLUMN name character varying(64) NOT NULL
+  COLUMN scope_imap boolean NOT NULL
+  COLUMN scope_smtp boolean NOT NULL
+  COLUMN secret_hash character varying(64) NOT NULL
+  COLUMN hint character varying(4) NOT NULL
+  COLUMN last_used_at timestamp with time zone
+  COLUMN last_used_ip character varying(64)
+  COLUMN last_used_protocol character varying(8)
+  COLUMN revoked_at timestamp with time zone
+  COLUMN revoked_by bigint
+  COLUMN revoke_reason character varying(16)
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_attachments
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_attachments_id_seq'::regclass)
   COLUMN message_id bigint NOT NULL
@@ -294,6 +313,13 @@ TABLE mail_broadcasts
   COLUMN started_by bigint
   COLUMN notice_state character varying(32) NOT NULL DEFAULT ''::character varying
   COLUMN notice_count integer NOT NULL DEFAULT 0
+
+TABLE mail_client_settings
+  COLUMN organization_id bigint NOT NULL
+  COLUMN access_enabled boolean NOT NULL DEFAULT true
+  COLUMN updated_by bigint
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
 
 TABLE mail_cloudflare_connections
   COLUMN id uuid NOT NULL
@@ -389,6 +415,19 @@ TABLE mail_folders
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE mail_imap_folders
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN folder_key character varying(32) NOT NULL
+  COLUMN uidvalidity bigint NOT NULL
+  COLUMN uidnext bigint NOT NULL DEFAULT 1
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE mail_imap_uids
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN folder_key character varying(32) NOT NULL
+  COLUMN uid bigint NOT NULL
+  COLUMN message_id bigint NOT NULL
+
 TABLE mail_labels
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_labels_id_seq'::regclass)
   COLUMN mailbox_id bigint NOT NULL
@@ -415,6 +454,14 @@ TABLE mail_message_reads
   COLUMN message_id bigint NOT NULL
   COLUMN membership_id bigint NOT NULL
   COLUMN read_at timestamp with time zone NOT NULL
+
+TABLE mail_message_sources
+  COLUMN message_id bigint NOT NULL
+  COLUMN raw bytea NOT NULL
+  COLUMN size integer NOT NULL
+  COLUMN sha256 character varying(64) NOT NULL
+  COLUMN origin character varying(16) NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
 
 TABLE mail_message_stars
   COLUMN membership_id bigint NOT NULL
@@ -673,6 +720,7 @@ TABLE organization_invitations
   COLUMN can_use_contacts boolean NOT NULL DEFAULT true
   COLUMN can_use_templates boolean NOT NULL DEFAULT true
   COLUMN can_use_api_keys boolean NOT NULL DEFAULT false
+  COLUMN can_use_mail_clients boolean NOT NULL DEFAULT true
 
 TABLE organization_memberships
   COLUMN id bigint NOT NULL DEFAULT nextval('organization_memberships_id_seq'::regclass)
@@ -685,6 +733,7 @@ TABLE organization_memberships
   COLUMN can_use_contacts boolean NOT NULL DEFAULT true
   COLUMN can_use_templates boolean NOT NULL DEFAULT true
   COLUMN can_use_api_keys boolean NOT NULL DEFAULT false
+  COLUMN can_use_mail_clients boolean NOT NULL DEFAULT true
 
 TABLE organizations
   COLUMN id bigint NOT NULL DEFAULT nextval('organizations_id_seq'::regclass)
@@ -1084,6 +1133,17 @@ CONSTRAINT mail_agent_grants.mail_agent_grants_mailbox_id_fkey FOREIGN KEY (mail
 CONSTRAINT mail_agent_grants.mail_agent_grants_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT mail_agent_grants.mail_agent_grants_pkey PRIMARY KEY (id)
 CONSTRAINT mail_agent_grants.mail_agent_grants_revoke_reason_check CHECK (((revoke_reason)::text = ANY ((ARRAY[''::character varying, 'revoked'::character varying, 'left_organization'::character varying, 'handed_over'::character varying, 'member_removed'::character varying, 'connection_revoked'::character varying])::text[])))
+CONSTRAINT mail_app_passwords.chk_mail_app_passwords_name CHECK (((char_length((name)::text) >= 1) AND (char_length((name)::text) <= 64)))
+CONSTRAINT mail_app_passwords.chk_mail_app_passwords_protocol CHECK (((last_used_protocol)::text = ANY ((ARRAY['imap'::character varying, 'smtp'::character varying])::text[])))
+CONSTRAINT mail_app_passwords.chk_mail_app_passwords_revoke_reason CHECK (((revoke_reason)::text = ANY ((ARRAY['user'::character varying, 'admin'::character varying])::text[])))
+CONSTRAINT mail_app_passwords.chk_mail_app_passwords_revoked CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL)))
+CONSTRAINT mail_app_passwords.chk_mail_app_passwords_scope CHECK ((scope_imap OR scope_smtp))
+CONSTRAINT mail_app_passwords.chk_mail_app_passwords_secret_hash CHECK (((secret_hash)::text ~ '^[0-9a-f]{64}$'::text))
+CONSTRAINT mail_app_passwords.fk_mail_app_passwords_membership FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
+CONSTRAINT mail_app_passwords.fk_mail_app_passwords_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_app_passwords.fk_mail_app_passwords_revoked_by FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_app_passwords.fk_mail_app_passwords_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+CONSTRAINT mail_app_passwords.mail_app_passwords_pkey PRIMARY KEY (id)
 CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
 CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
@@ -1094,6 +1154,9 @@ CONSTRAINT mail_broadcasts.chk_mail_broadcasts_status CHECK (((status)::text = A
 CONSTRAINT mail_broadcasts.chk_mail_broadcasts_test_percent CHECK (((test_percent >= 0) AND (test_percent <= 50)))
 CONSTRAINT mail_broadcasts.fk_mail_broadcasts_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_broadcasts.mail_broadcasts_pkey PRIMARY KEY (id)
+CONSTRAINT mail_client_settings.fk_mail_client_settings_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_client_settings.fk_mail_client_settings_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_client_settings.mail_client_settings_pkey PRIMARY KEY (organization_id)
 CONSTRAINT mail_cloudflare_connections.mail_cloudflare_connections_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT mail_cloudflare_connections.mail_cloudflare_connections_pkey PRIMARY KEY (id)
 CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_contact FOREIGN KEY (contact_id) REFERENCES mail_contacts(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -1125,6 +1188,13 @@ CONSTRAINT mail_drafts.mail_drafts_to_recipients_check CHECK ((char_length(to_re
 CONSTRAINT mail_drafts.mail_drafts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT mail_folders.mail_folders_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT mail_folders.mail_folders_pkey PRIMARY KEY (id)
+CONSTRAINT mail_imap_folders.chk_mail_imap_folders_key CHECK (((folder_key)::text ~ '^(inbox|sent|archive|trash|folder:[1-9][0-9]*)$'::text))
+CONSTRAINT mail_imap_folders.chk_mail_imap_folders_uidnext CHECK (((uidnext >= 1) AND (uidnext <= '4294967295'::bigint)))
+CONSTRAINT mail_imap_folders.chk_mail_imap_folders_uidvalidity CHECK (((uidvalidity >= 1) AND (uidvalidity <= '4294967295'::bigint)))
+CONSTRAINT mail_imap_folders.fk_mail_imap_folders_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_imap_folders.mail_imap_folders_pkey PRIMARY KEY (mailbox_id, folder_key)
+CONSTRAINT mail_imap_uids.fk_mail_imap_uids_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
+CONSTRAINT mail_imap_uids.mail_imap_uids_pkey PRIMARY KEY (mailbox_id, folder_key, uid)
 CONSTRAINT mail_labels.mail_labels_color_check CHECK (((color)::text = ANY ((ARRAY['gray'::character varying, 'red'::character varying, 'orange'::character varying, 'yellow'::character varying, 'green'::character varying, 'teal'::character varying, 'blue'::character varying, 'purple'::character varying, 'pink'::character varying])::text[])))
 CONSTRAINT mail_labels.mail_labels_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT mail_labels.mail_labels_pkey PRIMARY KEY (id)
@@ -1137,6 +1207,11 @@ CONSTRAINT mail_message_labels.mail_message_labels_pkey PRIMARY KEY (message_id,
 CONSTRAINT mail_message_reads.mail_message_reads_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
 CONSTRAINT mail_message_reads.mail_message_reads_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
 CONSTRAINT mail_message_reads.mail_message_reads_pkey PRIMARY KEY (membership_id, message_id)
+CONSTRAINT mail_message_sources.chk_mail_message_sources_origin CHECK (((origin)::text = ANY ((ARRAY['inbound'::character varying, 'smtp'::character varying, 'composed'::character varying])::text[])))
+CONSTRAINT mail_message_sources.chk_mail_message_sources_sha256 CHECK (((sha256)::text ~ '^[0-9a-f]{64}$'::text))
+CONSTRAINT mail_message_sources.chk_mail_message_sources_size CHECK (((size = octet_length(raw)) AND ((size >= 1) AND (size <= 5242880))))
+CONSTRAINT mail_message_sources.fk_mail_message_sources_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
+CONSTRAINT mail_message_sources.mail_message_sources_pkey PRIMARY KEY (message_id)
 CONSTRAINT mail_message_stars.mail_message_stars_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
 CONSTRAINT mail_message_stars.mail_message_stars_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
 CONSTRAINT mail_message_stars.mail_message_stars_pkey PRIMARY KEY (membership_id, message_id)
@@ -1428,6 +1503,11 @@ INDEX CREATE INDEX idx_mail_agent_grants_live_mailbox ON mail_agent_grants USING
 INDEX CREATE INDEX idx_mail_agent_grants_live_user ON mail_agent_grants USING btree (organization_id, key_user_id) WHERE (revoked_at IS NULL)
 INDEX CREATE INDEX idx_mail_agent_grants_mailbox ON mail_agent_grants USING btree (mailbox_id, id DESC)
 INDEX CREATE UNIQUE INDEX mail_agent_grants_pkey ON mail_agent_grants USING btree (id)
+INDEX CREATE INDEX idx_mail_app_passwords_membership ON mail_app_passwords USING btree (membership_id) WHERE (revoked_at IS NULL)
+INDEX CREATE INDEX idx_mail_app_passwords_organization ON mail_app_passwords USING btree (organization_id, id)
+INDEX CREATE INDEX idx_mail_app_passwords_revoked ON mail_app_passwords USING btree (revoked_at) WHERE (revoked_at IS NOT NULL)
+INDEX CREATE UNIQUE INDEX idx_mail_app_passwords_secret ON mail_app_passwords USING btree (secret_hash)
+INDEX CREATE UNIQUE INDEX mail_app_passwords_pkey ON mail_app_passwords USING btree (id)
 INDEX CREATE INDEX idx_mail_attachments_message ON mail_attachments USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_attachments_pkey ON mail_attachments USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_broadcast_recipients_contact ON mail_broadcast_recipients USING btree (broadcast_id, contact_id)
@@ -1437,6 +1517,7 @@ INDEX CREATE UNIQUE INDEX mail_broadcast_recipients_pkey ON mail_broadcast_recip
 INDEX CREATE INDEX idx_mail_broadcasts_due ON mail_broadcasts USING btree (status, scheduled_at)
 INDEX CREATE INDEX idx_mail_broadcasts_listing ON mail_broadcasts USING btree (organization_id, id)
 INDEX CREATE UNIQUE INDEX mail_broadcasts_pkey ON mail_broadcasts USING btree (id)
+INDEX CREATE UNIQUE INDEX mail_client_settings_pkey ON mail_client_settings USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX idx_mail_cloudflare_active ON mail_cloudflare_connections USING btree (organization_id) WHERE active
 INDEX CREATE UNIQUE INDEX mail_cloudflare_connections_pkey ON mail_cloudflare_connections USING btree (id)
 INDEX CREATE INDEX idx_mail_contact_list_members_contact ON mail_contact_list_members USING btree (contact_id)
@@ -1465,6 +1546,9 @@ INDEX CREATE INDEX idx_mail_drafts_user ON mail_drafts USING btree (user_id)
 INDEX CREATE UNIQUE INDEX mail_drafts_pkey ON mail_drafts USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_folders_name ON mail_folders USING btree (mailbox_id, lower((name)::text))
 INDEX CREATE UNIQUE INDEX mail_folders_pkey ON mail_folders USING btree (id)
+INDEX CREATE UNIQUE INDEX mail_imap_folders_pkey ON mail_imap_folders USING btree (mailbox_id, folder_key)
+INDEX CREATE UNIQUE INDEX idx_mail_imap_uids_message ON mail_imap_uids USING btree (message_id)
+INDEX CREATE UNIQUE INDEX mail_imap_uids_pkey ON mail_imap_uids USING btree (mailbox_id, folder_key, uid)
 INDEX CREATE UNIQUE INDEX idx_mail_labels_name ON mail_labels USING btree (mailbox_id, lower((name)::text))
 INDEX CREATE UNIQUE INDEX mail_labels_pkey ON mail_labels USING btree (id)
 INDEX CREATE INDEX idx_mail_message_events_message ON mail_message_events USING btree (message_id, occurred_at, id)
@@ -1473,6 +1557,7 @@ INDEX CREATE UNIQUE INDEX mail_message_events_pkey ON mail_message_events USING 
 INDEX CREATE INDEX idx_mail_message_labels_label ON mail_message_labels USING btree (label_id, message_id)
 INDEX CREATE UNIQUE INDEX mail_message_labels_pkey ON mail_message_labels USING btree (message_id, label_id)
 INDEX CREATE UNIQUE INDEX mail_message_reads_pkey ON mail_message_reads USING btree (membership_id, message_id)
+INDEX CREATE UNIQUE INDEX mail_message_sources_pkey ON mail_message_sources USING btree (message_id)
 INDEX CREATE INDEX idx_mail_message_stars_message ON mail_message_stars USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_message_stars_pkey ON mail_message_stars USING btree (membership_id, message_id)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
@@ -1660,3 +1745,10 @@ INDEX CREATE INDEX idx_workflow_tasks_claim ON workflow_tasks USING btree (queue
 INDEX CREATE INDEX idx_workflow_tasks_lease ON workflow_tasks USING btree (status, lease_expires_at)
 INDEX CREATE UNIQUE INDEX idx_workflow_tasks_queue_idempotency ON workflow_tasks USING btree (queue, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX workflow_tasks_pkey ON workflow_tasks USING btree (id)
+
+FUNCTION mail_imap_assign_uid() f4a79c3efdc01384f39d449b48a87eb1
+FUNCTION mail_imap_folder_key(direction text, status text, placement text, folder_id bigint) 5e22e4cda5977b29de83378609829fbb
+FUNCTION mail_imap_forget_folder() 2cd69f06b1bbb9a5e5917143bd45f6cc
+
+TRIGGER mail_imap_forget_folder CREATE TRIGGER mail_imap_forget_folder AFTER DELETE ON mail_folders FOR EACH ROW EXECUTE FUNCTION mail_imap_forget_folder()
+TRIGGER mail_imap_assign_uid CREATE TRIGGER mail_imap_assign_uid AFTER INSERT OR UPDATE OF placement, folder_id, status, mailbox_id ON mail_messages FOR EACH ROW EXECUTE FUNCTION mail_imap_assign_uid()

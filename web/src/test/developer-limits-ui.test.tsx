@@ -170,7 +170,13 @@ describe('developer limits and protection tab', () => {
   });
 });
 
-const allFeatures = { broadcasts: true, contacts: true, templates: true, api_keys: true };
+const allFeatures = {
+  broadcasts: true,
+  contacts: true,
+  templates: true,
+  api_keys: true,
+  mail_clients: true,
+};
 
 function renderTab({ canManage }: { canManage: boolean }) {
   const client = new QueryClient({

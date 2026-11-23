@@ -15,7 +15,9 @@ import {
   EXTERNAL_MAIL_IMAP_PORT,
   EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
   EXTERNAL_MAIL_SMTP_PORTS,
+  EXTERNAL_MAIL_APP_PASSWORD_PAGES,
   EXTERNAL_MAIL_SERVER_PRESETS,
+  presetForAddress,
   EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
   EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
   type ExternalMailBackfillDays,
@@ -119,6 +121,8 @@ export function ExternalPasswordForm({
   const t = useT('mailbox');
   const bind = useBindExternalMailCredentials(organizationId);
   const [host, setHost] = useState('');
+  // The IMAP server Zmail filled in itself; an address change may replace it, a typed one never.
+  const [autoHost, setAutoHost] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [smtpHost, setSmtpHost] = useState('');
@@ -144,6 +148,11 @@ export function ExternalPasswordForm({
     const timer = setTimeout(() => setSlow(true), SLOW_SIGN_IN_MS);
     return () => clearTimeout(timer);
   }, [bind.isPending]);
+
+  const activePreset = EXTERNAL_MAIL_SERVER_PRESETS.find(
+    preset => preset.imap === host.trim().toLowerCase()
+  );
+  const appPasswordPage = activePreset ? EXTERNAL_MAIL_APP_PASSWORD_PAGES[activePreset.id] : undefined;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -225,18 +234,49 @@ export function ExternalPasswordForm({
                   disabled={bind.isPending}
                   onClick={() => {
                     setHost(preset.imap);
+                    setAutoHost(preset.imap);
                     setSmtpHost(preset.smtp);
                     setSmtpPort(preset.smtpPort);
                     setSmtpEdited(false);
                     setErrors({});
                   }}
                 >
-                  {preset.label}
+                  {preset.id === 'exmail' || preset.id === 'aliyun'
+                    ? t(`external.password.presetLabels.${preset.id}`)
+                    : preset.label}
                 </Button>
               ))}
             </div>
           </div>
         )}
+        <div className="space-y-1.5">
+          <Label htmlFor={`${ids}-username`}>{t('external.password.username')}</Label>
+          <Input
+            id={`${ids}-username`}
+            name="username"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder={t('external.password.usernamePlaceholder')}
+            maxLength={EXTERNAL_MAIL_USERNAME_MAX_LENGTH}
+            value={username}
+            disabled={bind.isPending}
+            aria-invalid={errors.username ? true : undefined}
+            errorText={fieldError('username')}
+            onChange={event => {
+              const value = event.target.value;
+              setUsername(value);
+              const preset = presetForAddress(value);
+              if (reconnect || !preset) return;
+              if (host.trim() !== '' && host !== autoHost) return;
+              setHost(preset.imap);
+              setAutoHost(preset.imap);
+              setSmtpHost(preset.smtp);
+              setSmtpPort(preset.smtpPort);
+              setSmtpEdited(false);
+            }}
+          />
+        </div>
         <div className="grid gap-3 sm:grid-cols-[1fr_6rem]">
           <div className="space-y-1.5">
             <Label htmlFor={`${ids}-host`}>{t('external.password.host')}</Label>
@@ -277,23 +317,24 @@ export function ExternalPasswordForm({
         <p id={`${ids}-port-hint`} className="-mt-2 text-xs text-text-muted">
           {t('external.password.portHint', { port: EXTERNAL_MAIL_IMAP_PORT })}
         </p>
-        <div className="space-y-1.5">
-          <Label htmlFor={`${ids}-username`}>{t('external.password.username')}</Label>
-          <Input
-            id={`${ids}-username`}
-            name="username"
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            placeholder={t('external.password.usernamePlaceholder')}
-            maxLength={EXTERNAL_MAIL_USERNAME_MAX_LENGTH}
-            value={username}
-            disabled={bind.isPending}
-            aria-invalid={errors.username ? true : undefined}
-            errorText={fieldError('username')}
-            onChange={event => setUsername(event.target.value)}
-          />
-        </div>
+        {activePreset ? (
+          <Alert className="py-3">
+            <AlertDescription className="space-y-1 text-[13px]">
+              <p className="font-medium text-text">{t('external.password.codeTitle')}</p>
+              <p>{t(`external.password.codeSteps.${activePreset.id}`)}</p>
+              {appPasswordPage ? (
+                <a
+                  href={appPasswordPage}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-primary underline-offset-4 hover:underline"
+                >
+                  {t(`external.password.codeLinks.${activePreset.id as 'gmail' | 'icloud'}`)}
+                </a>
+              ) : null}
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <div className="space-y-1.5">
           <Label htmlFor={`${ids}-password`}>{t('external.password.password')}</Label>
           <PasswordInput

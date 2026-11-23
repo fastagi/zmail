@@ -103,7 +103,7 @@ export const EXTERNAL_MAIL_CREDENTIALS_REQUEST_TIMEOUT_MS = 65_000;
 export const EXTERNAL_MAIL_IMAP_PORT = 993;
 /**
  * Well-known IMAP and SMTP servers, offered as one-click presets in the app password form. The
- * labels are brand names and stay untranslated.
+ * labels are the English names; the form shows the localized `external.password.presetLabels`.
  */
 export const EXTERNAL_MAIL_SERVER_PRESETS = [
   { id: 'qq', label: 'QQ', imap: 'imap.qq.com', smtp: 'smtp.qq.com', smtpPort: 465 },
@@ -152,6 +152,45 @@ export const EXTERNAL_MAIL_SERVER_PRESETS = [
   smtp: string;
   smtpPort: 465 | 587;
 }[];
+
+export type ExternalMailServerPreset = (typeof EXTERNAL_MAIL_SERVER_PRESETS)[number];
+export type ExternalMailServerPresetId = ExternalMailServerPreset['id'];
+
+/**
+ * Address domains whose servers are known. Tencent Exmail serves company domains, so it is never
+ * guessed from an address.
+ */
+const PRESET_BY_DOMAIN: Readonly<Record<string, ExternalMailServerPresetId>> = {
+  'qq.com': 'qq',
+  'foxmail.com': 'qq',
+  'vip.qq.com': 'qq',
+  '163.com': 'netease163',
+  'vip.163.com': 'netease163',
+  '126.com': 'netease126',
+  'aliyun.com': 'aliyun',
+  'gmail.com': 'gmail',
+  'googlemail.com': 'gmail',
+  'icloud.com': 'icloud',
+  'me.com': 'icloud',
+  'mac.com': 'icloud',
+  'yahoo.com': 'yahoo',
+  'fastmail.com': 'fastmail',
+  'fastmail.fm': 'fastmail',
+};
+
+/** The preset of an address's domain, if Zmail knows its servers. */
+export function presetForAddress(address: string): ExternalMailServerPreset | undefined {
+  const at = address.trim().lastIndexOf('@');
+  if (at < 1) return undefined;
+  const id = PRESET_BY_DOMAIN[address.trim().slice(at + 1).toLowerCase()];
+  return id ? EXTERNAL_MAIL_SERVER_PRESETS.find(preset => preset.id === id) : undefined;
+}
+
+/** Where a provider issues app passwords, for those with a stable page. */
+export const EXTERNAL_MAIL_APP_PASSWORD_PAGES: Partial<Record<ExternalMailServerPresetId, string>> = {
+  gmail: 'https://myaccount.google.com/apppasswords',
+  icloud: 'https://account.apple.com',
+};
 
 /** SMTP submission: implicit TLS on 465 (the default) or STARTTLS on 587. */
 export const EXTERNAL_MAIL_SMTP_PORTS = [465, 587] as const;

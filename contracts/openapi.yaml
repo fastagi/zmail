@@ -10883,6 +10883,224 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-app-passwords:
+    get:
+      operationId: listMailAppPasswords
+      summary: List the caller's mail client passwords
+      description: Lists the caller's own passwords that are not revoked, newest first, never with a secret,
+        plus whether mail apps can sign in (`access`) and the IMAP server to configure (`server`). Works
+        without the `mail_clients` feature so a member can always remove a device. See MAILBOXES.md, Mail
+        Client Access. The response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The caller's passwords, access state, and server settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAppPasswordListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailAppPassword
+      summary: Create a mail client password for one device
+      description: Needs the `mail_clients` feature and the organization switch on, then the caller's account
+        password and, with two-factor sign-in on, an authenticator or recovery code. A wrong credential is
+        `422` with a field error, never `401`. The `secret` is returned only in this response; the API keeps
+        only its keyed hash. At most 20 passwords that are not revoked per member and organization. The
+        response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMailAppPasswordRequest'
+      responses:
+        '201':
+          description: The password with its one-time secret.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAppPasswordCreatedResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The membership lacks `mail_clients` (`ORGANIZATION.FEATURE_NOT_GRANTED`) or the
+            organization turned mail apps off (`MAILBOX.MAIL_CLIENT_ACCESS_DISABLED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The member already holds 20 passwords (`MAILBOX.APP_PASSWORD_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-app-passwords/{password_id}:
+    delete:
+      operationId: revokeMailAppPassword
+      summary: Revoke one of the caller's mail client passwords
+      description: Takes effect at once; open mail app sessions end within 60 seconds. Another member's
+        password, or one already revoked, is `404 MAILBOX.APP_PASSWORD_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailAppPasswordID'
+      responses:
+        '204':
+          description: The password is revoked.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-app-password-directory:
+    get:
+      operationId: listMailAppPasswordDirectory
+      summary: List every mail client password of the organization
+      description: Owners and admins only. Newest first, including passwords revoked in the last 90 days, with
+        the owner's identity. Never carries a secret or anything about mail. The response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated passwords of the organization.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAppPasswordDirectoryPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-app-password-directory/{password_id}:
+    delete:
+      operationId: forceRevokeMailAppPassword
+      summary: Revoke a member's mail client password
+      description: Owners and admins only; records `revoke_reason` `admin`. An id outside the organization or
+        already revoked is `404 MAILBOX.APP_PASSWORD_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailAppPasswordID'
+      responses:
+        '204':
+          description: The password is revoked.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-client-settings:
+    get:
+      operationId: getMailClientSettings
+      summary: Read whether the organization lets members use mail apps
+      description: Any member may read it. An organization that never saved the switch allows mail apps.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The switch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailClientSettingsResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailClientSettings
+      summary: Replace whether the organization lets members use mail apps
+      description: Owners and admins only. Turning it off keeps every password but none can sign in, and open
+        mail app sessions end within 60 seconds.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailClientSettingsRequest'
+      responses:
+        '200':
+          description: The switch after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailClientSettingsResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-delivery-events:
     post:
       operationId: receiveMailDeliveryEvent
@@ -11400,6 +11618,13 @@ components:
       description: Positive suppression list entry identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailAppPasswordID:
+      name: password_id
+      in: path
+      required: true
+      description: Positive mail client password identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
   responses:
     Forbidden:
       description: The caller is authenticated but not allowed to perform this operation.
@@ -11906,6 +12131,9 @@ components:
         - MAILBOX.AGENT_GRANT_INVALID
         - MAILBOX.AGENT_GRANT_LIMIT
         - MAILBOX.AGENT_GRANT_EXISTS
+        - MAILBOX.APP_PASSWORD_NOT_FOUND
+        - MAILBOX.APP_PASSWORD_LIMIT_REACHED
+        - MAILBOX.MAIL_CLIENT_ACCESS_DISABLED
     FieldErrors:
       type: object
       additionalProperties:
@@ -12913,6 +13141,7 @@ components:
         - contacts
         - templates
         - api_keys
+        - mail_clients
       properties:
         broadcasts:
           type: boolean
@@ -12926,6 +13155,9 @@ components:
         api_keys:
           type: boolean
           description: Use the member's API keys in this organization.
+        mail_clients:
+          type: boolean
+          description: Create mail client passwords and read mail in mail apps.
     OrganizationMemberFeaturesUpdateRequest:
       type: object
       description: Names at least one feature; omitted features keep their value.
@@ -12939,6 +13171,8 @@ components:
         templates:
           type: boolean
         api_keys:
+          type: boolean
+        mail_clients:
           type: boolean
     OrganizationOwnershipTransferRequest:
       type: object
@@ -16326,6 +16560,9 @@ components:
           type: boolean
         api_keys:
           type: boolean
+        mail_clients:
+          type: boolean
+          description: Granted when absent.
     MemberImportRequest:
       type: object
       additionalProperties: false
@@ -16343,7 +16580,7 @@ components:
           minLength: 1
           maxLength: 253
         features:
-          description: Absent means the new-member defaults, contacts and templates.
+          description: Absent means the new-member defaults, contacts, templates, and mail_clients.
           $ref: '#/components/schemas/MemberImportFeatures'
         rows:
           type: array
@@ -18634,6 +18871,337 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailTriageSetting'
+    MailClientProtocol:
+      type: string
+      enum:
+        - imap
+        - smtp
+    MailAppPassword:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - scopes
+        - hint
+        - created_at
+        - last_used_at
+        - last_used_protocol
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MailClientProtocol'
+        hint:
+          type: string
+          description: The secret's last four letters.
+          pattern: '^[a-z]{4}$'
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        last_used_protocol:
+          oneOf:
+            - $ref: '#/components/schemas/MailClientProtocol'
+            - type: 'null'
+    MailAppPasswordCreated:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - scopes
+        - hint
+        - created_at
+        - last_used_at
+        - last_used_protocol
+        - secret
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MailClientProtocol'
+        hint:
+          type: string
+          pattern: '^[a-z]{4}$'
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        last_used_protocol:
+          oneOf:
+            - $ref: '#/components/schemas/MailClientProtocol'
+            - type: 'null'
+        secret:
+          type: string
+          description: Shown only in this response; four groups of four lowercase letters.
+          pattern: '^[a-z]{4}( [a-z]{4}){3}$'
+    MailClientAccess:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - reason
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the caller's mail apps can sign in in this organization.
+        reason:
+          description: Why they cannot; null while `enabled` is true.
+          oneOf:
+            - type: string
+              enum:
+                - unavailable
+                - organization_disabled
+                - feature_not_granted
+            - type: 'null'
+    MailClientServer:
+      type: object
+      additionalProperties: false
+      required:
+        - imap_host
+        - imap_port
+        - imap_security
+      properties:
+        imap_host:
+          type: string
+          minLength: 1
+        imap_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        imap_security:
+          type: string
+          enum:
+            - ssl_tls
+    MailAppPasswordList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - limit
+        - access
+        - server
+      properties:
+        items:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/MailAppPassword'
+        limit:
+          type: integer
+          description: The most passwords a member may hold that are not revoked.
+          minimum: 1
+        access:
+          $ref: '#/components/schemas/MailClientAccess'
+        server:
+          $ref: '#/components/schemas/MailClientServer'
+    MailAppPasswordListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailAppPasswordList'
+    MailAppPasswordCreatedResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailAppPasswordCreated'
+    CreateMailAppPasswordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - scopes
+        - current_password
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MailClientProtocol'
+        current_password:
+          type: string
+          minLength: 1
+          maxLength: 256
+        totp_code:
+          type: string
+          description: Required when the account has two-factor sign-in on.
+          maxLength: 32
+    MailAppPasswordDirectoryEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - scopes
+        - hint
+        - created_at
+        - last_used_at
+        - last_used_protocol
+        - membership_id
+        - user_id
+        - user_email
+        - user_name
+        - revoked_at
+        - revoke_reason
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MailClientProtocol'
+        hint:
+          type: string
+          pattern: '^[a-z]{4}$'
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        last_used_protocol:
+          oneOf:
+            - $ref: '#/components/schemas/MailClientProtocol'
+            - type: 'null'
+        membership_id:
+          $ref: '#/components/schemas/PositiveID'
+        user_id:
+          $ref: '#/components/schemas/PositiveID'
+        user_email:
+          type: string
+        user_name:
+          type: string
+        revoked_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        revoke_reason:
+          oneOf:
+            - type: string
+              enum:
+                - user
+                - admin
+            - type: 'null'
+    MailAppPasswordDirectoryPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAppPasswordDirectoryEntry'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    MailClientSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - access_enabled
+        - updated_at
+      properties:
+        access_enabled:
+          type: boolean
+        updated_at:
+          description: Null until an owner or admin saves the switch.
+          type:
+            - string
+            - 'null'
+          format: date-time
+    MailClientSettingsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailClientSettings'
+    UpdateMailClientSettingsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - access_enabled
+      properties:
+        access_enabled:
+          type: boolean
     MailReplyDraftResponse:
       type: object
       additionalProperties: false

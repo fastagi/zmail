@@ -68,11 +68,13 @@ func ProvideService(
 	notices broadcastNoticeSender,
 	inviter domain.OrganizationRosterInviter,
 	notifications domain.NotificationPublisher,
+	reverifier domain.CredentialReverifier,
 ) *service {
 	svc := NewService(repo, memberships, templates, contacts, broadcasts, organize, domains, zones, domainProvider,
 		transport, notifier, settings, transactional, limits, accounts, notices)
 	svc.inviter = inviter
 	svc.notifications = notifications
+	svc.reverifier = reverifier
 	return svc
 }
 
@@ -144,6 +146,9 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_19_090000_add_mail_domain_error_code",
 			"2026_12_20_090000_add_broadcast_notices",
 			"2026_12_21_100000_add_mailbox_pending_owner",
+			"2026_12_24_090000_add_mail_message_sources",
+			"2026_12_24_100000_add_mail_imap_uids",
+			"2026_12_24_120000_add_mail_app_passwords",
 		),
 	)
 }

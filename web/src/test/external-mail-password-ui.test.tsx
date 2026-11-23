@@ -446,6 +446,51 @@ describe('app password connect step', () => {
     }
   });
 
+  it('fills the servers from the address of a known provider and says how to get its code', async () => {
+    renderWith(<ConnectDialog onOpenChange={vi.fn()} />);
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText('Username'), {
+      target: { value: 'Someone@QQ.com' },
+    });
+    expect(within(form).getByLabelText('IMAP server')).toHaveValue('imap.qq.com');
+    expect(within(form).getByLabelText('SMTP server (optional)')).toHaveValue('smtp.qq.com');
+    expect(within(form).getByRole('button', { name: 'QQ' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(form).getByText(/generate an authorization code/i)).toBeInTheDocument();
+    fireEvent.change(within(form).getByLabelText('Username'), {
+      target: { value: 'someone@gmail.com' },
+    });
+    expect(within(form).getByLabelText('IMAP server')).toHaveValue('imap.gmail.com');
+    expect(within(form).getByRole('link', { name: /app passwords/i })).toHaveAttribute(
+      'href',
+      'https://myaccount.google.com/apppasswords'
+    );
+  });
+
+  it('keeps a server the member typed when the address changes', async () => {
+    renderWith(<ConnectDialog onOpenChange={vi.fn()} />);
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText('IMAP server'), {
+      target: { value: 'mail.example.com' },
+    });
+    fireEvent.change(within(form).getByLabelText('Username'), {
+      target: { value: 'someone@qq.com' },
+    });
+    expect(within(form).getByLabelText('IMAP server')).toHaveValue('mail.example.com');
+    expect(within(form).queryByText(/generate an authorization code/i)).not.toBeInTheDocument();
+  });
+
+  it('names Chinese providers in Chinese', async () => {
+    renderWith(<ConnectDialog />, 'zh-Hans');
+    expect(screen.getByRole('button', { name: 'IMAP' })).toHaveAccessibleDescription(/QQ、163/);
+    fireEvent.click(screen.getByRole('button', { name: 'IMAP' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const form = await screen.findByRole('dialog', { name: '使用应用专用密码连接' });
+    expect(await within(form).findByRole('button', { name: '腾讯企业邮' })).toBeInTheDocument();
+    expect(within(form).getByRole('button', { name: '阿里邮箱' })).toBeInTheDocument();
+    fireEvent.click(within(form).getByRole('button', { name: '163' }));
+    expect(within(form).getByText(/新增授权码/)).toBeInTheDocument();
+  });
+
   it('renders the form in Simplified Chinese', async () => {
     renderWith(<ConnectDialog />, 'zh-Hans');
     fireEvent.click(screen.getByRole('button', { name: 'IMAP' }));

@@ -136,6 +136,7 @@ const messages = {
     contacts: '联系人',
     templates: '模板',
     api_keys: 'API 密钥',
+    mail_clients: '邮件客户端',
   },
   featuresColumn: '可用功能',
   featuresAllForManagers: '全部功能',

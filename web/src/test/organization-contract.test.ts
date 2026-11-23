@@ -271,7 +271,13 @@ describe('organization network contract validation', () => {
 });
 
 describe('member feature grants', () => {
-  const grants = { broadcasts: false, contacts: true, templates: false, api_keys: true };
+  const grants = {
+    broadcasts: false,
+    contacts: true,
+    templates: false,
+    api_keys: true,
+    mail_clients: false,
+  };
 
   it('reads grants from organization, context, and member views', () => {
     expect(parseOrganizationResponse({ ...organization, role: 'member', features: grants })).toMatchObject({
@@ -279,13 +285,29 @@ describe('member feature grants', () => {
     });
     // An API from before grants sends none; the view still parses.
     expect(parseOrganizationResponse(organization).features).toBeUndefined();
+    // An API from before mail client access omits that grant; it reads as not granted.
+    const earlier = {
+      broadcasts: grants.broadcasts,
+      contacts: grants.contacts,
+      templates: grants.templates,
+      api_keys: grants.api_keys,
+    };
+    expect(
+      parseOrganizationResponse({ ...organization, role: 'member', features: earlier }).features
+    ).toEqual({ ...earlier, mail_clients: false });
     expect(() =>
       parseOrganizationResponse({ ...organization, features: { ...grants, extra: true } })
     ).toThrow(ApiError);
   });
 
   it('gives owners, admins, and pre-grant views every feature', () => {
-    const all = { broadcasts: true, contacts: true, templates: true, api_keys: true };
+    const all = {
+      broadcasts: true,
+      contacts: true,
+      templates: true,
+      api_keys: true,
+      mail_clients: true,
+    };
     expect(effectiveMemberFeatures('member', grants)).toEqual(grants);
     expect(effectiveMemberFeatures('admin', grants)).toEqual(all);
     expect(effectiveMemberFeatures('owner', grants)).toEqual(all);
@@ -306,13 +328,25 @@ describe('member feature grants', () => {
       items: expect.arrayContaining([
         expect.objectContaining({
           id: 3,
-          features: { broadcasts: false, contacts: true, templates: true, api_keys: false },
+          features: {
+            broadcasts: false,
+            contacts: true,
+            templates: true,
+            api_keys: false,
+            mail_clients: true,
+          },
         }),
       ]),
     });
     expect(store.updateMemberFeatures(owner, 1, 3, { broadcasts: true })).toMatchObject({
       id: 3,
-      features: { broadcasts: true, contacts: true, templates: true, api_keys: false },
+      features: {
+        broadcasts: true,
+        contacts: true,
+        templates: true,
+        api_keys: false,
+        mail_clients: true,
+      },
     });
     expect(store.resolveContext(member, 1)?.features).toMatchObject({ broadcasts: true });
     expect(store.updateMemberFeatures(member, 1, 3, { api_keys: true })).toBe('permission_denied');

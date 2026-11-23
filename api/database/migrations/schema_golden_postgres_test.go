@@ -153,5 +153,58 @@ func dumpSchema(t *testing.T, db *gorm.DB) string {
 		definition = strings.ReplaceAll(definition, `"`+schema+`".`, "")
 		fmt.Fprintf(&out, "INDEX %s\n", definition)
 	}
+
+	// Functions are pinned by signature and a digest of their body; functions an extension owns are
+	// left out because the extension's version, not a migration, decides them.
+	type function struct {
+		Signature string
+		Digest    string
+	}
+	var functions []function
+	require.NoError(t, db.Raw(`
+		SELECT p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS signature,
+		       md5(p.prosrc) AS digest
+		FROM pg_proc p
+		WHERE p.pronamespace = current_schema()::regnamespace
+		  AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+		ORDER BY 1
+	`).Scan(&functions).Error)
+	out.WriteString("\n")
+	for _, fn := range functions {
+		fmt.Fprintf(&out, "FUNCTION %s %s\n", fn.Signature, fn.Digest)
+	}
+
+	type trigger struct {
+		Name       string
+		Definition string
+	}
+	var triggers []trigger
+	require.NoError(t, db.Raw(`
+		SELECT tg.tgname AS name, pg_get_triggerdef(tg.oid) AS definition
+		FROM pg_trigger tg
+		JOIN pg_class cl ON cl.oid = tg.tgrelid
+		WHERE cl.relnamespace = current_schema()::regnamespace
+		  AND NOT tg.tgisinternal
+		ORDER BY cl.relname, tg.tgname
+	`).Scan(&triggers).Error)
+	out.WriteString("\n")
+	for _, tg := range triggers {
+		definition := strings.ReplaceAll(tg.Definition, schema+".", "")
+		definition = strings.ReplaceAll(definition, `"`+schema+`".`, "")
+		fmt.Fprintf(&out, "TRIGGER %s %s\n", tg.Name, definition)
+	}
 	return out.String()
+}
+
+// TestGoldenDumpIncludesTriggers keeps plpgsql functions and triggers in the golden schema, so a
+// change to a trigger body or its firing rule fails the golden comparison like a column change.
+func TestGoldenDumpIncludesTriggers(t *testing.T) {
+	db := testplatform.OpenPostgres(t, nil)
+	migrateAll(t, db)
+	dump := dumpSchema(t, db)
+	require.Contains(t, dump, "\nTRIGGER mail_imap_assign_uid ")
+	require.Contains(t, dump, "\nTRIGGER mail_imap_forget_folder ")
+	require.Contains(t, dump, "\nFUNCTION mail_imap_folder_key(")
+	require.Contains(t, dump, "\nFUNCTION mail_imap_assign_uid()")
+	require.NotContains(t, dump, "FUNCTION similarity(", "extension functions are not part of the schema")
 }

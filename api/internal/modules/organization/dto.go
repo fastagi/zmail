@@ -42,10 +42,11 @@ type UpdateOrganizationMemberRequest struct {
 // UpdateOrganizationMemberFeaturesRequest changes the named feature grants of one member; a
 // feature left out keeps its value.
 type UpdateOrganizationMemberFeaturesRequest struct {
-	Broadcasts *bool `json:"broadcasts"`
-	Contacts   *bool `json:"contacts"`
-	Templates  *bool `json:"templates"`
-	APIKeys    *bool `json:"api_keys"`
+	Broadcasts  *bool `json:"broadcasts"`
+	Contacts    *bool `json:"contacts"`
+	Templates   *bool `json:"templates"`
+	APIKeys     *bool `json:"api_keys"`
+	MailClients *bool `json:"mail_clients"`
 }
 
 func (r *UpdateOrganizationMemberFeaturesRequest) patch() domain.MemberFeaturePatch {
@@ -54,6 +55,7 @@ func (r *UpdateOrganizationMemberFeaturesRequest) patch() domain.MemberFeaturePa
 	}
 	return domain.MemberFeaturePatch{
 		Broadcasts: r.Broadcasts, Contacts: r.Contacts, Templates: r.Templates, APIKeys: r.APIKeys,
+		MailClients: r.MailClients,
 	}
 }
 
@@ -62,25 +64,27 @@ func (r *UpdateOrganizationMemberFeaturesRequest) validationErrors() map[string]
 		return nil
 	}
 	return map[string][]string{
-		"features": {"name at least one of broadcasts, contacts, templates, or api_keys"},
+		"features": {"name at least one of broadcasts, contacts, templates, api_keys, or mail_clients"},
 	}
 }
 
 // MemberFeaturesResponse is what a membership may use. Owners and admins report every feature.
 type MemberFeaturesResponse struct {
-	Broadcasts bool `json:"broadcasts"`
-	Contacts   bool `json:"contacts"`
-	Templates  bool `json:"templates"`
-	APIKeys    bool `json:"api_keys"`
+	Broadcasts  bool `json:"broadcasts"`
+	Contacts    bool `json:"contacts"`
+	Templates   bool `json:"templates"`
+	APIKeys     bool `json:"api_keys"`
+	MailClients bool `json:"mail_clients"`
 }
 
 func toMemberFeaturesResponse(role domain.OrganizationRole, stored domain.MemberFeatures) MemberFeaturesResponse {
 	effective := role.EffectiveFeatures(stored)
 	return MemberFeaturesResponse{
-		Broadcasts: effective.Broadcasts,
-		Contacts:   effective.Contacts,
-		Templates:  effective.Templates,
-		APIKeys:    effective.APIKeys,
+		Broadcasts:  effective.Broadcasts,
+		Contacts:    effective.Contacts,
+		Templates:   effective.Templates,
+		APIKeys:     effective.APIKeys,
+		MailClients: effective.MailClients,
 	}
 }
 

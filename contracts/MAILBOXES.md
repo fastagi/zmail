@@ -132,6 +132,13 @@ recorded but has no special rights to it. A removed member loses access on their
 | Send lane usage | `GET /api/mail-send-lanes` | `GET /v1/mail-send-lanes` | `200` envelope, 3 lanes |
 | List the suppression list | `GET /api/mail-suppressions` | `GET /v1/mail-suppressions` | Keyset envelope |
 | Remove a suppressed address | `DELETE /api/mail-suppressions/:id` | `DELETE /v1/mail-suppressions/:suppression_id` | `204` |
+| List my mail client passwords | `GET /api/mail-app-passwords` | `GET /v1/mail-app-passwords` | `200` envelope, at most 20 items |
+| Create a mail client password | `POST /api/mail-app-passwords` | `POST /v1/mail-app-passwords` | `201` envelope |
+| Revoke my mail client password | `DELETE /api/mail-app-passwords/:id` | `DELETE /v1/mail-app-passwords/:password_id` | `204` |
+| List the organization's mail client passwords (owners and admins) | none yet | `GET /v1/mail-app-password-directory` | Paginated envelope |
+| Revoke a member's mail client password (owners and admins) | none yet | `DELETE /v1/mail-app-password-directory/:password_id` | `204` |
+| Read the mail client switch | `GET /api/mail-client-settings` | `GET /v1/mail-client-settings` | `200` envelope |
+| Replace the mail client switch | `PUT /api/mail-client-settings` | `PUT /v1/mail-client-settings` | `200` envelope |
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
 | Delivery event | none | `POST /v1/mail-delivery-events` | `201`, or `200` for a repeat |
 
@@ -2888,7 +2895,7 @@ model must use the masked form.
 
 ### Member Feature Grants
 
-An organization grants each `member` four features (see
+An organization grants each `member` five features (see
 [`ORGANIZATIONS.md`](ORGANIZATIONS.md#member-feature-grants)); owners and admins always have all of
 them. A route that needs a feature the active membership lacks returns
 `403 ORGANIZATION.FEATURE_NOT_GRANTED` before anything else is checked.
@@ -2901,6 +2908,140 @@ them. A route that needs a feature the active membership lacks returns
 | `templates` | `POST`, `PUT`, and `DELETE` on `/v1/mail-templates`, and `POST /v1/mail-templates/:template_id/tests` |
 | `templates`, `broadcasts`, or `api_keys` | `GET /v1/mail-templates`, `GET /v1/mail-templates/:template_id`, `POST /v1/mail-template-previews` |
 | `api_keys` | Every route authenticated by `X-API-Key` under [Programmatic Sending](#programmatic-sending), [Agent Grants](#agent-grants), and [Transactional Mail](#transactional-mail) |
+| `mail_clients` | `POST /v1/mail-app-passwords`, and signing in from a mail app (see [Mail Client Access](#mail-client-access)) |
+
+## Mail Client Access
+
+Members can read their mail in a desktop or phone mail app (Apple Mail, Outlook, Thunderbird, and
+others) over IMAP. A mail app never signs in with the account password: each device gets its own
+mail client password, which the member creates in the console, sees once, and can revoke on its
+own. These are unrelated to the outside provider's app password used under
+[Binding With An App Password](#binding-with-an-app-password).
+
+### Mail Client Passwords
+
+`POST /v1/mail-app-passwords` (session) creates one for the caller in the active organization:
+
+```json
+{ "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "current_password": "...", "totp_code": "123456" }
+```
+
+| Field | Rule |
+|---|---|
+| `name` | Required, 1 to 64 characters after trimming, the device's name |
+| `scopes` | Required, one or both of `imap` and `smtp`, no repeats. `smtp` is stored for mail submission, which is not offered yet |
+| `current_password` | Required, the caller's account password |
+| `totp_code` | Required when the account has two-factor sign-in on: an authenticator or recovery code |
+
+A mail client password bypasses two-factor sign-in, so creating one asks for the account
+credentials again. A wrong or missing password or code is `422 COMMON.VALIDATION_FAILED` with an
+error on `current_password` or `totp_code` (never `401`, which would read as an ended session).
+These checks share a budget of 5 failures per user per 15 minutes; past it the route answers
+`429 COMMON.RATE_LIMITED` with `Retry-After`. The body is at most 2 KiB.
+
+It answers `201` with the password and, only in this response, its `secret`:
+
+```json
+{
+  "id": 12, "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "hint": "mnop",
+  "created_at": "2026-12-24T09:00:00Z", "last_used_at": null, "last_used_protocol": null,
+  "secret": "abcd efgh ijkl mnop"
+}
+```
+
+- `secret` is 16 random lowercase letters in four groups. Mail apps may send it with or without the
+  spaces and in any case. The API keeps only a keyed hash of it (HMAC-SHA256 with the instance's
+  `MAIL_APP_PASSWORD_PEPPER`); nobody can read it again, and no other response carries it.
+  Without a configured pepper creating answers `503 COMMON.SERVICE_UNAVAILABLE`.
+- `hint` is the secret's last four letters, to tell devices apart.
+- A member holds at most 20 passwords that are not revoked per organization; the next is
+  `409 MAILBOX.APP_PASSWORD_LIMIT_REACHED`.
+- Creating needs the `mail_clients` feature (`403 ORGANIZATION.FEATURE_NOT_GRANTED`) and the
+  organization switch on (`403 MAILBOX.MAIL_CLIENT_ACCESS_DISABLED`), checked in that order before
+  the credentials.
+
+`GET /v1/mail-app-passwords` lists the caller's own passwords that are not revoked, newest first,
+without secrets, and tells the console whether mail apps can sign in and where:
+
+```json
+{
+  "items": [{ "id": 12, "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "hint": "mnop",
+    "created_at": "2026-12-24T09:00:00Z", "last_used_at": "2026-12-24T10:00:00Z", "last_used_protocol": "imap" }],
+  "limit": 20,
+  "access": { "enabled": false, "reason": "organization_disabled" },
+  "server": { "imap_host": "imap.zmail.im", "imap_port": 993, "imap_security": "ssl_tls" }
+}
+```
+
+`access.reason` is `unavailable` when the instance has no pepper configured,
+`organization_disabled` when the organization switch is off, `feature_not_granted` when the
+membership lacks `mail_clients`, and `null` while `enabled` is `true`, checked in that order. Listing and revoking work without the feature, so a member can always remove a device.
+`server` comes from `MAIL_GATEWAY_PUBLIC_IMAP_HOST` and `MAIL_GATEWAY_PUBLIC_IMAP_PORT`.
+
+`DELETE /v1/mail-app-passwords/:password_id` revokes one of the caller's own passwords at once and
+answers `204`; anything else, including another member's password or one already revoked, is
+`404 MAILBOX.APP_PASSWORD_NOT_FOUND`.
+
+Owners and admins see every password of the organization with `GET /v1/mail-app-password-directory`
+(`page`, `per_page` up to 100), newest first. Each item adds the owner's `membership_id`, `user_id`,
+`user_email`, and `user_name`, plus `revoked_at` and `revoke_reason` (`user` or `admin`) for
+passwords revoked in the last 90 days. It never carries a secret or anything about mail.
+`DELETE /v1/mail-app-password-directory/:password_id` revokes a member's password with
+`revoke_reason` `admin` and answers `204`; an id outside the organization or already revoked is
+`404 MAILBOX.APP_PASSWORD_NOT_FOUND`. Members get `403 PERMISSION.DENIED` on both.
+
+Creating and revoking write a user audit change (see [`AUDIT.md`](AUDIT.md)) with resource
+`mail_app_passwords`, action `create` or `delete`, the password id as target, and metadata holding
+only `name_length`, `scopes`, and `by_admin`. Revoked passwords are deleted 90 days
+after revocation; leaving the organization deletes the member's passwords with the membership.
+
+### Organization Switch
+
+`GET /v1/mail-client-settings` answers `{ "access_enabled": true, "updated_at": null }` to any
+member; `updated_at` is `null` until an owner or admin saves the switch, and an organization that
+never saved it has mail apps allowed. `PUT /v1/mail-client-settings` with
+`{ "access_enabled": false }` replaces it (owners and admins; `403 PERMISSION.DENIED` otherwise).
+Turning it off keeps every password but none can sign in; turning it on again restores them.
+
+### Signing In
+
+A mail app signs in with a full mailbox address as the user name (or the account email) and a mail
+client password. Sign-in succeeds only when the password is not revoked, has the protocol's scope,
+the organization switch is on, the membership still exists and has `mail_clients`, and the address
+names a mailbox the member may `view` (see [Access](#access)). Every failure looks the same to the
+mail app. Revoking a password, turning the switch off, withdrawing the feature, or removing the
+member ends that device's open sessions within 60 seconds.
+
+### IMAP Folders
+
+After signing in, a mail app sees the mailboxes the member may `view`, read-only in this release.
+The mailbox named by the user name is the root; every other shared mailbox is under
+`Shared/<address>/`. Connected mailbox copies (`origin` `connected`) are not offered.
+
+| IMAP folder | Messages |
+|---|---|
+| `INBOX` | Inbound messages in the `default` placement |
+| `Sent` (`\Sent`) | Outbound messages in the `default` placement that did not fail |
+| `Archive` (`\Archive`) | The `archive` placement |
+| `Trash` (`\Trash`) | The `trash` placement |
+| The folder's name | The `folder` placement of that folder; `/` in a name shows as `∕`, and a name that collides with another folder gets ` (1)` |
+
+Each message has a UID that grows in the order it entered the folder; moving a message out and
+back gives it a new UID. A folder's UIDVALIDITY changes only when the folder is created again. A
+mail app can set and clear `\Seen` and `\Flagged`, which are the reader's own read and starred
+state from [Read State](#read-state). Creating, renaming, or deleting folders, appending, copying,
+moving, and expunging are refused.
+
+### Message Sources
+
+A mail app downloads each message as RFC 5322. Inbound mail delivered after this release keeps its
+raw message byte for byte, at most 5 MiB, deleted with the message. Older mail and outbound mail
+are rebuilt from the stored fields: `From`, `To`, `Cc`, `Subject`, `Date` (when Zmail stored it),
+`Message-ID`, `In-Reply-To`, `References`, the text and HTML bodies, and the attached files, with
+the header `X-Zmail-Reconstructed: 1`; `Reply-To`, the original `Date`, signatures, and inline image
+references are lost. Mail apps receive the source unmasked: one-time codes and sign-in links are
+not masked as in [Masked Secrets](#masked-secrets). An organization that must not let codes reach
+devices turns the switch off.
 
 ## Programmatic Sending
 
@@ -3564,7 +3705,9 @@ so an unsigned caller cannot learn which addresses exist.
 The inbound route carries no organization header: the recipient address identifies the mailbox,
 and the mailbox its organization. A message is identified by its `Message-ID`, or by a hash of its
 content when it has none, once per mailbox. The API stores the first `text/plain` and first `text/html` part, converted to UTF-8 and
-truncated to 256 KiB each. Attachments are not stored.
+truncated to 256 KiB each, the attached files as described under [Attachments](#attachments), and
+the raw message byte for byte as its source (see [Message Sources](#message-sources)). A repeated
+delivery stores nothing new.
 
 ### New-Mail Notifications
 
@@ -3687,6 +3830,9 @@ inbound response. Without the notification starter nothing is published.
 | `MAILBOX.AGENT_GRANT_EXISTS` | 409 |
 | `MAILBOX.AGENT_GRANT_LIMIT` | 409 |
 | `MAILBOX.AGENT_GRANT_INVALID` | 422 |
+| `MAILBOX.APP_PASSWORD_NOT_FOUND` | 404 |
+| `MAILBOX.APP_PASSWORD_LIMIT_REACHED` | 409 |
+| `MAILBOX.MAIL_CLIENT_ACCESS_DISABLED` | 403 |
 
 ### Organization Cloudflare discovery
 

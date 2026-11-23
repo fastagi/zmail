@@ -286,6 +286,8 @@ validated only when the starter is selected.
 | `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN` | empty | Both are required when the provider is `cloudflare`. The token is a secret. |
 | `MAILBOX_REQUEST_TIMEOUT` | `15s` | Bounds one provider call; greater than 0 and at most `60s`. |
 | `MAILBOX_INBOUND_SECRET` | empty | Shared secret of at least 32 characters that signs deliveries from the mail edge. Empty keeps inbound mail disabled. |
+| `MAIL_APP_PASSWORD_PEPPER` | empty | Secret of at least 32 characters that keys the HMAC-SHA256 of every mail client password (see `contracts/MAILBOXES.md`, Mail Client Access). No default, also outside production: empty keeps creating mail client passwords off. Changing it makes every existing password stop working. |
+| `MAIL_GATEWAY_PUBLIC_IMAP_HOST`, `MAIL_GATEWAY_PUBLIC_IMAP_PORT` | `imap.zmail.im`, `993` | The IMAP server the console shows members for their mail apps; a host name and a port from 1 to 65535. |
 | `MAILBOX_DAILY_SEND_LIMIT` | `200` | The personal lane: console sends, replies, API outbound messages, and template test sends one organization may attempt per rolling 24 hours; 1 to 100000. |
 | `MAILBOX_DAILY_BROADCAST_LIMIT` | value of `MAILBOX_DAILY_SEND_LIMIT` | The broadcast lane: broadcast recipients one organization may attempt per rolling 24 hours; 1 to 100000. Unset or `0` takes the personal limit. |
 | `MAILBOX_NEW_ORGANIZATION_DAILY_SEND_LIMIT` | `0` | Caps each lane of an organization younger than `MAILBOX_NEW_ORGANIZATION_PERIOD`, and the personal messages it may have waiting; 0 to 100000, `0` turns the cap off. Lane limits below the cap are unchanged. |

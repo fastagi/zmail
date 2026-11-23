@@ -10,17 +10,18 @@ import (
 )
 
 type organizationContextRow struct {
-	OrganizationID   uint   `gorm:"column:organization_id"`
-	OrganizationName string `gorm:"column:organization_name"`
-	OrganizationSlug string `gorm:"column:organization_slug"`
-	MembershipID     uint   `gorm:"column:membership_id"`
-	UserID           uint   `gorm:"column:user_id"`
-	Role             string `gorm:"column:role"`
-	Suspended        bool   `gorm:"column:suspended"`
-	CanUseBroadcasts bool   `gorm:"column:can_use_broadcasts"`
-	CanUseContacts   bool   `gorm:"column:can_use_contacts"`
-	CanUseTemplates  bool   `gorm:"column:can_use_templates"`
-	CanUseAPIKeys    bool   `gorm:"column:can_use_api_keys"`
+	OrganizationID    uint   `gorm:"column:organization_id"`
+	OrganizationName  string `gorm:"column:organization_name"`
+	OrganizationSlug  string `gorm:"column:organization_slug"`
+	MembershipID      uint   `gorm:"column:membership_id"`
+	UserID            uint   `gorm:"column:user_id"`
+	Role              string `gorm:"column:role"`
+	CanUseBroadcasts  bool   `gorm:"column:can_use_broadcasts"`
+	CanUseContacts    bool   `gorm:"column:can_use_contacts"`
+	CanUseTemplates   bool   `gorm:"column:can_use_templates"`
+	CanUseAPIKeys     bool   `gorm:"column:can_use_api_keys"`
+	CanUseMailClients bool   `gorm:"column:can_use_mail_clients"`
+	Suspended         bool   `gorm:"column:suspended"`
 }
 
 func (r *repository) ResolveContext(
@@ -49,6 +50,7 @@ func (r *repository) ResolveContext(
 			memberships.can_use_contacts,
 			memberships.can_use_templates,
 			memberships.can_use_api_keys,
+			memberships.can_use_mail_clients,
 			organizations.suspended_at IS NOT NULL AS suspended
 		`).
 		Joins("JOIN organizations ON organizations.id = memberships.organization_id").
@@ -72,10 +74,11 @@ func (r *repository) ResolveContext(
 		UserID:           row.UserID,
 		Role:             domain.OrganizationRole(row.Role),
 		Features: domain.MemberFeatures{
-			Broadcasts: row.CanUseBroadcasts,
-			Contacts:   row.CanUseContacts,
-			Templates:  row.CanUseTemplates,
-			APIKeys:    row.CanUseAPIKeys,
+			Broadcasts:  row.CanUseBroadcasts,
+			Contacts:    row.CanUseContacts,
+			Templates:   row.CanUseTemplates,
+			APIKeys:     row.CanUseAPIKeys,
+			MailClients: row.CanUseMailClients,
 		},
 	}
 	if !resolved.IsValid() {

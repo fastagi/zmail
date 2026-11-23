@@ -2688,7 +2688,13 @@ describe('mailbox browser route boundary', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       dry_run: true,
       domain: 'news.example.com',
-      features: { broadcasts: false, contacts: true, templates: true, api_keys: false },
+      features: {
+        broadcasts: false,
+        contacts: true,
+        templates: true,
+        api_keys: false,
+        mail_clients: true,
+      },
       rows: [{ email: 'a@b.co', name: '', role: '', mailbox: 'alice' }],
     });
 

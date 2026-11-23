@@ -1,10 +1,12 @@
 import { lazy, Suspense } from 'react';
-import { Bell, KeyRound, ShieldCheck, SlidersHorizontal, UserRound } from 'lucide-react';
+import { Bell, KeyRound, Mail, ShieldCheck, SlidersHorizontal, UserRound } from 'lucide-react';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { isWebFeatureEnabled } from '@/config/features';
 import { ApiKeyPanel } from '@/features/api-key';
+import { MailClientsAvailable } from '@/features/mailbox/components/mail-clients-available';
+import { LazyMailClientsTab } from '@/features/mailbox/components/mail-clients-tab-lazy';
 import { MemberFeatureGate } from '@/features/mailbox/components/member-feature-gate';
 import { NotificationSettingsTab } from '@/features/notification/components/notification-settings-tab';
 import { getT } from '@/i18n/server';
@@ -31,7 +33,14 @@ const UserSettingPanel = lazy(async () => {
   return { default: feature.UserSettingPanel };
 });
 
-const settingsTabs = ['profile', 'preferences', 'notifications', 'security', 'api'] as const;
+const settingsTabs = [
+  'profile',
+  'preferences',
+  'notifications',
+  'security',
+  'mail-clients',
+  'api',
+] as const;
 
 /**
  * Replaceable settings surface for the starter console. `?tab=` opens one tab directly.
@@ -40,13 +49,15 @@ export default async function SettingsPage() {
   const t = await getT('settings');
   const settingEnabled = isWebFeatureEnabled('setting');
   const notificationEnabled = isWebFeatureEnabled('notification');
+  // API keys and mail apps work in an organization only while it grants them to the member.
+  const gateApiKeys = isWebFeatureEnabled('organization') && isWebFeatureEnabled('mailbox');
+  const mailClientsEnabled = gateApiKeys;
   const tabs = settingsTabs.filter(
     value =>
       (value !== 'preferences' || settingEnabled) &&
-      (value !== 'notifications' || notificationEnabled)
+      (value !== 'notifications' || notificationEnabled) &&
+      (value !== 'mail-clients' || mailClientsEnabled)
   );
-  // API keys work in an organization only while it grants them to the member.
-  const gateApiKeys = isWebFeatureEnabled('organization') && isWebFeatureEnabled('mailbox');
   const apiTrigger = (
     <TabsTrigger value="api">
       <KeyRound aria-hidden="true" />
@@ -80,6 +91,16 @@ export default async function SettingsPage() {
             <ShieldCheck aria-hidden="true" />
             {t('tabs.security')}
           </TabsTrigger>
+          {mailClientsEnabled ? (
+            <MemberFeatureGate feature="mail_clients" fallback={null}>
+              <MailClientsAvailable>
+                <TabsTrigger value="mail-clients">
+                  <Mail aria-hidden="true" />
+                  {t('tabs.mailClients')}
+                </TabsTrigger>
+              </MailClientsAvailable>
+            </MemberFeatureGate>
+          ) : null}
           {gateApiKeys ? (
             <MemberFeatureGate feature="api_keys" fallback={null}>
               {apiTrigger}
@@ -115,6 +136,14 @@ export default async function SettingsPage() {
             <TwoFactorPanel />
           </Suspense>
         </TabsContent>
+
+        {mailClientsEnabled ? (
+          <TabsContent value="mail-clients" className="pt-5">
+            <MemberFeatureGate feature="mail_clients">
+              <LazyMailClientsTab />
+            </MemberFeatureGate>
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="api" className="pt-5">
           {gateApiKeys ? (

@@ -6,8 +6,12 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -238,4 +242,25 @@ func (s *service) DisableTOTP(ctx context.Context, userID uint, code string) err
 	}
 	s.resetTOTPAttempts(ctx, throttleKey)
 	return nil
+}
+
+// ReverifyCredentials confirms a signed-in user's password and, with two-factor sign-in on, an
+// authenticator or recovery code, which it consumes like a sign-in does. An unknown user still
+// costs a password comparison, and every password failure is ErrInvalidCredentials.
+func (s *service) ReverifyCredentials(ctx context.Context, userID uint, password, secondFactor string) error {
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("load user to reverify: %w", err)
+	}
+	if err != nil || user == nil {
+		if compareErr := s.verifyPassword([]byte(dummyPasswordHash), []byte(password)); compareErr != nil &&
+			!errors.Is(compareErr, bcrypt.ErrMismatchedHashAndPassword) {
+			slog.ErrorContext(ctx, "user.reverify_dummy_hash_invalid", "err", compareErr)
+		}
+		return domain.ErrInvalidCredentials
+	}
+	if s.verifyPassword([]byte(user.Password), []byte(password)) != nil || !user.IsActive() {
+		return domain.ErrInvalidCredentials
+	}
+	return s.totp.checkSignIn(ctx, user.ID, secondFactor)
 }
