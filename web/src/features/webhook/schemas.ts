@@ -10,6 +10,7 @@ import {
   nonnegative,
   nullable,
   number,
+  optional,
   positive,
   refine,
   regex,
@@ -54,6 +55,8 @@ export const webhookEndpointSchema = strictObject({
   secret_hint: string().check(minLength(1), maxLength(16)),
   secret_version: safeIdSchema,
   previous_secret_expiry: nullable(timestampSchema),
+  // The creator's user id; a developer manages only their own endpoints. Older APIs omit it.
+  created_by: optional(nonnegativeIntegerSchema),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });

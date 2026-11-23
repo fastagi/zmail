@@ -1,4 +1,5 @@
 import type {
+  DeveloperScope,
   MemberFeature,
   MemberFeatures,
   OrganizationRole,
@@ -11,6 +12,7 @@ export const MEMBER_FEATURES: readonly MemberFeature[] = [
   'templates',
   'api_keys',
   'mail_clients',
+  'developer',
 ];
 
 const ALL_FEATURES: MemberFeatures = {
@@ -19,6 +21,7 @@ const ALL_FEATURES: MemberFeatures = {
   templates: true,
   api_keys: true,
   mail_clients: true,
+  developer: true,
 };
 
 /**
@@ -30,7 +33,17 @@ export function effectiveMemberFeatures(
   features: MemberFeatures | undefined
 ): MemberFeatures {
   if (role === 'owner' || role === 'admin' || !features) return ALL_FEATURES;
-  return features;
+  // Developer access includes API keys; the API reports it that way too.
+  return features.developer ? { ...features, api_keys: true } : features;
+}
+
+/** The domains a member's developer access covers, for display; undefined without the grant. */
+export function developerScopeLabel(
+  scope: DeveloperScope | null | undefined,
+  allDomainsLabel: string
+): string | undefined {
+  if (!scope) return undefined;
+  return scope.all_domains ? allDomainsLabel : scope.domains.join(', ');
 }
 
 /** Whether the role's grants are fixed: owners and admins always have every feature. */

@@ -19,6 +19,7 @@ type fakeRepository struct {
 	updateFn  func(context.Context, *domain.Organization) error
 	countFn   func(context.Context, uint) (int64, int64, error)
 	removeFn  func(context.Context, uint, uint, uint) (*domain.OrganizationMembership, error)
+	featureFn func(domain.MemberFeaturePatch) (*domain.OrganizationMembershipFeatureChange, error)
 }
 
 func newOrganizationService(repo domain.OrganizationRepository) *service {
@@ -52,8 +53,11 @@ func (r *fakeRepository) ChangeMemberRole(context.Context, uint, uint, uint, dom
 	return nil, nil
 }
 
-func (r *fakeRepository) UpdateMemberFeatures(context.Context, uint, uint, uint, domain.MemberFeaturePatch, time.Time) (*domain.OrganizationMembershipFeatureChange, error) {
-	return nil, nil
+func (r *fakeRepository) UpdateMemberFeatures(_ context.Context, _, _, _ uint, patch domain.MemberFeaturePatch, _ time.Time) (*domain.OrganizationMembershipFeatureChange, error) {
+	if r.featureFn == nil {
+		return nil, nil
+	}
+	return r.featureFn(patch)
 }
 
 func (r *fakeRepository) RemoveMember(ctx context.Context, organizationID, userID, memberID uint) (*domain.OrganizationMembership, error) {

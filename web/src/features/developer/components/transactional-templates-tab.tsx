@@ -8,6 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TransactionalTemplateDialog } from '@/features/developer/components/transactional-template-dialog';
 import { useDeveloperTab } from '@/features/developer/hooks/use-developer-tab';
+import {
+  canWriteTransactional,
+  offersSenderDomain,
+} from '@/features/developer/utils/developer-scope';
 import { useTransactionalLog } from '@/features/developer/hooks/use-developer';
 import { OrganizationLostState } from '@/features/mailbox/components/mail-organization';
 import { EmptyState, ErrorAlert, MailHtmlFrame } from '@/features/mailbox/components/mail-shared';
@@ -53,7 +57,8 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
   );
   const sent24h = selectedLog.data?.pages[0]?.meta.total_24h;
 
-  const create = organization.canManage ? (
+  const writable = canWriteTransactional(organization);
+  const create = writable ? (
     <Button
       type="button"
       icon={<Plus className="size-4" />}
@@ -68,6 +73,7 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
       <TransactionalTemplateDialog
         organizationId={organization.id}
         template={editing.kind === 'edit' ? editing.template : null}
+        offersDomain={domain => offersSenderDomain(organization, domain)}
         onClose={() => setEditing({ kind: 'closed' })}
         onSaved={template => setChosenId(template.id)}
       />
@@ -98,7 +104,7 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
           icon={<FileText className="size-5" aria-hidden="true" />}
           title={t('templates.emptyTitle')}
           description={
-            organization.canManage ? t('templates.emptyDescription') : t('templates.readOnly')
+            writable ? t('templates.emptyDescription') : t('templates.readOnly')
           }
           action={create}
         />
@@ -126,6 +132,11 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
                 >
                   <span className="flex items-center gap-2">
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                    {item.outside_sending_scope ? (
+                      <Badge variant="outline" className="text-muted-foreground">
+                        {t('templates.outsideScopeBadge')}
+                      </Badge>
+                    ) : null}
                     {hasSecrets(item) ? (
                       <Badge className="bg-warning-subtle text-warning" variant="secondary">
                         {t('templates.containsSecrets')}
@@ -146,7 +157,7 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
           })}
         </ul>
         {create ? <div className="px-1">{create}</div> : null}
-        {organization.canManage ? null : (
+        {writable ? null : (
           <p className="px-1 text-xs text-muted-foreground">{t('templates.readOnly')}</p>
         )}
       </div>
@@ -162,7 +173,7 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
         ) : (
           <TemplateDetail
             template={detail.data}
-            canManage={organization.canManage}
+            canManage={writable && !detail.data.outside_sending_scope}
             onEdit={() => setEditing({ kind: 'edit', template: detail.data })}
           />
         )}
@@ -205,7 +216,11 @@ function TemplateDetail({
             <h2 className="truncate text-lg font-semibold">{template.name}</h2>
             <p className="truncate font-mono text-xs text-muted-foreground">{template.key}</p>
           </div>
-          {canManage ? (
+          {template.outside_sending_scope ? (
+            <p className="max-w-xs text-xs text-muted-foreground">
+              {t('templates.outsideScope')}
+            </p>
+          ) : canManage ? (
             <Button
               type="button"
               size="sm"

@@ -41,6 +41,8 @@ type publicationMutation struct {
 	PayloadJSON    string
 	OccurredAt     time.Time
 	Now            time.Time
+	// Origin decides which endpoints created by developers receive the event.
+	Origin *domain.WebhookEventOrigin
 }
 
 type publicationResult struct {
@@ -124,6 +126,9 @@ func (r *repository) ListEndpoints(
 		return nil, 0, domain.ErrInvalidInput
 	}
 	query := db.Model(&EndpointPO{}).Where("organization_id = ?", organizationID)
+	if owner := endpointOwnerFromContext(ctx); owner != 0 {
+		query = query.Where("created_by = ?", owner)
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count webhook endpoints: %w", err)
@@ -158,16 +163,18 @@ func (r *repository) CreateEndpoint(ctx context.Context, mutation endpointMutati
 			return fmt.Errorf("find webhook endpoint organization: %w", err)
 		}
 		po := &EndpointPO{
-			OrganizationID:      mutation.OrganizationID,
-			Name:                mutation.Name,
-			URL:                 mutation.URL,
-			URLHash:             mutation.URLHash,
-			Status:              endpointStatusActive,
-			Version:             1,
-			SecretCiphertext:    mutation.SecretCiphertext,
-			SecretHint:          mutation.SecretHint,
-			SecretVersion:       1,
-			CreatedBy:           mutation.ActorID,
+			OrganizationID:   mutation.OrganizationID,
+			Name:             mutation.Name,
+			URL:              mutation.URL,
+			URLHash:          mutation.URLHash,
+			Status:           endpointStatusActive,
+			Version:          1,
+			SecretCiphertext: mutation.SecretCiphertext,
+			SecretHint:       mutation.SecretHint,
+			SecretVersion:    1,
+			CreatedBy:        mutation.ActorID,
+			// A request limited to its own endpoints is a developer's.
+			DeveloperOwned:      endpointOwnerFromContext(ctx) != 0,
 			UpdatedBy:           mutation.ActorID,
 			CreatedAt:           mutation.Now,
 			UpdatedAt:           mutation.Now,
@@ -512,6 +519,9 @@ func (r *repository) ListDeliveries(
 		return nil, 0, domain.ErrInvalidInput
 	}
 	query := db.Model(&DeliveryPO{}).Where("organization_id = ?", organizationID)
+	if owner := endpointOwnerFromContext(ctx); owner != 0 {
+		query = query.Where(ownedEndpointCondition, organizationID, owner)
+	}
 	if filter.EndpointID != 0 {
 		query = query.Where("endpoint_id = ?", filter.EndpointID)
 	}
@@ -552,9 +562,11 @@ func (r *repository) ListAttempts(
 		return nil, 0, domain.ErrInvalidInput
 	}
 	var deliveryCount int64
-	if err := db.Model(&DeliveryPO{}).
-		Where("id = ? AND organization_id = ?", deliveryID, organizationID).
-		Count(&deliveryCount).Error; err != nil {
+	owned := db.Model(&DeliveryPO{}).Where("id = ? AND organization_id = ?", deliveryID, organizationID)
+	if owner := endpointOwnerFromContext(ctx); owner != 0 {
+		owned = owned.Where(ownedEndpointCondition, organizationID, owner)
+	}
+	if err := owned.Count(&deliveryCount).Error; err != nil {
 		return nil, 0, fmt.Errorf("find webhook delivery attempts owner: %w", err)
 	}
 	if deliveryCount != 1 {
@@ -965,7 +977,11 @@ func findEndpointForUpdate(tx *gorm.DB, organizationID uint, endpointID uint) (*
 	var po EndpointPO
 	query := webhookRowLockQuery(tx.Model(&EndpointPO{})).
 		Preload("Subscriptions", func(value *gorm.DB) *gorm.DB { return value.Order("event_type ASC") })
-	if err := query.Where("id = ? AND organization_id = ?", endpointID, organizationID).First(&po).Error; err != nil {
+	query = query.Where("id = ? AND organization_id = ?", endpointID, organizationID)
+	if owner := endpointOwnerFromContext(tx.Statement.Context); owner != 0 {
+		query = query.Where("created_by = ?", owner)
+	}
+	if err := query.First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrWebhookEndpointNotFound
 		}
@@ -976,7 +992,8 @@ func findEndpointForUpdate(tx *gorm.DB, organizationID uint, endpointID uint) (*
 
 func subscribedEndpoints(tx *gorm.DB, mutation publicationMutation) ([]EndpointPO, error) {
 	query := tx.Model(&EndpointPO{}).
-		Select("webhook_endpoints.id", "webhook_endpoints.url_hash").
+		Select("webhook_endpoints.id", "webhook_endpoints.url_hash", "webhook_endpoints.created_by",
+			"webhook_endpoints.developer_owned").
 		Joins("JOIN webhook_subscriptions ON webhook_subscriptions.endpoint_id = webhook_endpoints.id").
 		Where(
 			"webhook_endpoints.organization_id = ? AND webhook_endpoints.status = ? AND webhook_endpoints.deleted_at IS NULL AND webhook_subscriptions.event_type = ?",
@@ -984,16 +1001,31 @@ func subscribedEndpoints(tx *gorm.DB, mutation publicationMutation) ([]EndpointP
 			endpointStatusActive,
 			mutation.EventType,
 		)
+	owner := endpointOwnerFromContext(tx.Statement.Context)
 	if mutation.TargetEndpoint != 0 {
 		query = query.Where("webhook_endpoints.id = ?", mutation.TargetEndpoint)
+		if owner != 0 {
+			query = query.Where("webhook_endpoints.created_by = ?", owner)
+		}
 	}
 	var rows []EndpointPO
 	if err := query.Order("webhook_endpoints.id ASC").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("find subscribed webhook endpoints: %w", err)
 	}
+	if mutation.TargetEndpoint == 0 {
+		audience, err := endpointsInAudience(tx, mutation, rows)
+		if err != nil {
+			return nil, err
+		}
+		rows = audience
+	}
 	if mutation.TargetEndpoint != 0 && len(rows) != 1 {
 		var endpoint EndpointPO
-		if err := tx.Where("id = ? AND organization_id = ?", mutation.TargetEndpoint, mutation.OrganizationID).First(&endpoint).Error; err != nil {
+		lookup := tx.Where("id = ? AND organization_id = ?", mutation.TargetEndpoint, mutation.OrganizationID)
+		if owner != 0 {
+			lookup = lookup.Where("created_by = ?", owner)
+		}
+		if err := lookup.First(&endpoint).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, domain.ErrWebhookEndpointNotFound
 			}

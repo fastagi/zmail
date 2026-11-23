@@ -93,7 +93,7 @@ func (s *service) GetTemplate(ctx context.Context, organizationID, id uint) (*do
 }
 
 func (s *service) CreateTemplate(ctx context.Context, viewer domain.OrganizationContext, input TemplateInput) (*domain.MailTemplate, error) {
-	if err := requireTemplateWriter(viewer, templateKind(input.Kind)); err != nil {
+	if err := s.requireTemplateWriter(ctx, viewer, templateKind(input.Kind), input.FromAddress); err != nil {
 		return nil, err
 	}
 	template, err := s.buildSavedTemplate(ctx, viewer.OrganizationID, input)
@@ -111,14 +111,14 @@ func (s *service) CreateTemplate(ctx context.Context, viewer domain.Organization
 // member can neither edit a transactional template nor turn one into a standard template.
 func (s *service) UpdateTemplate(ctx context.Context, viewer domain.OrganizationContext, id uint, input TemplateInput) (*domain.MailTemplate, error) {
 	kind := templateKind(input.Kind)
-	if err := requireTemplateWriter(viewer, kind); err != nil {
+	if err := s.requireTemplateWriter(ctx, viewer, kind, input.FromAddress); err != nil {
 		return nil, err
 	}
 	stored, err := s.templates.FindTemplate(ctx, viewer.OrganizationID, id)
 	if err != nil {
 		return nil, err
 	}
-	if err = requireTemplateWriter(viewer, stored.Kind); err != nil {
+	if err = s.requireTemplateWriter(ctx, viewer, stored.Kind, stored.FromAddress); err != nil {
 		return nil, err
 	}
 	if kind != stored.Kind {
@@ -140,7 +140,7 @@ func (s *service) DeleteTemplate(ctx context.Context, viewer domain.Organization
 	if err != nil {
 		return err
 	}
-	if err := requireTemplateWriter(viewer, stored.Kind); err != nil {
+	if err := s.requireTemplateWriter(ctx, viewer, stored.Kind, stored.FromAddress); err != nil {
 		return err
 	}
 	return s.templates.DeleteTemplate(ctx, viewer.OrganizationID, id)

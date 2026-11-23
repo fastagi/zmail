@@ -58,6 +58,11 @@ func TestUsageOrganizationListRequiresManagerRoleAndPrivateContext(t *testing.T)
 			UserID:           fixture.user.ID,
 			Role:             domain.OrganizationRole(c.Param("role")),
 		}
+		if c.Param("role") == "developer" {
+			organizationContext.Role = domain.OrganizationRoleMember
+			organizationContext.Features = domain.MemberFeatures{Developer: true}
+			organizationContext.DeveloperGrant = &domain.DeveloperGrant{Domains: []string{"fast-ui.com"}}
+		}
 		c.Request = c.Request.WithContext(domain.WithOrganizationContext(context.Background(), organizationContext))
 		handler.OrganizationList(c)
 	})
@@ -68,6 +73,10 @@ func TestUsageOrganizationListRequiresManagerRoleAndPrivateContext(t *testing.T)
 	assert.Equal(t, domain.CodePermissionDenied, usageResponseErrorCode(t, member))
 	assert.Equal(t, "private, no-store", member.Header().Get("Cache-Control"))
 	assert.Equal(t, "Authorization, Organization-Id", member.Header().Get("Vary"))
+
+	developer := httptest.NewRecorder()
+	router.ServeHTTP(developer, httptest.NewRequest(http.MethodGet, "/organization-usage/developer", nil))
+	assert.Equal(t, http.StatusOK, developer.Code, "a developer reads the organization's usage")
 
 	admin := httptest.NewRecorder()
 	router.ServeHTTP(admin, httptest.NewRequest(http.MethodGet, "/organization-usage/admin", nil))

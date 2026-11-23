@@ -169,7 +169,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             titleKey: 'nav.developers' as const,
             href: ROUTES.CONSOLE.DEVELOPERS,
             icon: Code2,
-            feature: 'api_keys' as const,
+            feature: 'developer' as const,
           },
         ]
       : []),

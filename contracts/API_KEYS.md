@@ -108,7 +108,7 @@ stores `NULL` for both.
 
 | Field on the key | Effect on API key routes |
 |---|---|
-| `organization_id` | The key acts in that organization. `Organization-Id` becomes optional: when absent the bound organization is used; a different value is `403 API_KEY.ORGANIZATION_MISMATCH`. The owner's current membership and feature grants still apply exactly as for an unrestricted key. |
+| `organization_id` | The key acts in that organization. `Organization-Id` becomes optional: when absent the bound organization is used; a different value is `403 API_KEY.ORGANIZATION_MISMATCH`. The owner's current membership and feature grants still apply exactly as for an unrestricted key. A `member` with the `developer` grant may only name `sending_domains` inside the grant's scope (`403 DEVELOPER.DOMAIN_NOT_ALLOWED`); omitting them copies an explicit scope's domains, and an all-domains scope leaves the key open (see [MAILBOXES.md](MAILBOXES.md#developer-access)). |
 | `sending_domains` | Every send checks the domain of the from address (for `POST /v1/outbound-mail-messages` the `from` field, for `POST /v1/transactional-messages` the template's `from_address`). Matching is exact and ignores case; a subdomain is a different domain. Any other domain is `403 API_KEY.DOMAIN_NOT_ALLOWED` and nothing is stored or sent. |
 
 A restriction never widens a key: a domain later removed from the organization stays listed on the

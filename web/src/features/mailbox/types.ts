@@ -142,6 +142,8 @@ export interface MemberImportRowInput {
   name: string;
   role: string;
   mailbox: string;
+  /** The roster's `developer=yes`: developer access for a member on joining. */
+  developer?: boolean;
 }
 /** The grants every invitation of a roster import starts the membership with. */
 export interface MemberImportFeatures {
@@ -150,6 +152,8 @@ export interface MemberImportFeatures {
   templates: boolean;
   api_keys: boolean;
   mail_clients: boolean;
+  /** Developer access for every invited member, scoped to the default mail domain on joining. */
+  developer?: boolean;
 }
 export interface MemberImportInput {
   dryRun: boolean;

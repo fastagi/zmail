@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogBody,
@@ -50,6 +51,7 @@ export function CreateOrganizationInvitationDialog({
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrganizationInvitationRole>('member');
+  const [developer, setDeveloper] = useState(false);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   // The one-time link lives only here, never in the query cache, and is dropped on close.
   const [issued, setIssued] = useState<IssuedInvitationLink>();
@@ -57,6 +59,7 @@ export function CreateOrganizationInvitationDialog({
   const reset = () => {
     setEmail('');
     setRole('member');
+    setDeveloper(false);
     setClientErrors({});
     setIssued(undefined);
     mutation.reset();
@@ -64,7 +67,12 @@ export function CreateOrganizationInvitationDialog({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const parsed = createOrganizationInvitationSchema.safeParse({ email, role });
+    const parsed = createOrganizationInvitationSchema.safeParse({
+      email,
+      role,
+      // Admins have every feature; only a member invitation carries developer access.
+      ...(role === 'member' && developer ? { developer: true } : {}),
+    });
     if (!parsed.success) {
       const invalidFields = new Set(
         parsed.error.issues.map((issue) => issue.path[0])
@@ -187,6 +195,24 @@ export function CreateOrganizationInvitationDialog({
                     </SelectContent>
                   </Select>
                 </div>
+                {role === 'member' ? (
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      id="organization-invitation-developer"
+                      checked={developer}
+                      disabled={mutation.isPending}
+                      onCheckedChange={checked => setDeveloper(checked === true)}
+                    />
+                    <div className="grid gap-1">
+                      <Label htmlFor="organization-invitation-developer">
+                        {t('invitationDeveloper')}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t('invitationDeveloperHint')}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
               </DialogBody>
               <DialogFooter className="pt-5">
                 <DialogClose asChild>

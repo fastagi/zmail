@@ -4706,7 +4706,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "API_KEY.ORGANIZATION_MISMATCH" | "API_KEY.DOMAIN_NOT_ALLOWED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SUSPENDED" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "ORGANIZATION.FEATURE_NOT_GRANTED" | "ORGANIZATION.MEMBER_FEATURES_FIXED" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "NOTIFICATION.WEB_PUSH_DISABLED" | "NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID" | "NOTIFICATION.WEB_PUSH_KEYS_INVALID" | "NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.IMPORT_EMAIL_INVALID" | "MAILBOX.IMPORT_ROLE_INVALID" | "MAILBOX.IMPORT_DOMAIN_REQUIRED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.DRAFT_NOT_FOUND" | "MAILBOX.DRAFT_LIMIT_REACHED" | "MAILBOX.ASSIGNMENT_UNAVAILABLE" | "MAILBOX.NOTE_NOT_FOUND" | "MAILBOX.NOTE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.WELCOME_NOT_ELIGIBLE" | "MAILBOX.WELCOME_DISABLED" | "MAILBOX.WELCOME_RESEND_LIMITED" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS" | "MAILBOX.APP_PASSWORD_NOT_FOUND" | "MAILBOX.APP_PASSWORD_LIMIT_REACHED" | "MAILBOX.MAIL_CLIENT_ACCESS_DISABLED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "API_KEY.ORGANIZATION_MISMATCH" | "API_KEY.DOMAIN_NOT_ALLOWED" | "DEVELOPER.DOMAIN_NOT_ALLOWED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SUSPENDED" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "ORGANIZATION.FEATURE_NOT_GRANTED" | "ORGANIZATION.MEMBER_FEATURES_FIXED" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "NOTIFICATION.WEB_PUSH_DISABLED" | "NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID" | "NOTIFICATION.WEB_PUSH_KEYS_INVALID" | "NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.IMPORT_EMAIL_INVALID" | "MAILBOX.IMPORT_ROLE_INVALID" | "MAILBOX.IMPORT_DOMAIN_REQUIRED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.DRAFT_NOT_FOUND" | "MAILBOX.DRAFT_LIMIT_REACHED" | "MAILBOX.ASSIGNMENT_UNAVAILABLE" | "MAILBOX.NOTE_NOT_FOUND" | "MAILBOX.NOTE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.WELCOME_NOT_ELIGIBLE" | "MAILBOX.WELCOME_DISABLED" | "MAILBOX.WELCOME_RESEND_LIMITED" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS" | "MAILBOX.APP_PASSWORD_NOT_FOUND" | "MAILBOX.APP_PASSWORD_LIMIT_REACHED" | "MAILBOX.MAIL_CLIENT_ACCESS_DISABLED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -6475,6 +6475,8 @@ export interface components {
             key: string | null;
             kind: components["schemas"]["MailTemplateKind"];
             name: string;
+            /** @description True only for a developer whose grant no longer covers this transactional template's sender domain; the template is read-only for them. */
+            outside_sending_scope?: boolean;
             sample_variables: components["schemas"]["MailTemplateVariables"];
             subject: string;
             text_body: string;
@@ -6565,6 +6567,8 @@ export interface components {
             key: string | null;
             kind: components["schemas"]["MailTemplateKind"];
             name: string;
+            /** @description True only for a developer whose grant no longer covers this transactional template's sender domain; the template is read-only for them. */
+            outside_sending_scope?: boolean;
             subject: string;
             /** Format: date-time */
             updated_at: string;
@@ -6738,6 +6742,8 @@ export interface components {
             api_keys?: boolean;
             broadcasts?: boolean;
             contacts?: boolean;
+            /** @description Gives every invited `member` developer access on joining, scoped to the organization's default mail domain then. */
+            developer?: boolean;
             /** @description Granted when absent. */
             mail_clients?: boolean;
             templates?: boolean;
@@ -6772,6 +6778,8 @@ export interface components {
             message: string;
         };
         MemberImportRow: {
+            /** @description The roster's `developer=yes`. Gives this `member` developer access on joining, scoped to the organization's default mail domain then. Ignored for an `admin`. */
+            developer?: boolean;
             /** @description The address the person signs in and accepts the invitation with. */
             email: string;
             /** @description A local part on `domain`, or a whole address on a verified organization domain. Empty uses the email's local part without a `+tag`. */
@@ -7265,6 +7273,7 @@ export interface components {
         Organization: {
             /** Format: date-time */
             created_at: string;
+            developer_scope?: components["schemas"]["OrganizationDeveloperScope"] | null;
             features: components["schemas"]["OrganizationMemberFeatures"];
             id: components["schemas"]["PositiveID"];
             name: string;
@@ -7280,6 +7289,7 @@ export interface components {
         OrganizationAssignableRole: "admin" | "member";
         /** @description Verified request-scoped organization membership. */
         OrganizationContext: {
+            developer_scope?: components["schemas"]["OrganizationDeveloperScope"] | null;
             features: components["schemas"]["OrganizationMemberFeatures"];
             membership_id: components["schemas"]["PositiveID"];
             organization_id: components["schemas"]["PositiveID"];
@@ -7298,6 +7308,13 @@ export interface components {
             name: components["schemas"]["OrganizationName"];
             /** @description Immutable and globally unique; generated as `org-...` when omitted or empty. */
             slug?: components["schemas"]["OrganizationSlug"] | "";
+        };
+        /** @description Sending domains a member's developer grant covers. Null for owners and admins, who are unrestricted, and for members without the grant. */
+        OrganizationDeveloperScope: {
+            /** @description Every verified domain of the organization, including domains verified later. The platform's shared sending domain is never included. */
+            all_domains: boolean;
+            /** @description Lowercase domain names; empty when `all_domains` is true. */
+            domains: string[];
         };
         /** @description Token-free invitation view. */
         OrganizationInvitation: {
@@ -7323,6 +7340,8 @@ export interface components {
             token: string;
         };
         OrganizationInvitationCreateRequest: {
+            /** @description Gives a `member` developer access on accept, scoped to the organization's default mail domain then; without a verified domain the member joins without it. Ignored for an `admin`. */
+            developer?: boolean;
             /**
              * Format: email
              * @description Trimmed and lower-cased before storage.
@@ -7363,6 +7382,7 @@ export interface components {
         /** @description PII-minimized member view; `id` is the membership ID. */
         OrganizationMember: {
             avatar?: string;
+            developer_scope?: components["schemas"]["OrganizationDeveloperScope"] | null;
             features: components["schemas"]["OrganizationMemberFeatures"];
             id: components["schemas"]["PositiveID"];
             /** Format: date-time */
@@ -7382,6 +7402,8 @@ export interface components {
             broadcasts: boolean;
             /** @description Read and edit contacts and contact lists. */
             contacts: boolean;
+            /** @description Connect the organization's own systems (transactional templates, webhooks, suppressions, usage) within the sending domains of `developer_scope`. Includes `api_keys`, which reports true whenever this does. */
+            developer: boolean;
             /** @description Create mail client passwords and read mail in mail apps. */
             mail_clients: boolean;
             /** @description Create and edit mail templates. */
@@ -7392,6 +7414,12 @@ export interface components {
             api_keys?: boolean;
             broadcasts?: boolean;
             contacts?: boolean;
+            /** @description Turning it on for a member without a grant needs `developer_all_domains` or `developer_domains`; turning it off removes the grant and its scope. */
+            developer?: boolean;
+            /** @description Scope the grant to every verified domain of the organization. */
+            developer_all_domains?: boolean;
+            /** @description Scope the grant to these verified domains of the organization; any other is `403 DEVELOPER.DOMAIN_NOT_ALLOWED`. With an existing grant, either scope field alone replaces its scope. */
+            developer_domains?: string[];
             mail_clients?: boolean;
             templates?: boolean;
         };
@@ -8110,6 +8138,8 @@ export interface components {
             consecutive_failures: number;
             /** Format: date-time */
             created_at: string;
+            /** @description The user who created the endpoint. A developer manages only the endpoints they created; owners and admins manage every endpoint. */
+            created_by?: components["schemas"]["PositiveID"];
             /** @description Empty unless the endpoint is disabled. */
             disabled_reason: string;
             event_types: string[];
@@ -17890,7 +17920,7 @@ export interface operations {
             };
             400: components["responses"]["InvalidInput"];
             401: components["responses"]["Unauthorized"];
-            /** @description `PERMISSION.DENIED`: only owners and admins may change member features. */
+            /** @description `PERMISSION.DENIED`: only owners and admins may change member features. `DEVELOPER.DOMAIN_NOT_ALLOWED`: a developer domain is not a verified domain of the organization. */
             403: components["responses"]["Forbidden"];
             /** @description `ORGANIZATION.NOT_FOUND` or `ORGANIZATION.MEMBER_NOT_FOUND`. */
             404: components["responses"]["NotFound"];

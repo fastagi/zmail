@@ -90,6 +90,7 @@ func (r *repository) FindForUser(ctx context.Context, organizationID, userID uin
 	var membership OrganizationMembershipPO
 	err = db.
 		Preload("Organization").
+		Preload("DeveloperGrant").
 		Where("organization_id = ? AND user_id = ?", organizationID, userID).
 		First(&membership).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -117,6 +118,7 @@ func (r *repository) ListForUser(ctx context.Context, userID uint, page, pageSiz
 	offset := (page - 1) * pageSize
 	if err := query.
 		Preload("Organization").
+		Preload("DeveloperGrant").
 		Order("created_at DESC, id DESC").
 		Offset(offset).
 		Limit(pageSize).

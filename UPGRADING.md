@@ -11,6 +11,42 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Developer access
+
+### High — Deploy the Web before the API
+
+Organization, context, and member responses gain `features.developer` and `developer_scope`. The
+Web parses them with strict schemas, so an older Web rejects the new API response. Ship the Web
+first: the new Web reads an older API's views as having no developer grant.
+
+### Medium — New table `member_developer_grants`
+
+Migration `2026_12_28_090000_add_member_developer_grants` (organization starter) creates
+`member_developer_grants`: one row per membership (primary key `membership_id`, `ON DELETE
+CASCADE`), its `organization_id`, `all_domains`, `scope_domains` (`text`, a JSON array), and
+`granted_by`, with the check `chk_member_developer_grants_scope` (all domains or at least one
+domain). It only creates a table; its foreign keys take a brief `SHARE ROW EXCLUSIVE` lock on
+`organization_memberships`, `organizations`, and `users` while the table is created, which blocks
+writes to those tables for that moment but not reads. The same migration creates
+`organization_invitation_developer_grants` (primary key `invitation_id`, `ON DELETE CASCADE`), which
+marks invitations and roster rows that give developer access on accept, scoped to the organization's
+default mail domain then. Migration
+`2026_12_28_090100_add_webhook_endpoint_developer_owned` (webhook starter) adds
+`webhook_endpoints.developer_owned boolean NOT NULL DEFAULT false`; the constant default makes this
+a catalog-only change, but `ADD COLUMN` still takes an `ACCESS EXCLUSIVE` lock on
+`webhook_endpoints` for that moment, so run it outside a long transaction that reads endpoints.
+Existing endpoints stay organization-owned. Rolling back drops the column and every developer grant.
+
+### Medium — Developer grant widens owner/admin-only routes
+
+A member with the `developer` feature may now manage transactional templates within the grant's
+sending domains, manage the webhooks they created, list and remove suppressions, and read send
+lanes and organization usage. Transactional sends by a member's API key, and console test sends by
+a member, now need the developer grant (`403 ORGANIZATION.FEATURE_NOT_GRANTED` otherwise) and a
+sender inside the grant (`403 DEVELOPER.DOMAIN_NOT_ALLOWED`). A fork that relied on a member key
+with only `api_keys` sending transactional mail must grant `developer`. Webhook endpoints created by
+a member receive only `email.*` events from senders inside the creator's current grant. See
+"Developer access" in `contracts/MAILBOXES.md` and `contracts/WEBHOOKS.md`.
 ## Unreleased — Resending member welcome mail
 
 ### Low — Deploy the API before the Web

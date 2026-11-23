@@ -44,7 +44,7 @@ func TestOrganizationContextCanUseFollowsRoleAndGrants(t *testing.T) {
 func TestMemberFeatureCatalogIsStable(t *testing.T) {
 	assert.Equal(t, []MemberFeature{
 		MemberFeatureBroadcasts, MemberFeatureContacts, MemberFeatureTemplates, MemberFeatureAPIKeys,
-		MemberFeatureMailClients,
+		MemberFeatureMailClients, MemberFeatureDeveloper,
 	}, MemberFeatureCatalog())
 	for _, feature := range MemberFeatureCatalog() {
 		assert.True(t, feature.IsValid())

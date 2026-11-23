@@ -3,6 +3,7 @@ package organization
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -47,6 +48,7 @@ func (r *repository) ListMembers(
 	var memberships []*OrganizationMembershipPO
 	if err := query.
 		Preload("User").
+		Preload("DeveloperGrant").
 		Order("organization_memberships.user_id ASC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
@@ -113,6 +115,12 @@ func (r *repository) ChangeMemberRole(
 		if result.RowsAffected != 1 {
 			return domain.ErrConflict
 		}
+		// A role change withdraws developer access: an admin needs none, and demoting them later
+		// must not quietly restore an old grant.
+		if deleteErr := tx.Where("membership_id = ?", target.ID).Delete(&MemberDeveloperGrantPO{}).Error; deleteErr != nil {
+			return fmt.Errorf("withdraw developer grant: %w", deleteErr)
+		}
+		target.DeveloperGrant = nil
 		target.Role = string(role)
 		target.UpdatedAt = now
 		change = &domain.OrganizationMembershipRoleChange{
@@ -288,6 +296,7 @@ func findMembershipByIDUpdate(tx *gorm.DB, organizationID, memberID uint) (*Orga
 	var membership OrganizationMembershipPO
 	err := forUpdate(tx).
 		Preload("User").
+		Preload("DeveloperGrant").
 		Where("organization_id = ? AND id = ?", organizationID, memberID).
 		First(&membership).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

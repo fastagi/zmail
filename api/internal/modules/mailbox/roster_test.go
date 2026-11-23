@@ -168,6 +168,24 @@ func TestRosterInvitesReservesAMailboxAndCarriesTheGrants(t *testing.T) {
 	}
 }
 
+// TestRosterDeveloperRowsInviteDevelopers: a developer=yes row carries developer access for a
+// member; an admin row never needs it.
+func TestRosterDeveloperRowsInviteDevelopers(t *testing.T) {
+	f := newRosterFixture(t)
+	f.run(t, false,
+		MemberImportRow{Email: "dev@gmail.com", Developer: true},
+		MemberImportRow{Email: "plain@gmail.com"},
+		MemberImportRow{Email: "boss@gmail.com", Role: "admin", Developer: true},
+	)
+	if len(f.inviter.sent) != 3 {
+		t.Fatalf("invitations = %d", len(f.inviter.sent))
+	}
+	if !f.inviter.sent[0].Features.Developer || f.inviter.sent[1].Features.Developer || f.inviter.sent[2].Features.Developer {
+		t.Fatalf("developer grants = %v %v %v", f.inviter.sent[0].Features.Developer,
+			f.inviter.sent[1].Features.Developer, f.inviter.sent[2].Features.Developer)
+	}
+}
+
 func TestRosterReuploadIsIdempotent(t *testing.T) {
 	f := newRosterFixture(t)
 	rows := []MemberImportRow{{Email: "alice@gmail.com"}, {Email: "bob@outlook.com"}}

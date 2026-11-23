@@ -50,6 +50,8 @@ type MemberImportRow struct {
 	Name    string
 	Role    string
 	Mailbox string
+	// Developer gives this member developer access on joining, on top of the import's grants.
+	Developer bool
 }
 
 // MemberImportInput is one roster import: the rows, the verified domain their mailboxes default
@@ -101,6 +103,7 @@ type preparedMemberRow struct {
 	email       string
 	displayName string
 	role        domain.OrganizationRole
+	developer   bool
 	localPart   string
 	domainName  string
 	err         error
@@ -306,7 +309,10 @@ func (s *service) importInvitee(
 		outcome.InvitationID = pending.ID
 		return outcome
 	}
-	invitation, emailStatus, err := s.inviter.InviteRosterMember(ctx, viewer.UserID, viewer.OrganizationID, row.email, row.role, input.Features)
+	features := input.Features
+	// Developer access is a member grant; an admin already has every feature.
+	features.Developer = (features.Developer || row.developer) && row.role == domain.OrganizationRoleMember
+	invitation, emailStatus, err := s.inviter.InviteRosterMember(ctx, viewer.UserID, viewer.OrganizationID, row.email, row.role, features)
 	switch {
 	case errors.Is(err, domain.ErrOrganizationMemberAlreadyExists):
 		// The person joined since the lookup; the join claimed or will claim the mailbox.
@@ -468,7 +474,10 @@ func prepareMemberRows(rows []MemberImportRow, defaultDomain string) []preparedM
 }
 
 func prepareMemberRow(raw MemberImportRow, defaultDomain string) preparedMemberRow {
-	row := preparedMemberRow{email: strings.ToLower(strings.TrimSpace(stripFormulaGuard(strings.TrimSpace(raw.Email))))}
+	row := preparedMemberRow{
+		email:     strings.ToLower(strings.TrimSpace(stripFormulaGuard(strings.TrimSpace(raw.Email)))),
+		developer: raw.Developer,
+	}
 	if !validRosterEmail(row.email) {
 		row.err = ErrMemberImportEmailInvalid
 		return row

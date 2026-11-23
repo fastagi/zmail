@@ -277,6 +277,7 @@ describe('member feature grants', () => {
     templates: false,
     api_keys: true,
     mail_clients: false,
+    developer: false,
   };
 
   it('reads grants from organization, context, and member views', () => {
@@ -294,7 +295,7 @@ describe('member feature grants', () => {
     };
     expect(
       parseOrganizationResponse({ ...organization, role: 'member', features: earlier }).features
-    ).toEqual({ ...earlier, mail_clients: false });
+    ).toEqual({ ...earlier, mail_clients: false, developer: false });
     expect(() =>
       parseOrganizationResponse({ ...organization, features: { ...grants, extra: true } })
     ).toThrow(ApiError);
@@ -307,11 +308,18 @@ describe('member feature grants', () => {
       templates: true,
       api_keys: true,
       mail_clients: true,
+      developer: true,
     };
     expect(effectiveMemberFeatures('member', grants)).toEqual(grants);
     expect(effectiveMemberFeatures('admin', grants)).toEqual(all);
     expect(effectiveMemberFeatures('owner', grants)).toEqual(all);
     expect(effectiveMemberFeatures('member', undefined)).toEqual(all);
+    // Developer access includes API keys.
+    expect(effectiveMemberFeatures('member', { ...grants, api_keys: false, developer: true })).toEqual({
+      ...grants,
+      api_keys: true,
+      developer: true,
+    });
   });
 
   it('accepts a change that names at least one known feature', () => {
@@ -319,6 +327,18 @@ describe('member feature grants', () => {
     expect(updateOrganizationMemberFeaturesSchema.safeParse({}).success).toBe(false);
     expect(updateOrganizationMemberFeaturesSchema.safeParse({ billing: true }).success).toBe(false);
     expect(updateOrganizationMemberFeaturesSchema.safeParse({ contacts: 'yes' }).success).toBe(false);
+    expect(
+      updateOrganizationMemberFeaturesSchema.safeParse({
+        developer: true,
+        developer_domains: ['fast-ui.com'],
+      }).success
+    ).toBe(true);
+    expect(
+      updateOrganizationMemberFeaturesSchema.safeParse({
+        developer: true,
+        developer_domains: Array.from({ length: 51 }, (_, index) => `d${index}.example`),
+      }).success
+    ).toBe(false);
   });
 
   it('lets mock managers change a member and nobody change a manager', () => {
@@ -334,6 +354,7 @@ describe('member feature grants', () => {
             templates: true,
             api_keys: false,
             mail_clients: true,
+            developer: false,
           },
         }),
       ]),
@@ -346,6 +367,7 @@ describe('member feature grants', () => {
         templates: true,
         api_keys: false,
         mail_clients: true,
+        developer: false,
       },
     });
     expect(store.resolveContext(member, 1)?.features).toMatchObject({ broadcasts: true });

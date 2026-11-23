@@ -1223,7 +1223,9 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-          description: '`PERMISSION.DENIED`: only owners and admins may change member features.'
+          description: '`PERMISSION.DENIED`: only owners and admins may change member features.
+            `DEVELOPER.DOMAIN_NOT_ALLOWED`: a developer domain is not a verified domain of the
+            organization.'
         '404':
           $ref: '#/components/responses/NotFound'
           description: '`ORGANIZATION.NOT_FOUND` or `ORGANIZATION.MEMBER_NOT_FOUND`.'
@@ -12278,6 +12280,7 @@ components:
         - API_KEY.REVOKED
         - API_KEY.ORGANIZATION_MISMATCH
         - API_KEY.DOMAIN_NOT_ALLOWED
+        - DEVELOPER.DOMAIN_NOT_ALLOWED
         - ORGANIZATION.NOT_FOUND
         - ORGANIZATION.CONTEXT_REQUIRED
         - ORGANIZATION.CONTEXT_INVALID
@@ -13300,6 +13303,10 @@ components:
           $ref: '#/components/schemas/OrganizationRole'
         features:
           $ref: '#/components/schemas/OrganizationMemberFeatures'
+        developer_scope:
+          oneOf:
+            - $ref: '#/components/schemas/OrganizationDeveloperScope'
+            - type: 'null'
         created_at:
           type: string
           format: date-time
@@ -13390,6 +13397,10 @@ components:
           $ref: '#/components/schemas/OrganizationRole'
         features:
           $ref: '#/components/schemas/OrganizationMemberFeatures'
+        developer_scope:
+          oneOf:
+            - $ref: '#/components/schemas/OrganizationDeveloperScope'
+            - type: 'null'
     OrganizationContextResponse:
       type: object
       additionalProperties: false
@@ -13431,6 +13442,10 @@ components:
           $ref: '#/components/schemas/OrganizationRole'
         features:
           $ref: '#/components/schemas/OrganizationMemberFeatures'
+        developer_scope:
+          oneOf:
+            - $ref: '#/components/schemas/OrganizationDeveloperScope'
+            - type: 'null'
         joined_at:
           type: string
           format: date-time
@@ -13491,6 +13506,7 @@ components:
         - templates
         - api_keys
         - mail_clients
+        - developer
       properties:
         broadcasts:
           type: boolean
@@ -13507,6 +13523,31 @@ components:
         mail_clients:
           type: boolean
           description: Create mail client passwords and read mail in mail apps.
+        developer:
+          type: boolean
+          description: Connect the organization's own systems (transactional templates, webhooks,
+            suppressions, usage) within the sending domains of `developer_scope`. Includes
+            `api_keys`, which reports true whenever this does.
+    OrganizationDeveloperScope:
+      type: object
+      description: Sending domains a member's developer grant covers. Null for owners and admins,
+        who are unrestricted, and for members without the grant.
+      additionalProperties: false
+      required:
+        - all_domains
+        - domains
+      properties:
+        all_domains:
+          type: boolean
+          description: Every verified domain of the organization, including domains verified later.
+            The platform's shared sending domain is never included.
+        domains:
+          type: array
+          maxItems: 50
+          description: Lowercase domain names; empty when `all_domains` is true.
+          items:
+            type: string
+            maxLength: 253
     OrganizationMemberFeaturesUpdateRequest:
       type: object
       description: Names at least one feature; omitted features keep their value.
@@ -13523,6 +13564,22 @@ components:
           type: boolean
         mail_clients:
           type: boolean
+        developer:
+          type: boolean
+          description: Turning it on for a member without a grant needs `developer_all_domains` or
+            `developer_domains`; turning it off removes the grant and its scope.
+        developer_all_domains:
+          type: boolean
+          description: Scope the grant to every verified domain of the organization.
+        developer_domains:
+          type: array
+          maxItems: 50
+          description: Scope the grant to these verified domains of the organization; any other is
+            `403 DEVELOPER.DOMAIN_NOT_ALLOWED`. With an existing grant, either scope field alone
+            replaces its scope.
+          items:
+            type: string
+            maxLength: 253
     OrganizationOwnershipTransferRequest:
       type: object
       additionalProperties: false
@@ -13653,6 +13710,11 @@ components:
           description: Trimmed and lower-cased before storage.
         role:
           $ref: '#/components/schemas/OrganizationAssignableRole'
+        developer:
+          type: boolean
+          description: Gives a `member` developer access on accept, scoped to the organization's
+            default mail domain then; without a verified domain the member joins without it.
+            Ignored for an `admin`.
     OrganizationInvitationCreateResult:
       type: object
       additionalProperties: false
@@ -14653,6 +14715,10 @@ components:
         updated_at:
           type: string
           format: date-time
+        created_by:
+          $ref: '#/components/schemas/PositiveID'
+          description: The user who created the endpoint. A developer manages only the endpoints
+            they created; owners and admins manage every endpoint.
     WebhookEndpointResponse:
       type: object
       additionalProperties: false
@@ -16901,6 +16967,10 @@ components:
           description: A local part on `domain`, or a whole address on a verified organization domain. Empty
             uses the email's local part without a `+tag`.
           maxLength: 320
+        developer:
+          type: boolean
+          description: The roster's `developer=yes`. Gives this `member` developer access on joining,
+            scoped to the organization's default mail domain then. Ignored for an `admin`.
     MemberImportFeatures:
       type: object
       description: The grants every invitation of the import starts the membership with.
@@ -16917,6 +16987,10 @@ components:
         mail_clients:
           type: boolean
           description: Granted when absent.
+        developer:
+          type: boolean
+          description: Gives every invited `member` developer access on joining, scoped to the
+            organization's default mail domain then.
     MemberImportRequest:
       type: object
       additionalProperties: false
@@ -21752,6 +21826,10 @@ components:
           maxItems: 100
           items:
             $ref: '#/components/schemas/MailTemplateVariableDefinition'
+        outside_sending_scope:
+          type: boolean
+          description: True only for a developer whose grant no longer covers this transactional
+            template's sender domain; the template is read-only for them.
     MailTemplate:
       type: object
       additionalProperties: false
@@ -21814,6 +21892,10 @@ components:
           maxItems: 100
           items:
             $ref: '#/components/schemas/MailTemplateVariableDefinition'
+        outside_sending_scope:
+          type: boolean
+          description: True only for a developer whose grant no longer covers this transactional
+            template's sender domain; the template is read-only for them.
     MailTemplateResponse:
       type: object
       additionalProperties: false

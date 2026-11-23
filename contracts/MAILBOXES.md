@@ -381,6 +381,9 @@ each invitation the feature grants the membership starts with. Only owners and a
 - `features` is applied to every invitation the request creates; absent means the new-member
   defaults, contacts and templates. Owners and admins always have every feature, so an admin row's
   grants only matter if the admin is later made a member.
+- `features.developer`, or a row's `developer: true` (the roster's `developer=yes` column), gives a
+  `member` row developer access on joining, scoped to the organization's default mail domain at
+  accept time (see [Developer access](#developer-access)); it is ignored for an `admin` row.
 - One leading `'` is removed from `email`, `name`, and `mailbox` when the next character is `=`,
   `+`, `-`, or `@`.
 
@@ -2392,8 +2395,9 @@ was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotenc
 
 #### Lane Usage
 
-`GET /v1/mail-send-lanes` shows owners and admins how full each lane is; a member gets
-`403 PERMISSION.DENIED` and reads only the limits from `GET /v1/mailbox-domains`. It is computed on
+`GET /v1/mail-send-lanes` shows owners, admins, and developers (see
+[Developer access](#developer-access)) how full each lane is, for the whole organization; any other
+member gets `403 PERMISSION.DENIED` and reads only the limits from `GET /v1/mailbox-domains`. It is computed on
 every request and never cached:
 
 ```json
@@ -2534,8 +2538,13 @@ A `standard` template must not carry `key`, `from_address`, `from_name`, or `var
 (`{ address, name }`, null for standard), and `variable_definitions` (empty for standard).
 `sample_variables` may hold example values for secret variables too; they are used only by previews.
 
-Every member reads every template and writes standard ones. Creating, replacing, or deleting a
-transactional template needs an owner or admin; a member is `403 PERMISSION.DENIED`.
+Every member reads every template and writes standard ones with the `templates` grant. Creating,
+replacing, or deleting a transactional template needs an owner, an admin, or a developer whose grant
+covers the sender domain (both the stored and the new one on a replace; see
+[Developer access](#developer-access)). A developer acting outside the grant gets
+`403 DEVELOPER.DOMAIN_NOT_ALLOWED`; any other member `403 PERMISSION.DENIED`. Every template
+response carries `outside_sending_scope`: true only for a developer whose grant does not cover a
+transactional template's sender, which the template is then read-only for.
 
 A transactional template serves only transactional messages. Naming one in a mailbox send
 (`template`), a template test (`POST /v1/mail-templates/{id}/tests`), or a broadcast (create,
@@ -3103,7 +3112,7 @@ model must use the masked form.
 
 ### Member Feature Grants
 
-An organization grants each `member` five features (see
+An organization grants each `member` six features (see
 [`ORGANIZATIONS.md`](ORGANIZATIONS.md#member-feature-grants)); owners and admins always have all of
 them. A route that needs a feature the active membership lacks returns
 `403 ORGANIZATION.FEATURE_NOT_GRANTED` before anything else is checked.
@@ -3113,9 +3122,11 @@ them. A route that needs a feature the active membership lacks returns
 | `broadcasts` | Every `/v1/mail-broadcasts` route |
 | `contacts` | Every `/v1/mail-contacts` route, `POST /v1/mail-contact-imports`, and writes to `/v1/mail-contact-lists` |
 | `contacts` or `broadcasts` | `GET /v1/mail-contact-lists` |
-| `templates` | `POST`, `PUT`, and `DELETE` on `/v1/mail-templates`, and `POST /v1/mail-templates/:template_id/tests` |
+| `templates` | `POST /v1/mail-templates/:template_id/tests` |
+| `templates` or `developer` | `POST`, `PUT`, and `DELETE` on `/v1/mail-templates` (a developer writes only transactional templates inside the scope; see [Developer access](#developer-access)) |
 | `templates`, `broadcasts`, or `api_keys` | `GET /v1/mail-templates`, `GET /v1/mail-templates/:template_id`, `POST /v1/mail-template-previews` |
 | `api_keys` | Every route authenticated by `X-API-Key` under [Programmatic Sending](#programmatic-sending), [Agent Grants](#agent-grants), and [Transactional Mail](#transactional-mail) |
+| `developer` | Also grants `api_keys`; adds [Developer access](#developer-access) on top of the routes above |
 | `mail_clients` | `POST /v1/mail-app-passwords`, and signing in from a mail app (see [Mail Client Access](#mail-client-access)) |
 
 ## Mail Client Access
@@ -3522,6 +3533,37 @@ one pending draft per message: the first answers `201`, a later one replaces its
 drafts newest first, only while their message exists and is not sealed. Nothing sends a draft; a
 person replies through [Send](#send).
 
+## Developer Access
+
+An owner or admin may give a `member` the `developer` feature (see
+[ORGANIZATIONS.md](ORGANIZATIONS.md)) to connect the organization's own systems without managing the
+organization. The grant carries a sending scope: every verified domain of the organization (followed
+as domains are verified later), or listed verified domains. The platform's shared sending domain is
+never in a scope. Owners and admins have every developer capability with no scope.
+
+| Capability | Developer |
+|---|---|
+| Developer console, send log, API keys with `mail:transactional` | Yes; the grant includes `api_keys` |
+| Transactional templates | Create, replace, delete when the sender domain is in scope; read-only otherwise |
+| Webhook endpoints | Manage only the endpoints they created (see [WEBHOOKS.md](WEBHOOKS.md)) |
+| Suppression list | List and remove; no bulk import |
+| Lane usage and organization usage | Read only, whole organization |
+| Members, domains, organization settings, colleagues' mailboxes, broadcasts | No (unchanged) |
+
+The scope is checked when it matters, against the grant as it stands then:
+
+- saving a transactional template (sender out of scope: `403 DEVELOPER.DOMAIN_NOT_ALLOWED`);
+- creating an organization-bound API key: `sending_domains` must lie in the scope
+  (`403 DEVELOPER.DOMAIN_NOT_ALLOWED`); a key created without them takes the listed domains of an
+  explicit scope, and stays open under an all-domains scope;
+- every transactional send by a member's key and every console test send by a member: the member
+  needs the grant (`403 ORGANIZATION.FEATURE_NOT_GRANTED`) and the template's sender domain must be in
+  scope (`403 DEVELOPER.DOMAIN_NOT_ALLOWED`), whoever created the template. Narrowing or withdrawing a
+  grant applies to the next send; keys are never deleted, and a key the member also holds under a
+  separate `api_keys` grant keeps working for `mail:send`.
+
+Mailbox sends (`POST /v1/outbound-mail-messages`) are governed by mailbox access, not by this scope.
+
 ## Transactional Mail
 
 A transactional message is one message to one recipient, rendered from a
@@ -3671,8 +3713,9 @@ the request is `429 MAILBOX.SEND_LIMIT_REACHED` and nothing is stored.
 The suppression list holds one entry per organization and address (lowercased). An address is
 added when a delivery event reports it `bounced` or `complained` (see [Delivery Events](#delivery-events));
 `rejected` events and provider refusals at send time never add one. Transactional messages to a
-listed address are `suppressed`, and broadcasts skip it. Owners and admins manage the list; a
-member gets `403 PERMISSION.DENIED`.
+listed address are `suppressed`, and broadcasts skip it. Owners, admins, and developers manage the
+list (developers are not limited by domain; the list has none); any other member gets
+`403 PERMISSION.DENIED`. Every removal that deletes an entry is audited with who removed it.
 
 `GET /v1/mail-suppressions` lists entries newest first, by `created_at` then `id`, in keyset pages.
 Each entry has `id`, `email`, `reason` (`bounced` or `complained`), `source` (`transactional`,
@@ -3786,6 +3829,8 @@ per-recipient rate limit on, and answers `202` with the message, including `to`.
 | Unusable recipient, undeclared variable, unknown simulator address | 422 | `MAILBOX.MESSAGE_INVALID` | After fixing |
 | `Idempotency-Key` missing or malformed | 422 | `MAILBOX.IDEMPOTENCY_KEY_INVALID` | After fixing |
 | Not a transactional template | 422 | `MAILBOX.TEMPLATE_KIND_MISMATCH` | No |
+| The key's owner is a member without the developer grant | 403 | `ORGANIZATION.FEATURE_NOT_GRANTED` | After a grant |
+| The template's sender domain is outside the key owner's developer grant | 403 | `DEVELOPER.DOMAIN_NOT_ALLOWED` | After the grant covers it |
 | Required variable missing or empty | 422 | `MAILBOX.TEMPLATE_VARIABLES_MISSING` | After fixing |
 | Sender domain not verified | 422 | `MAILBOX.DOMAIN_NOT_VERIFIED` | After verifying |
 | Per-key or per-user rate limit | 429 | `COMMON.RATE_LIMITED` with `Retry-After` | Yes |

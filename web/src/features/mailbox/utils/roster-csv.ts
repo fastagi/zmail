@@ -8,13 +8,17 @@ const rosterHeaders = {
   name: ['name', '\u59d3\u540d', '\u540d\u79f0'],
   role: ['role', '\u89d2\u8272'],
   mailbox: ['mailbox', '\u90ae\u7bb1\u524d\u7f00', '\u4f01\u4e1a\u90ae\u7bb1', '\u90ae\u7bb1\u5730\u5740'],
+  developer: ['developer', '\u5f00\u53d1\u8005'],
 } as const;
+
+/** Cell values that turn on developer access for a row: yes, true, 1, and the Chinese "yes" and "grant". */
+const YES = new Set(['yes', 'y', 'true', '1', '\u662f', '\u5f00\u901a']);
 
 /** The roster template: the header line and two example rows to replace. */
 export const ROSTER_IMPORT_TEMPLATE = toCsv([
-  ['email', 'name', 'role', 'mailbox'],
-  ['alice@example.com', 'Alice Wang', 'member', 'alice'],
-  ['bob@example.com', 'Bob Li', 'admin', ''],
+  ['email', 'name', 'role', 'mailbox', 'developer'],
+  ['alice@example.com', 'Alice Wang', 'member', 'alice', 'yes'],
+  ['bob@example.com', 'Bob Li', 'admin', '', ''],
 ]);
 
 export type RosterRowsResult =
@@ -36,6 +40,7 @@ export function readRosterRows(text: string): RosterRowsResult {
   const name = columnOf('name');
   const role = columnOf('role');
   const mailbox = columnOf('mailbox');
+  const developer = columnOf('developer');
   if (email < 0) return { ok: false, error: 'missing_columns' };
   if (data.length === 0) return { ok: false, error: 'empty' };
   if (data.length > MEMBER_IMPORT_MAX_ROWS) return { ok: false, error: 'too_many_rows' };
@@ -47,6 +52,7 @@ export function readRosterRows(text: string): RosterRowsResult {
       name: cell(row, name),
       role: cell(row, role),
       mailbox: cell(row, mailbox),
+      ...(YES.has(cell(row, developer).toLowerCase()) ? { developer: true } : {}),
     })),
   };
 }

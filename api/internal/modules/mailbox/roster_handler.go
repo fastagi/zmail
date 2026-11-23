@@ -14,6 +14,8 @@ type MemberImportRowRequest struct {
 	Name    string `json:"name" binding:"max=480"`
 	Role    string `json:"role" binding:"max=16"`
 	Mailbox string `json:"mailbox" binding:"max=320"`
+	// Developer gives this member developer access on joining (the roster's developer=yes).
+	Developer bool `json:"developer"`
 }
 
 // MemberImportFeaturesRequest is the grants every invited member of the import starts with.
@@ -24,6 +26,9 @@ type MemberImportFeaturesRequest struct {
 	APIKeys    bool `json:"api_keys"`
 	// MailClients is granted when absent, so a client that predates the feature keeps the default.
 	MailClients *bool `json:"mail_clients"`
+	// Developer gives every invited member developer access on joining, scoped to the
+	// organization's default mail domain then.
+	Developer bool `json:"developer"`
 }
 
 // CreateMemberImportRequest is the body of POST /v1/member-imports. Features defaults to the
@@ -45,6 +50,7 @@ func (r CreateMemberImportRequest) input() MemberImportInput {
 		if r.Features.MailClients != nil {
 			features.MailClients = *r.Features.MailClients
 		}
+		features.Developer = r.Features.Developer
 	}
 	rows := make([]MemberImportRow, 0, len(r.Rows))
 	for _, row := range r.Rows {

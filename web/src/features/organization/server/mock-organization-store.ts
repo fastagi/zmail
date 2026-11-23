@@ -5,6 +5,7 @@ import type {
   AcceptOrganizationInvitationInput,
   CreateOrganizationInput,
   CreateOrganizationInvitationInput,
+  DeveloperScope,
   MemberFeatures,
   Organization,
   OrganizationContext,
@@ -39,6 +40,7 @@ const NEW_MEMBER_FEATURES: MemberFeatures = {
   templates: true,
   api_keys: false,
   mail_clients: true,
+  developer: false,
 };
 
 const RESEND_COOLDOWN_MS = 60 * 1000;
@@ -56,6 +58,7 @@ export type MockOrganizationStoreError =
   | 'invitation_resend_rate_limited'
   | 'member_already_exists'
   | 'member_features_fixed'
+  | 'developer_scope_invalid'
   | 'member_not_found'
   | 'organization_not_found'
   | 'ownership_transfer_required'
@@ -93,6 +96,8 @@ interface MockMembershipRecord {
   role: OrganizationRole;
   /** Stored grants; they take effect only for the member role, as in the API. */
   features: MemberFeatures;
+  /** The developer grant's sending scope; kept only while `developer` is granted. */
+  developerScope?: DeveloperScope;
   joinedAt: string;
   updatedAt: string;
 }
@@ -161,7 +166,7 @@ export class MockOrganizationStore {
     );
     const items = memberships.flatMap((membership) => {
       const organization = this.organizationRecord(membership.organizationId);
-      return organization ? [this.organizationView(organization, membership.role, membership.features)] : [];
+      return organization ? [this.organizationView(organization, membership.role, membership.features, membership.developerScope)] : [];
     });
     return paginated(items, page, perPage, '/api/organizations');
   }
@@ -170,7 +175,7 @@ export class MockOrganizationStore {
     const membership = this.membershipForActor(actor, organizationId);
     const organization = this.organizationRecord(organizationId);
     return membership && organization
-      ? this.organizationView(organization, membership.role, membership.features)
+      ? this.organizationView(organization, membership.role, membership.features, membership.developerScope)
       : null;
   }
 
@@ -218,7 +223,7 @@ export class MockOrganizationStore {
 
     organization.name = input.name;
     organization.updatedAt = this.dependencies.now().toISOString();
-    return this.organizationView(organization, membership.role, membership.features);
+    return this.organizationView(organization, membership.role, membership.features, membership.developerScope);
   }
 
   resolveContext(
@@ -238,6 +243,11 @@ export class MockOrganizationStore {
       user_id: user.id,
       role: membership.role,
       features: effectiveMemberFeatures(membership.role, membership.features),
+      developer_scope: developerScopeView(
+        membership.role,
+        membership.features,
+        membership.developerScope
+      ),
     };
   }
 
@@ -352,7 +362,12 @@ export class MockOrganizationStore {
       const granted = input[feature];
       if (granted !== undefined) next[feature] = granted;
     }
+    // As in the API: a grant needs a scope, a scope needs a grant, and withdrawing clears it.
+    const scope = requestedDeveloperScope(input);
+    if (scope && !next.developer) return 'developer_scope_invalid';
+    if (next.developer && !scope && !target.developerScope) return 'developer_scope_invalid';
     target.features = next;
+    target.developerScope = next.developer ? (scope ?? target.developerScope) : undefined;
     target.updatedAt = this.dependencies.now().toISOString();
     return memberView(target, user);
   }
@@ -506,7 +521,8 @@ export class MockOrganizationStore {
     organizationId: number,
     email: string,
     role: OrganizationInvitationRole,
-    features: MemberFeatures
+    // Invitations never carry developer access; a manager grants it after the member joins.
+    features: Omit<MemberFeatures, 'developer'>
   ): { id: number; email_send_status: 'not_configured' } {
     const now = this.dependencies.now();
     const timestamp = now.toISOString();
@@ -522,7 +538,7 @@ export class MockOrganizationStore {
       created_at: timestamp,
       updated_at: timestamp,
       token: this.dependencies.invitationToken(),
-      features: { ...features },
+      features: { ...features, developer: false },
     };
     this.invitations = [invitation, ...this.invitations];
     return { id: invitation.id, email_send_status: 'not_configured' };
@@ -714,7 +730,8 @@ export class MockOrganizationStore {
   private organizationView(
     organization: MockOrganizationRecord,
     role: OrganizationRole,
-    features: MemberFeatures
+    features: MemberFeatures,
+    developerScope?: DeveloperScope
   ): Organization {
     return {
       id: organization.id,
@@ -722,6 +739,7 @@ export class MockOrganizationStore {
       slug: organization.slug,
       role,
       features: effectiveMemberFeatures(role, features),
+      developer_scope: developerScopeView(role, features, developerScope),
       created_at: organization.createdAt,
       updated_at: organization.updatedAt,
     };
@@ -766,6 +784,26 @@ function mockMembership(
   };
 }
 
+function requestedDeveloperScope(
+  input: UpdateOrganizationMemberFeaturesInput
+): DeveloperScope | undefined {
+  if (input.developer_all_domains) return { all_domains: true, domains: [] };
+  if (input.developer_domains?.length) {
+    const domains = [...new Set(input.developer_domains.map(name => name.trim().toLowerCase()))];
+    return { all_domains: false, domains: domains.sort() };
+  }
+  return undefined;
+}
+
+function developerScopeView(
+  role: OrganizationRole,
+  features: MemberFeatures,
+  scope: DeveloperScope | undefined
+): DeveloperScope | null {
+  if (role !== 'member' || !features.developer || !scope) return null;
+  return { all_domains: scope.all_domains, domains: [...scope.domains] };
+}
+
 function memberView(
   membership: MockMembershipRecord,
   user: MockUserRecord
@@ -778,6 +816,11 @@ function memberView(
     ...(user.avatar ? { avatar: user.avatar } : {}),
     role: membership.role,
     features: effectiveMemberFeatures(membership.role, membership.features),
+    developer_scope: developerScopeView(
+      membership.role,
+      membership.features,
+      membership.developerScope
+    ),
     joined_at: membership.joinedAt,
     updated_at: membership.updatedAt,
   };

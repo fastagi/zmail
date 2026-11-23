@@ -17,6 +17,7 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(domain.ErrOrganizationContextInvalid, http.StatusBadRequest, domain.CodeOrganizationContextInvalid)
 	mapper.Register(domain.ErrOrganizationFeatureNotGranted, http.StatusForbidden, domain.CodeOrganizationFeatureNotGranted)
 	mapper.Register(domain.ErrOrganizationMemberFeaturesFixed, http.StatusConflict, domain.CodeOrganizationMemberFeaturesFixed)
+	mapper.Register(domain.ErrDeveloperDomainNotAllowed, http.StatusForbidden, domain.CodeDeveloperDomainNotAllowed)
 	mapper.Register(domain.ErrOrganizationInvitationEmailMismatch, http.StatusForbidden, domain.CodeOrganizationInvitationEmailMismatch)
 	mapper.Register(domain.ErrOrganizationSlugAlreadyExists, http.StatusConflict, domain.CodeOrganizationSlugAlreadyExists)
 	mapper.Register(domain.ErrOrganizationOwnershipTransferRequired, http.StatusConflict, domain.CodeOrganizationOwnershipTransferRequired)

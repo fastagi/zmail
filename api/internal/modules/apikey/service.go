@@ -296,6 +296,23 @@ func (s *service) resolveRestriction(ctx context.Context, userID uint, req *APIK
 			return nil, nil, domain.ErrInvalidInput
 		}
 	}
+	// A developer's key stays inside the grant. Without named domains it takes an explicit
+	// grant's list; an all-domains grant leaves it open and the send-time check follows the grant.
+	grant, allowed, err := s.sendingDomains.DeveloperSendingScope(ctx, organizationID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if grant != nil {
+		for _, name := range requested {
+			if !slices.Contains(allowed, name) {
+				return nil, nil, domain.ErrDeveloperDomainNotAllowed
+			}
+		}
+		if requested == nil && !grant.AllDomains {
+			requested = slices.Clone(allowed)
+			slices.Sort(requested)
+		}
+	}
 	return &organizationID, requested, nil
 }
 

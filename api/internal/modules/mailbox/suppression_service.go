@@ -10,13 +10,13 @@ import (
 )
 
 // ListSuppressions lists one page of the organization's suppression list, newest first, and the
-// cursor of the next page (nil on the last). Only owners and admins may.
+// cursor of the next page (nil on the last). Owners, admins, and developers may.
 func (s *service) ListSuppressions(
 	ctx context.Context,
 	viewer domain.OrganizationContext,
 	filter domain.MailSuppressionFilter,
 ) ([]domain.MailSuppression, *uint, error) {
-	if !viewer.Role.CanManageOrganization() {
+	if !canUseDeveloperTools(viewer) {
 		return nil, nil, domain.ErrPermissionDenied
 	}
 	if s.transactional == nil {
@@ -49,9 +49,10 @@ func (s *service) ListSuppressions(
 
 // RemoveSuppression takes an entry off the organization's suppression list. It succeeds whether
 // or not the organization had the entry, so it discloses nothing, and audits only a removal that
-// deleted one. A contact's status is never changed.
+// deleted one, with the actor the audit entry records. Owners, admins, and developers may; the
+// list has no domain, so a developer's scope does not limit it. A contact's status is never changed.
 func (s *service) RemoveSuppression(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
-	if !viewer.Role.CanManageOrganization() {
+	if !canUseDeveloperTools(viewer) {
 		return domain.ErrPermissionDenied
 	}
 	if s.transactional == nil {

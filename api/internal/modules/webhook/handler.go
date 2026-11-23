@@ -287,9 +287,16 @@ func webhookManager(c *gin.Context) (domain.OrganizationContext, uint, bool) {
 		response.HandleError(c, "Organization context required", domain.ErrOrganizationContextRequired)
 		return domain.OrganizationContext{}, 0, false
 	}
-	if organization.UserID != actorID || !organization.Role.CanManageOrganization() {
+	// Owners and admins manage every endpoint; a developer manages only the endpoints they
+	// created, so their requests carry that limit down to the repository.
+	manager := organization.Role.CanManageOrganization()
+	_, _, developer := organization.DeveloperScope()
+	if organization.UserID != actorID || (!manager && !developer) {
 		response.HandleError(c, "Webhook management forbidden", domain.ErrPermissionDenied)
 		return domain.OrganizationContext{}, 0, false
+	}
+	if !manager {
+		c.Request = c.Request.WithContext(withEndpointOwner(c.Request.Context(), actorID))
 	}
 	return organization, actorID, true
 }

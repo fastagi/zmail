@@ -142,6 +142,8 @@ func featuresWith(feature domain.MemberFeature) domain.MemberFeatures {
 		features.APIKeys = true
 	case domain.MemberFeatureMailClients:
 		features.MailClients = true
+	case domain.MemberFeatureDeveloper:
+		features.Developer = true
 	}
 	return features
 }

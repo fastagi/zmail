@@ -37,6 +37,8 @@ type EndpointResponse struct {
 	PreviousSecretExpiry *time.Time                   `json:"previous_secret_expiry"`
 	CreatedAt            time.Time                    `json:"created_at"`
 	UpdatedAt            time.Time                    `json:"updated_at"`
+	// CreatedBy is the user id of the endpoint's creator; a developer manages only their own.
+	CreatedBy uint `json:"created_by"`
 }
 
 // EndpointSecretResponse contains one-time plaintext only on create or rotation.
@@ -97,6 +99,7 @@ func toEndpointResponse(value *domain.WebhookEndpoint) *EndpointResponse {
 		PreviousSecretExpiry: cloneTime(value.PreviousSecretExpiry),
 		CreatedAt:            value.CreatedAt,
 		UpdatedAt:            value.UpdatedAt,
+		CreatedBy:            value.CreatedBy,
 	}
 }
 

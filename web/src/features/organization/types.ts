@@ -5,6 +5,7 @@ import type {
   createOrganizationInvitationSchema,
   createOrganizationSchema,
   invitationEmailSendStatusSchema,
+  developerScopeSchema,
   memberFeatureSchema,
   memberFeaturesSchema,
   organizationContextSchema,
@@ -27,6 +28,7 @@ import type {
 export type OrganizationRole = Infer<typeof organizationRoleSchema>;
 export type MemberFeature = Infer<typeof memberFeatureSchema>;
 export type MemberFeatures = Infer<typeof memberFeaturesSchema>;
+export type DeveloperScope = Infer<typeof developerScopeSchema>;
 export type UpdateOrganizationMemberFeaturesInput = Infer<
   typeof updateOrganizationMemberFeaturesSchema
 >;

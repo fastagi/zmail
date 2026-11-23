@@ -103,11 +103,26 @@ func (s *service) requireTemplateSender(ctx context.Context, organizationID uint
 	}
 }
 
-// requireTemplateWriter lets every member write standard templates and only owners and admins
-// write transactional ones.
-func requireTemplateWriter(viewer domain.OrganizationContext, kind domain.MailTemplateKind) error {
-	if kind == domain.MailTemplateTransactional && !viewer.Role.CanManageOrganization() {
-		return domain.ErrPermissionDenied
+// requireTemplateWriter decides who may write a template with this kind and sender: a standard
+// template needs the templates grant, a transactional one an owner, an admin, or a developer whose
+// grant covers the sender's domain.
+func (s *service) requireTemplateWriter(
+	ctx context.Context,
+	viewer domain.OrganizationContext,
+	kind domain.MailTemplateKind,
+	fromAddress string,
+) error {
+	if kind != domain.MailTemplateTransactional {
+		if !viewer.CanUse(domain.MemberFeatureTemplates) {
+			return domain.ErrOrganizationFeatureNotGranted
+		}
+		return nil
+	}
+	if err := s.requireDeveloperSender(ctx, viewer, fromAddress); err != nil {
+		if errors.Is(err, domain.ErrOrganizationFeatureNotGranted) {
+			return domain.ErrPermissionDenied
+		}
+		return err
 	}
 	return nil
 }

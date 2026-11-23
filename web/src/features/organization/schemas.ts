@@ -48,6 +48,7 @@ export const memberFeatureSchema = enumSchema([
   'templates',
   'api_keys',
   'mail_clients',
+  'developer',
 ]);
 
 /**
@@ -61,6 +62,20 @@ export const memberFeaturesSchema = strictObject({
   api_keys: boolean(),
   // An API from before mail client access does not report it; nothing there signs mail apps in.
   mail_clients: _default(boolean(), false),
+  // Developer access implies api_keys; an API from before it does not report it.
+  developer: _default(boolean(), false),
+});
+
+/** The most domains one developer grant may list, matching the API. */
+export const MAX_DEVELOPER_GRANT_DOMAINS = 50;
+
+/**
+ * Which sending domains a member's developer grant covers: every verified domain of the
+ * organization, or the listed ones. Null for owners, admins, and members without the grant.
+ */
+export const developerScopeSchema = strictObject({
+  all_domains: boolean(),
+  domains: array(string()),
 });
 
 const safeIdSchema = number().check(
@@ -103,6 +118,7 @@ export const organizationSchema = object({
   slug: organizationSlugSchema,
   role: organizationRoleSchema,
   features: optional(memberFeaturesSchema),
+  developer_scope: optional(nullable(developerScopeSchema)),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });
@@ -115,6 +131,7 @@ export const organizationContextSchema = object({
   user_id: safeIdSchema,
   role: organizationRoleSchema,
   features: optional(memberFeaturesSchema),
+  developer_scope: optional(nullable(developerScopeSchema)),
 });
 
 export const paginationMetaSchema = object({
@@ -149,6 +166,7 @@ export const organizationMemberSchema = strictObject({
   avatar: optional(string().check(maxLength(255))),
   role: organizationRoleSchema,
   features: optional(memberFeaturesSchema),
+  developer_scope: optional(nullable(developerScopeSchema)),
   joined_at: timestampSchema,
   updated_at: timestampSchema,
 });
@@ -220,6 +238,8 @@ export const updateOrganizationSchema = object({
 export const createOrganizationInvitationSchema = strictObject({
   email: invitationEmailInputSchema,
   role: organizationInvitationRoleSchema,
+  // Developer access on accept, scoped to the default mail domain then; members only.
+  developer: optional(boolean()),
 });
 
 export const acceptOrganizationInvitationSchema = strictObject({
@@ -236,6 +256,13 @@ export const updateOrganizationMemberFeaturesSchema = strictObject({
   templates: optional(boolean()),
   api_keys: optional(boolean()),
   mail_clients: optional(boolean()),
+  developer: optional(boolean()),
+  developer_all_domains: optional(boolean()),
+  developer_domains: optional(
+    array(string().check(minLength(1), maxLength(253))).check(
+      maxLength(MAX_DEVELOPER_GRANT_DOMAINS)
+    )
+  ),
 }).check(
   refine((value) => Object.values(value).some((granted) => granted !== undefined), {
     message: 'Name at least one feature',

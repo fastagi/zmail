@@ -791,6 +791,9 @@ export const mailTemplateSummarySchema = strictObject({
   key: nullable(string()),
   from: nullable(mailTemplateSenderSchema),
   variable_definitions: array(mailTemplateVariableDefinitionSchema),
+  // True only for a developer whose sending scope no longer covers this transactional
+  // template's sender; the template is then read-only for them. Older APIs omit it.
+  outside_sending_scope: _default(boolean(), false),
 });
 export const mailTemplateListSchema = array(mailTemplateSummarySchema);
 
@@ -813,6 +816,9 @@ export const mailTemplateSchema = strictObject({
   key: nullable(string()),
   from: nullable(mailTemplateSenderSchema),
   variable_definitions: array(mailTemplateVariableDefinitionSchema),
+  // True only for a developer whose sending scope no longer covers this transactional
+  // template's sender; the template is then read-only for them. Older APIs omit it.
+  outside_sending_scope: _default(boolean(), false),
 });
 
 export const mailTemplateInputSchema = strictObject({
