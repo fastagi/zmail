@@ -11,6 +11,27 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Broadcast progress and notices
+
+### High — Deploy the Web before the API
+
+A broadcast read with `GET /v1/mail-broadcasts/{id}` gains `progress` (send rate, estimated finish,
+and when the 24-hour broadcast limit lets it continue); every broadcast view carries the key, null
+outside that read. A Web console from before this change validates broadcasts strictly and fails
+against the new API. The new Web treats a missing `progress` as none, so roll the Web forward first.
+
+### Medium — `mailbox.NewService` takes a broadcast notice sender
+
+Migration `2026_12_20_090000_add_broadcast_notices` (mailbox starter) adds `started_by`,
+`notice_state`, and `notice_count` to `mail_broadcasts`; existing broadcasts are recorded as already
+told, so the deploy sends no notices about the past. The `mail:broadcast:work` worker now tells the
+person who started a broadcast when it finishes, fails, pauses on its own, or waits for the send
+limit: an in-app notification when the notification starter runs, and an email through the system
+mailer (`MAIL_PROVIDER`, `MAIL_FROM`) when it is configured (see `contracts/MAILBOXES.md`,
+"Notices"). `mailbox.NewService` gains a last `broadcastNoticeSender` argument (nil sends none),
+provided by `NewBroadcastNoticeSender`; `domain.MailBroadcastRepository` gains
+`CountRecipientsFinishedSince`, `NthBroadcastAttemptSince`, `ListBroadcastNoticesDue`, and
+`MarkBroadcastNoticed`; `domain.MailBroadcast` gains `StartedBy`.
 ## Unreleased — Mail domain error codes
 
 ### Low — Domains gain `last_error_code`

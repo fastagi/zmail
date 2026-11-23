@@ -140,7 +140,7 @@ func BenchmarkMailboxDirectory1000(b *testing.B) {
 	settings := accessSettings()
 	settings.MaxMailboxes = 5000
 	svc := NewService(repo, newAccessMemberships(), nil, newFakeContacts(), &stubBroadcasts{}, nil,
-		nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, settings, nil, nil, nil)
+		nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, settings, nil, nil, nil, nil)
 	admin := viewerOf(directoryBenchOrg, 900, domain.OrganizationRoleAdmin)
 	ctx := context.Background()
 	for _, scenario := range []struct{ name, query string }{{"first-page", ""}, {"search-sales", "sales"}} {

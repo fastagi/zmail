@@ -44,7 +44,7 @@ func newExternalFixture(t *testing.T, providers ...string) *externalFixture {
 	settings.SecretEncryptionKey = externalTestKey
 	settings.ExternalMail = config.ExternalMailConfig{Providers: providers}
 	svc := NewService(repo, memberships, repo, repo, repo, repo,
-		nil, nil, nil, transport, &fakeNotifier{}, settings, nil, nil, nil)
+		nil, nil, nil, transport, &fakeNotifier{}, settings, nil, nil, nil, nil)
 	source := NewFakeExternalMailSource()
 	svc.externalConnectors = fakeExternalMailRegistry(source)
 	f := &externalFixture{accessFixture: seedAccessFixture(t, svc, repo, transport, memberships), source: source}

@@ -35,7 +35,7 @@ func limitService(repo domain.MailboxRepository, memberships *fakeMemberships, m
 	settings := accessSettings()
 	settings.MaxMailboxes = maxMailboxes
 	return NewService(repo, memberships, nil, newFakeContacts(), &stubBroadcasts{}, nil,
-		nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, settings, nil, nil, nil)
+		nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, settings, nil, nil, nil, nil)
 }
 
 // sharedFor is a shared mailbox C views.

@@ -291,6 +291,9 @@ TABLE mail_broadcasts
   COLUMN resume_at timestamp with time zone
   COLUMN safety_override boolean NOT NULL DEFAULT false
   COLUMN variables jsonb NOT NULL DEFAULT '{}'::jsonb
+  COLUMN started_by bigint
+  COLUMN notice_state character varying(32) NOT NULL DEFAULT ''::character varying
+  COLUMN notice_count integer NOT NULL DEFAULT 0
 
 TABLE mail_cloudflare_connections
   COLUMN id uuid NOT NULL

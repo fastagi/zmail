@@ -5121,6 +5121,8 @@ export interface components {
             list_id: components["schemas"]["PositiveID"];
             mailbox_id: components["schemas"]["PositiveID"];
             name: string;
+            /** @description Send rate and estimated finish, set when one scheduled, sending, or paused broadcast is read; null in the listing, in answers to writes, and for any other status. */
+            progress: components["schemas"]["MailBroadcastProgress"] | null;
             /**
              * Format: date-time
              * @description When a waiting test wave is checked and the rest continues.
@@ -5162,6 +5164,26 @@ export interface components {
             links: components["schemas"]["PaginationLinks"];
             message: string;
             meta: components["schemas"]["PaginationMeta"];
+        };
+        MailBroadcastProgress: {
+            /** Format: date-time */
+            computed_at: string;
+            /**
+             * Format: date-time
+             * @description When the last pending recipient should be finished; null when it cannot be told, such as while a person or the health check holds the broadcast.
+             */
+            estimated_finish_at: string | null;
+            /** @description Recipients finished per minute over the rate window, two decimals; null when none finished in it or the broadcast is not sending. */
+            rate_per_minute: number | null;
+            /** @constant */
+            rate_window_minutes: 10;
+            /** @description The organization's 24-hour broadcast limit holds the broadcast now or will before every pending recipient is sent. */
+            send_limit_pauses: boolean;
+            /**
+             * Format: date-time
+             * @description When the broadcast limit has room again; null when send_limit_pauses is false.
+             */
+            send_limit_resumes_at: string | null;
         };
         MailBroadcastRecipient: {
             contact_id: components["schemas"]["PositiveID"];

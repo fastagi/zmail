@@ -37,6 +37,8 @@ var ProviderSet = wire.NewSet(
 	NewWebhookCatalog,
 	NewWebhookNotifier,
 	wire.Bind(new(mailNotifier), new(*webhookNotifier)),
+	// Broadcast notices go to the notification center and, through the system mailer, by email.
+	NewBroadcastNoticeSender,
 	NewService,
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,
@@ -109,6 +111,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_16_090000_add_external_mail_provider_releases",
 			"2026_12_17_090000_add_external_mail_release_owner",
 			"2026_12_19_090000_add_mail_domain_error_code",
+			"2026_12_20_090000_add_broadcast_notices",
 		),
 	)
 }

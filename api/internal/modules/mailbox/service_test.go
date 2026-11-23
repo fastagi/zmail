@@ -1072,7 +1072,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,
 		DailySendLimit:   3,
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	fixture.service.now = func() time.Time { return fixture.now }
 	return fixture
 }
