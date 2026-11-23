@@ -85,6 +85,7 @@ func newAppPasswordFixture(t *testing.T) *appPasswordFixture {
 	settings := accessSettings()
 	settings.AppPasswordPepper = testAppPasswordPepper
 	settings.ClientIMAPHost, settings.ClientIMAPPort = "imap.example.test", 993
+	settings.ClientSMTPHost, settings.ClientSMTPPort, settings.ClientSubmissionPort = "smtp.example.test", 465, 587
 	svc := NewService(repo, newAccessMemberships(), repo, repo, repo, repo, nil, nil, nil, &fakeTransport{},
 		&fakeNotifier{}, settings, nil, ratelimit.NewMemoryStores(), nil, nil)
 	reverifier := &fakeReverifier{}
@@ -107,8 +108,7 @@ func newAppPasswordFixture(t *testing.T) *appPasswordFixture {
 func (f *appPasswordFixture) create(t *testing.T, viewer domain.OrganizationContext, name string) (*domain.MailAppPassword, string) {
 	t.Helper()
 	created, secret, err := f.service.CreateAppPassword(context.Background(), viewer, CreateAppPasswordInput{
-		Name: name, Scopes: []domain.MailClientProtocol{domain.MailClientProtocolIMAP, domain.MailClientProtocolSMTP},
-		CurrentPassword: "right",
+		Name: name, Scopes: []domain.MailClientProtocol{domain.MailClientProtocolIMAP}, CurrentPassword: "right",
 	})
 	if err != nil {
 		t.Fatalf("CreateAppPassword(%q): %v", name, err)
@@ -131,7 +131,7 @@ func TestCreateAppPasswordReturnsSecretOnce(t *testing.T) {
 		t.Fatalf("secret = %q", secret)
 	}
 	normalized := normalizeAppPassword(secret)
-	if created.Name != "Alice's iPhone" || created.Hint != normalized[12:] || !created.ScopeIMAP || !created.ScopeSMTP {
+	if created.Name != "Alice's iPhone" || created.Hint != normalized[12:] || !created.ScopeIMAP || created.ScopeSMTP {
 		t.Fatalf("created = %+v", created)
 	}
 	var row struct {
@@ -150,7 +150,8 @@ func TestCreateAppPasswordReturnsSecretOnce(t *testing.T) {
 	if err != nil || len(list.Items) != 1 || list.Items[0].ID != created.ID {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
-	if !list.Access.Enabled || list.Access.Reason != "" || list.Server.IMAPHost != "imap.example.test" || list.Limit != MaxAppPasswordsPerMember {
+	if !list.Access.Enabled || list.Access.Reason != "" || list.Server.IMAPHost != "imap.example.test" ||
+		list.Server.SMTPHost != "smtp.example.test" || list.Server.SMTPPort != 465 || list.Server.SMTPSecurity != "ssl_tls" || list.Server.SMTPStartTLSPort != 587 || list.Limit != MaxAppPasswordsPerMember {
 		t.Fatalf("list access and server = %+v %+v", list.Access, list.Server)
 	}
 	encoded, _ := json.Marshal(toMailAppPasswordListResponse(list))
@@ -203,6 +204,31 @@ func TestCreateAppPasswordRequiresCurrentPasswordAndTOTP(t *testing.T) {
 	}
 	if _, _, err := f.service.CreateAppPassword(ctx, f.member, CreateAppPasswordInput{Scopes: nil, CurrentPassword: "right"}); !fieldErrorOf(err, "name") || !fieldErrorOf(err, "scopes") {
 		t.Fatalf("empty name and scopes = %v", err)
+	}
+}
+
+// TestCreateAppPasswordAcceptsSMTP stores the smtp scope alone or with imap.
+func TestCreateAppPasswordAcceptsSMTP(t *testing.T) {
+	f := newAppPasswordFixture(t)
+	for _, scopes := range [][]domain.MailClientProtocol{
+		{domain.MailClientProtocolIMAP, domain.MailClientProtocolSMTP},
+		{domain.MailClientProtocolSMTP},
+	} {
+		created, _, err := f.service.CreateAppPassword(context.Background(), f.member, CreateAppPasswordInput{
+			Name: "Phone", Scopes: scopes, CurrentPassword: "right",
+		})
+		if err != nil {
+			t.Fatalf("scopes %v = %v", scopes, err)
+		}
+		if !created.ScopeSMTP || created.ScopeIMAP != (len(scopes) == 2) {
+			t.Fatalf("scopes %v stored imap=%t smtp=%t", scopes, created.ScopeIMAP, created.ScopeSMTP)
+		}
+	}
+	_, _, err := f.service.CreateAppPassword(context.Background(), f.member, CreateAppPasswordInput{
+		Name: "Phone", Scopes: []domain.MailClientProtocol{domain.MailClientProtocolSMTP, domain.MailClientProtocolSMTP}, CurrentPassword: "right",
+	})
+	if !fieldErrorOf(err, "scopes") {
+		t.Fatalf("a repeated smtp scope = %v", err)
 	}
 }
 
@@ -424,6 +450,10 @@ func TestAppPasswordRoutesAnswerTheContract(t *testing.T) {
 		t.Fatalf("unknown scope = %d %v", recorder.Code, body)
 	}
 	recorder, body = do(http.MethodPost, "/mail-app-passwords", `{"name":"Phone","scopes":["imap","smtp"],"current_password":"right"}`)
+	if both, _ := body["data"].(map[string]any); recorder.Code != http.StatusCreated || len(both["scopes"].([]any)) != 2 {
+		t.Fatalf("imap and smtp = %d %v", recorder.Code, body)
+	}
+	recorder, body = do(http.MethodPost, "/mail-app-passwords", `{"name":"Phone","scopes":["imap"],"current_password":"right"}`)
 	data, _ := body["data"].(map[string]any)
 	if recorder.Code != http.StatusCreated || !appPasswordSecretPattern.MatchString(data["secret"].(string)) ||
 		recorder.Header().Get("Cache-Control") != "private, no-store" {
@@ -432,7 +462,8 @@ func TestAppPasswordRoutesAnswerTheContract(t *testing.T) {
 	id := int(data["id"].(float64))
 	recorder, body = do(http.MethodGet, "/mail-app-passwords", "")
 	data, _ = body["data"].(map[string]any)
-	if recorder.Code != http.StatusOK || len(data["items"].([]any)) != 1 || strings.Contains(recorder.Body.String(), "secret") {
+	if recorder.Code != http.StatusOK || len(data["items"].([]any)) != 2 || strings.Contains(recorder.Body.String(), "secret") ||
+		!strings.Contains(recorder.Body.String(), `"smtp_host":"smtp.example.test","smtp_port":465,"smtp_security":"ssl_tls","smtp_starttls_port":587`) {
 		t.Fatalf("list = %d %s", recorder.Code, recorder.Body.String())
 	}
 	for range 5 {

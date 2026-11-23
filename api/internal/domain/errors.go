@@ -42,6 +42,10 @@ var (
 	ErrAPIKeyInvalid  = errors.New("api key is invalid")
 	ErrAPIKeyExpired  = errors.New("api key is expired")
 	ErrAPIKeyRevoked  = errors.New("api key is revoked")
+	// ErrAPIKeyOrganizationMismatch: an organization-bound key named another organization.
+	ErrAPIKeyOrganizationMismatch = errors.New("api key is bound to another organization")
+	// ErrAPIKeyDomainNotAllowed: a domain-restricted key tried to send from another domain.
+	ErrAPIKeyDomainNotAllowed = errors.New("api key may not send from this domain")
 
 	// Organization errors
 	ErrOrganizationNotFound                       = errors.New("organization not found")

@@ -53,7 +53,7 @@ const messages = {
     name: '名称',
     namePlaceholder: '例如：订单处理器',
     url: '目标 URL',
-    urlPlaceholder: 'https://hooks.example.com/fastbuild',
+    urlPlaceholder: 'https://hooks.example.com/zmail',
     eventTypes: '事件类型',
     invalid: '请检查名称、HTTPS 目标和事件选择。',
   },

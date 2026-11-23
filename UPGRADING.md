@@ -11,6 +11,80 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Organization and sending-domain restrictions on API keys
+
+### Medium — Optional key restrictions, two error codes, and a migration on `api_keys`
+
+`POST /v1/api-keys` accepts an optional `organization_id` and, with it, an optional
+`sending_domains` list. A bound key acts in its organization without `Organization-Id` and answers
+`403 API_KEY.ORGANIZATION_MISMATCH` for any other; a domain-restricted key sending from another
+domain answers `403 API_KEY.DOMAIN_NOT_ALLOWED` on `POST /v1/outbound-mail-messages` and
+`POST /v1/transactional-messages`. Existing keys and keys created without the fields stay
+unrestricted. See "Restrictions" in `contracts/API_KEYS.md`.
+
+- Migration `2026_12_26_090000_add_api_key_restrictions` (apikey starter) adds
+  `api_keys.organization_id` (`bigint`, no foreign key) and `api_keys.sending_domains` (`text`, a
+  JSON array), both nullable without a default, plus the check
+  `chk_api_keys_sending_domains_organization` (domains need an organization). Adding the columns
+  only changes the catalog, but the `ALTER TABLE` takes a short `ACCESS EXCLUSIVE` lock on
+  `api_keys`, and adding the check scans the table under that lock to validate it (every row is
+  `NULL`, so it is quick on a small table). While it waits for the lock it blocks API key
+  authentication; run it off-peak with a `lock_timeout` (for example `SET lock_timeout = '5s'`).
+- **Down revokes restricted keys.** It runs `UPDATE api_keys SET revoked_at = now(), updated_at =
+  now()` on every active key with an organization or domain list before dropping the columns,
+  because older code would treat them as unrestricted. Re-applying Up does not restore them.
+- `domain.SendingDomainDirectory` is bound to the mailbox service and injected into the API key
+  service through the new `apikey.ProvideService`; `apikey.NewService` still builds a service that
+  issues only unrestricted keys. Run `make wire` in a fork with its own injector.
+- Clients that mirror error codes add `API_KEY.ORGANIZATION_MISMATCH` and
+  `API_KEY.DOMAIN_NOT_ALLOWED`. On API-key routes `Organization-Id` is now described by the optional
+  `APIKeyOrganizationContext` parameter in `contracts/openapi.yaml`.
+
+## Unreleased — Template creation with an API key
+
+### Medium — New `templates:create` scope and `POST /v1/agent-mail-templates`
+
+API keys accept a new scope, `templates:create` (`apikey.ScopeTemplatesCreate`), and a key holding
+it may create organization templates with `POST /v1/agent-mail-templates`, so an AI tool can save a
+draft template without a session. The route reuses the template create path and its rules, needs the
+key owner's membership plus the `api_keys` and `templates` grants, and never sends mail; see "Create
+a template from an AI tool" in `contracts/MAILBOXES.md`. A fork that mirrors the scope list
+(`knownScopes`, the `CreateAPIKeyRequest` enum, or the Web create dialog) adds the new value.
+
+## Unreleased — Mail client access, part 2 (SMTP submission)
+
+### Medium — Blind copies, the sending member, and inline attachments are stored
+
+Migration `2026_12_25_090000_add_mail_submission_fields` adds `mail_messages.bcc_addresses`
+(`text NOT NULL DEFAULT '[]'`), `mail_messages.sent_by_membership_id` (`bigint`, no foreign key),
+`mail_attachments.content_id` (`varchar(250) NOT NULL DEFAULT ''`, a bare token without angle
+brackets or spaces), and `mail_attachments.inline` (`boolean NOT NULL DEFAULT false`). Every column
+has a constant default, so PostgreSQL only changes the catalog and rewrites no row, but each `ALTER
+TABLE` takes a short `ACCESS EXCLUSIVE` lock on `mail_messages` and `mail_attachments` that waits
+behind running queries and blocks new ones while it waits. Run it off-peak and with a
+`lock_timeout` (for example `SET lock_timeout = '5s'`) so a long query makes it retry instead of
+queueing traffic behind it. Down drops the four columns and forgets blind copies and inline
+placement.
+
+### Medium — SMTP submission in `fastbuild mail:gateway`
+
+- `MAIL_GATEWAY_SMTPS_ADDR` (implicit TLS) and `MAIL_GATEWAY_SUBMISSION_ADDR` (STARTTLS; AUTH only
+  after STARTTLS) turn on SMTP submission in the existing gateway process; each stays off when
+  empty, and the gateway now starts when any of the three listen addresses is set. In a container
+  bind unprivileged ports such as `:1465` and `:1587` and publish `465:1465` and `587:1587`. The
+  listeners reuse `MAIL_GATEWAY_TLS_CERT_FILE`/`KEY_FILE`, the connection caps, the health address,
+  and one sign-in limiter shared with IMAP, so failures over either protocol lock both.
+- Point DNS `smtp.zmail.im` (or your `MAIL_GATEWAY_PUBLIC_SMTP_HOST`) at the gateway and make sure
+  its certificate covers that name. `MAIL_GATEWAY_PUBLIC_SMTP_HOST`, `MAIL_GATEWAY_PUBLIC_SMTP_PORT`,
+  and `MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT` (default `smtp.zmail.im`, `465`, `587`) are what the
+  console shows.
+- Mail client passwords now accept the `smtp` scope; `GET /v1/mail-app-passwords` reports
+  `server.smtp_host`, `smtp_port`, `smtp_security`, and `smtp_starttls_port`. Messages a mail app
+  submits count in the personal send lane and queue at its limit like console sends.
+- `imapgateway.Config` gains `Limiter`; the sign-in limiter moved to package
+  `mailbox/mailclientauth`. `domain.MailSubmissionStore` is bound to the mailbox service and exposed
+  as `app.Application.MailSubmissions`; run `make wire` in a fork with its own injector.
+
 ## Unreleased — Mail client access, part 1
 
 ### High — Deploy the Web before the API
@@ -38,6 +112,21 @@ so roll the Web forward first. Existing memberships and pending invitations are 
   or nil (which refuses creating mail client passwords). Run `make wire`.
 - `mail:broadcast:work` now also deletes mail client passwords revoked more than 90 days ago, as its
   last step.
+- Creating a mail client password with the `smtp` scope answers `422` with `errors.scopes` until
+  mail submission ships; only `["imap"]` is accepted.
+
+### Medium — Read-only IMAP gateway
+
+- New operator command `fastbuild mail:gateway` serves mailboxes to mail apps over implicit-TLS
+  IMAP (read-only: no APPEND, COPY, MOVE, or folder changes). It exits cleanly while
+  `MAIL_GATEWAY_IMAP_ADDR` is empty, so existing deployments are unaffected. Enabling it needs the
+  mailbox starter, `MAIL_APP_PASSWORD_PEPPER`, and `MAIL_GATEWAY_TLS_CERT_FILE` /
+  `MAIL_GATEWAY_TLS_KEY_FILE`; see `api/docs/CONFIGURATION.md` for the caps, the health address,
+  and `MAIL_GATEWAY_REVALIDATE_INTERVAL` (at most `30s`).
+- New dependency `github.com/emersion/go-imap/v2` pinned at `v2.0.0-beta.9` (MIT, with
+  `go-message` and `go-sasl`); only `internal/modules/mailbox/imapgateway` imports it.
+- `domain.MailClientStore` is new and `app.Application` gains `MailClients`, bound to the mailbox
+  service in its provider set. Run `make wire`.
 
 ### Medium — Migrations `2026_12_24_090000` to `2026_12_24_120000`
 

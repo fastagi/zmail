@@ -120,6 +120,7 @@ func (s *service) storedFiles(ctx context.Context, messageID uint) ([]mailtransp
 		}
 		files = append(files, mailtransport.Attachment{
 			Filename: stored.Filename, ContentType: stored.ContentType, Content: stored.Content,
+			ContentID: stored.ContentID, Inline: stored.Inline,
 		})
 	}
 	return files, nil

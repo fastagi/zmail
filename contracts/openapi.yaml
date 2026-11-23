@@ -1,3 +1,4 @@
+
 openapi: 3.1.0
 info:
   title: FastBuild HTTP API
@@ -711,6 +712,13 @@ paths:
           $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`organization_id` names an organization the caller is not a member of
+            (`ORGANIZATION.NOT_FOUND`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
@@ -8484,7 +8492,7 @@ paths:
       operationId: sendOutboundMailMessage
       summary: Send a message with an API key
       description: "For backend services. The key must hold the `mail:send` scope, and `from` must be the
-        address of a mailbox of the organization named by `Organization-Id`, of which the key's owner must be a member. Outcomes are the same as sending from a mailbox: a
+        address of a mailbox of the organization named by `Organization-Id` (or the key's bound organization), of which the key's owner must be a member. Outcomes are the same as sending from a mailbox: a
         message the provider does not accept answers `502 MAILBOX.DELIVERY_FAILED` and is kept with
         status `failed`."
       tags:
@@ -8492,7 +8500,7 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
         - $ref: '#/components/parameters/MailIdempotencyKey'
       requestBody:
         required: true
@@ -8525,7 +8533,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: The key lacks `mail:send` or the owner may not send from the mailbox
+            (`PERMISSION.DENIED`), the key is bound to another organization
+            (`API_KEY.ORGANIZATION_MISMATCH`), or the key is restricted to other sending domains
+            than the one of `from` (`API_KEY.DOMAIN_NOT_ALLOWED`); nothing is stored or sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: The organization has no mailbox with the `from` address (`MAILBOX.NOT_FOUND`), or the key's owner is not a member of it (`ORGANIZATION.NOT_FOUND`).
           content:
@@ -8576,7 +8591,7 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
         - $ref: '#/components/parameters/MailMessageID'
       responses:
         '200':
@@ -8608,7 +8623,7 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
         - name: after
           in: query
           required: false
@@ -8668,7 +8683,7 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
         - $ref: '#/components/parameters/MailMessageID'
       responses:
         '200':
@@ -8711,7 +8726,7 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
       requestBody:
         required: true
         content:
@@ -8750,6 +8765,71 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/agent-mail-templates:
+    post:
+      operationId: createAgentMailTemplate
+      summary: Create an organization template with an API key
+      description: For AI tools and agents. The key must hold the `templates:create` scope (`*` also grants
+        it); test keys are refused. The key's owner must be a member of the organization named by
+        `Organization-Id` and, as a member, hold both the `api_keys` and the `templates` grant. The body,
+        validation, and response are those of `createMailTemplate`. Creates a reusable template and sends
+        no email. See MAILBOXES.md, Create a template from an AI tool.
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailTemplateRequest'
+      responses:
+        '201':
+          description: The created template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplateResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The key lacks `templates:create` or is a test key, or a member owner tried to write a
+            transactional template (`PERMISSION.DENIED`); or the owner's membership lacks the `api_keys` or
+            `templates` grant (`ORGANIZATION.FEATURE_NOT_GRANTED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`), the key is
+            taken in the organization (`MAILBOX.TEMPLATE_KEY_TAKEN`), or the organization has 200 templates
+            (`MAILBOX.TEMPLATE_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation; the name, subject, body, sample values, or placeholder
+            syntax is unusable, or a transactional template's key, sender, or variable definitions break the
+            template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not
+            verified (`MAILBOX.DOMAIN_NOT_VERIFIED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/transactional-messages:
     post:
       operationId: sendTransactionalMessage
@@ -8766,7 +8846,7 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
         - $ref: '#/components/parameters/TransactionalIdempotencyKey'
       requestBody:
         required: true
@@ -8804,7 +8884,9 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: The key lacks `mail:transactional` (`PERMISSION.DENIED`).
+          description: The key lacks `mail:transactional` (`PERMISSION.DENIED`), is bound to another
+            organization (`API_KEY.ORGANIZATION_MISMATCH`), or is restricted to other sending domains
+            than the one of the template's `from_address` (`API_KEY.DOMAIN_NOT_ALLOWED`).
           content:
             application/json:
               schema:
@@ -8873,7 +8955,7 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/APIKeyOrganizationContext'
         - $ref: '#/components/parameters/TransactionalMessageID'
       responses:
         '200':
@@ -11229,6 +11311,17 @@ components:
       schema:
         type: string
         pattern: ^[1-9][0-9]{0,15}$
+    APIKeyOrganizationContext:
+      name: Organization-Id
+      in: header
+      required: false
+      description: Organization the API key acts in, verified against its owner's membership.
+        Required for an unrestricted key (`400 ORGANIZATION.CONTEXT_REQUIRED` without it). A key
+        bound to an organization acts there when the header is absent; a different value is
+        `403 API_KEY.ORGANIZATION_MISMATCH`.
+      schema:
+        type: string
+        pattern: ^[1-9][0-9]{0,15}$
     IfMatch:
       name: If-Match
       in: header
@@ -11968,6 +12061,8 @@ components:
         - API_KEY.INVALID
         - API_KEY.EXPIRED
         - API_KEY.REVOKED
+        - API_KEY.ORGANIZATION_MISMATCH
+        - API_KEY.DOMAIN_NOT_ALLOWED
         - ORGANIZATION.NOT_FOUND
         - ORGANIZATION.CONTEXT_REQUIRED
         - ORGANIZATION.CONTEXT_INVALID
@@ -12282,6 +12377,26 @@ components:
         updated_at:
           type: string
           format: date-time
+        organization_id:
+          description: Present only on a key bound to one organization; such a key acts there
+            without `Organization-Id` and is refused in any other. Absent on an unrestricted key.
+          allOf:
+            - $ref: '#/components/schemas/PositiveID'
+        sending_domains:
+          type: array
+          description: Present only on a key restricted to these sending domains (lowercase,
+            sorted); it may send only from addresses on them. Absent on a key that may send from
+            every domain.
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/APIKeySendingDomain'
+    APIKeySendingDomain:
+      type: string
+      minLength: 1
+      maxLength: 253
+      description: A domain the key's organization may send from.
     CreateAPIKeyRequest:
       type: object
       additionalProperties: false
@@ -12297,7 +12412,7 @@ components:
           type: array
           minItems: 1
           maxItems: 32
-          description: At least one of Zmail's mail scopes, or `*` for all of them.
+          description: At least one of Zmail's scopes, or `*` for all of them.
           items:
             type: string
             enum:
@@ -12305,12 +12420,28 @@ components:
               - mail:read
               - mail:transactional
               - mail:agent
+              - templates:create
               - '*'
         expires_at:
           type: string
           format: date-time
         mode:
           $ref: '#/components/schemas/APIKeyMode'
+        organization_id:
+          description: Optional. Binds the key to this organization, of which the caller must be a
+            member (`404 ORGANIZATION.NOT_FOUND` otherwise). Omit for an unrestricted key. Fixed at
+            creation.
+          allOf:
+            - $ref: '#/components/schemas/PositiveID'
+        sending_domains:
+          type: array
+          description: Optional, and only with `organization_id`. Restricts sending to these domains,
+            each one the organization may send from (the shared domain or one of its verified
+            domains); matching ignores case. Omit to allow every domain. Fixed at creation.
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/APIKeySendingDomain'
     APIKeyMode:
       type: string
       description: '`live` keys act for real; `test` keys are issued with the `zmail_test_` prefix, are
@@ -16805,6 +16936,14 @@ components:
           items:
             type: string
             maxLength: 320
+        bcc:
+          type: array
+          description: Blind copies of an outbound message. Present only on the detail the sending
+            member reads in the console; absent for everyone else, in listings, and on API-key routes.
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
         subject:
           type: string
           maxLength: 998
@@ -18988,6 +19127,10 @@ components:
         - imap_host
         - imap_port
         - imap_security
+        - smtp_host
+        - smtp_port
+        - smtp_security
+        - smtp_starttls_port
       properties:
         imap_host:
           type: string
@@ -19000,6 +19143,23 @@ components:
           type: string
           enum:
             - ssl_tls
+        smtp_host:
+          type: string
+          minLength: 1
+        smtp_port:
+          type: integer
+          description: The SMTP submission port with TLS from the start.
+          minimum: 1
+          maximum: 65535
+        smtp_security:
+          type: string
+          enum:
+            - ssl_tls
+        smtp_starttls_port:
+          type: integer
+          description: The SMTP submission port that upgrades with STARTTLS.
+          minimum: 1
+          maximum: 65535
     MailAppPasswordList:
       type: object
       additionalProperties: false
@@ -19064,6 +19224,7 @@ components:
           maxLength: 64
         scopes:
           type: array
+          description: '`imap` lets a mail app read; `smtp` lets it send over SMTP submission.'
           minItems: 1
           maxItems: 2
           uniqueItems: true

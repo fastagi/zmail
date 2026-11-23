@@ -54,11 +54,15 @@ type MailClientAccessResponse struct {
 	Reason  *string `json:"reason"`
 }
 
-// MailClientServerResponse is the public IMAP server.
+// MailClientServerResponse is the public IMAP and SMTP servers.
 type MailClientServerResponse struct {
-	IMAPHost     string `json:"imap_host"`
-	IMAPPort     int    `json:"imap_port"`
-	IMAPSecurity string `json:"imap_security"`
+	IMAPHost         string `json:"imap_host"`
+	IMAPPort         int    `json:"imap_port"`
+	IMAPSecurity     string `json:"imap_security"`
+	SMTPHost         string `json:"smtp_host"`
+	SMTPPort         int    `json:"smtp_port"`
+	SMTPSecurity     string `json:"smtp_security"`
+	SMTPStartTLSPort int    `json:"smtp_starttls_port"`
 }
 
 // MailAppPasswordListResponse is the caller's own passwords, the cap, access, and the server.
@@ -118,6 +122,8 @@ func toMailAppPasswordListResponse(list *AppPasswordList) MailAppPasswordListRes
 		Items: items, Limit: list.Limit, Access: access,
 		Server: MailClientServerResponse{
 			IMAPHost: list.Server.IMAPHost, IMAPPort: list.Server.IMAPPort, IMAPSecurity: list.Server.IMAPSecurity,
+			SMTPHost: list.Server.SMTPHost, SMTPPort: list.Server.SMTPPort, SMTPSecurity: list.Server.SMTPSecurity,
+			SMTPStartTLSPort: list.Server.SMTPStartTLSPort,
 		},
 	}
 }

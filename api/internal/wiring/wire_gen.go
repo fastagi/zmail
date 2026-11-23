@@ -56,35 +56,56 @@ func InitApplication() (*app.Application, error) {
 	auditService := audit.ProvideService(auditRepository, configConfig)
 	handler := audit.NewHandler(auditService)
 	apikeyRepository := apikey.NewRepository(db)
-	apikeyService := apikey.NewService(apikeyRepository)
-	apikeyHandler := apikey.NewHandler(apikeyService)
-	userRepository := user.NewRepository(db)
-	sessionService := user.NewSessionService(userRepository, configConfig)
-	userMailer := user.NewUserMailer(service)
-	accountDeletionPolicy := user.NewAccountDeletionPolicy()
-	authAbuseGuard := user.NewAuthAbuseGuard(configConfig, stores)
-	userService := user.ProvideService(userRepository, userRepository, sessionService, eventBus, userMailer, accountDeletionPolicy, authAbuseGuard, configConfig)
-	userHandler := user.NewHandler(userService, userService, userService, sessionService, userMailer, authAbuseGuard)
+	mailboxRepository := mailbox.NewRepository(db)
 	organizationRepository := organization.NewRepository(db)
-	invitationMailer := organization.NewInvitationMailer(service, configConfig)
-	invitationPolicy := organization.NewInvitationPolicy(configConfig, stores)
-	membershipEventPublisher := organization.NewMembershipEventPublisher(eventBus)
-	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy, membershipEventPublisher)
-	contextResolver := organization.NewContextResolver(organizationService)
-	organizationHandler := organization.NewHandler(organizationService, contextResolver, accountDeletionPolicy)
-	permissionRepository := permission.NewRepository(db)
-	catalog, err := permission.NewDefaultCatalog()
+	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
+	domainProvider := mailtransport.NewDomainProvider(configConfig)
+	transport := mailtransport.New(configConfig)
+	catalog, err := mailbox.NewWebhookCatalog()
 	if err != nil {
 		return nil, err
 	}
-	permissionService := permission.NewService(permissionRepository, catalog)
-	guard := permission.NewGuard(permissionService)
-	permissionHandler := permission.NewHandler(permissionService, guard)
+	webhookRepository := webhook.NewRepository(db)
+	secretProtector, err := webhook.NewSecretProtector(configConfig)
+	if err != nil {
+		return nil, err
+	}
+	targetPolicy := webhook.NewTargetPolicy(configConfig)
+	sender := webhook.NewSender(configConfig, targetPolicy)
+	webhookService := webhook.NewService(catalog, webhookRepository, secretProtector, targetPolicy, sender, configConfig)
+	webhookNotifier := mailbox.NewWebhookNotifier(configConfig, webhookService)
+	settings := mailbox.SettingsFromConfig(configConfig)
+	userRepository := user.NewRepository(db)
+	accountDirectory := mailbox.NewAccountDirectory(userRepository)
 	notificationRepository := notification.NewRepository(db)
 	emailSender := notification.ProvideEmailSender(service)
 	eventPublisher := notification.ProvideEventPublisher(eventBus)
 	webPushSender := notification.ProvideWebPushSender(configConfig)
 	notificationService := notification.NewService(configConfig, notificationRepository, emailSender, eventPublisher, webPushSender)
+	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
+	invitationMailer := organization.NewInvitationMailer(service, configConfig)
+	invitationPolicy := organization.NewInvitationPolicy(configConfig, stores)
+	membershipEventPublisher := organization.NewMembershipEventPublisher(eventBus)
+	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy, membershipEventPublisher)
+	sessionService := user.NewSessionService(userRepository, configConfig)
+	userMailer := user.NewUserMailer(service)
+	accountDeletionPolicy := user.NewAccountDeletionPolicy()
+	authAbuseGuard := user.NewAuthAbuseGuard(configConfig, stores)
+	userService := user.ProvideService(userRepository, userRepository, sessionService, eventBus, userMailer, accountDeletionPolicy, authAbuseGuard, configConfig)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService)
+	apikeyService := apikey.ProvideService(apikeyRepository, mailboxService)
+	apikeyHandler := apikey.NewHandler(apikeyService)
+	userHandler := user.NewHandler(userService, userService, userService, sessionService, userMailer, authAbuseGuard)
+	contextResolver := organization.NewContextResolver(organizationService)
+	organizationHandler := organization.NewHandler(organizationService, contextResolver, accountDeletionPolicy)
+	permissionRepository := permission.NewRepository(db)
+	permissionCatalog, err := permission.NewDefaultCatalog()
+	if err != nil {
+		return nil, err
+	}
+	permissionService := permission.NewService(permissionRepository, permissionCatalog)
+	guard := permission.NewGuard(permissionService)
+	permissionHandler := permission.NewHandler(permissionService, guard)
 	notificationHandler := notification.NewHandler(notificationService)
 	assetRepository := asset.NewRepository(db)
 	objectStore, err := storage.NewObjectStore(configConfig)
@@ -112,25 +133,12 @@ func InitApplication() (*app.Application, error) {
 	usageRepository := usage.NewRepository(db)
 	usageService := usage.NewService(usageCatalog, usageRepository, configConfig)
 	usageHandler := usage.NewHandler(usageService, accountDeletionPolicy)
-	webhookCatalog, err := mailbox.NewWebhookCatalog()
-	if err != nil {
-		return nil, err
-	}
-	webhookRepository := webhook.NewRepository(db)
-	secretProtector, err := webhook.NewSecretProtector(configConfig)
-	if err != nil {
-		return nil, err
-	}
-	targetPolicy := webhook.NewTargetPolicy(configConfig)
-	sender := webhook.NewSender(configConfig, targetPolicy)
-	webhookService := webhook.NewService(webhookCatalog, webhookRepository, secretProtector, targetPolicy, sender, configConfig)
 	webhookHandler := webhook.NewHandler(webhookService)
 	operatorRepository := operator.NewRepository(db)
 	operatorService := operator.NewService(operatorRepository, userRepository, userService, sessionService, sessionService, userService, auditService)
 	operatorHandler := organization.NewOperatorHandler(organizationRepository)
 	webhookOperatorHandler := webhook.NewOperatorHandler(webhookService)
 	notificationOperatorHandler := notification.NewOperatorHandler(notificationRepository)
-	mailboxRepository := mailbox.NewRepository(db)
 	operatorMetricsHandler := mailbox.NewOperatorMetricsHandler(mailboxRepository, organizationRepository)
 	surfaces := operator.Surfaces{
 		Settings:      settingHandler,
@@ -140,14 +148,6 @@ func InitApplication() (*app.Application, error) {
 		MailMetrics:   operatorMetricsHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, configConfig, surfaces)
-	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
-	domainProvider := mailtransport.NewDomainProvider(configConfig)
-	transport := mailtransport.New(configConfig)
-	webhookNotifier := mailbox.NewWebhookNotifier(configConfig, webhookService)
-	settings := mailbox.SettingsFromConfig(configConfig)
-	accountDirectory := mailbox.NewAccountDirectory(userRepository)
-	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -203,6 +203,8 @@ func InitApplication() (*app.Application, error) {
 		MailTriage:                 mailboxService,
 		ExternalMail:               mailboxService,
 		MailAgentEvents:            mailboxService,
+		MailClients:                mailboxService,
+		MailSubmissions:            mailboxService,
 	}
 	return application, nil
 }
@@ -227,35 +229,56 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	auditService := audit.ProvideService(auditRepository, cfg)
 	handler := audit.NewHandler(auditService)
 	apikeyRepository := apikey.NewRepository(db)
-	apikeyService := apikey.NewService(apikeyRepository)
-	apikeyHandler := apikey.NewHandler(apikeyService)
-	userRepository := user.NewRepository(db)
-	sessionService := user.NewSessionService(userRepository, cfg)
-	userMailer := user.NewUserMailer(service)
-	accountDeletionPolicy := user.NewAccountDeletionPolicy()
-	authAbuseGuard := user.NewAuthAbuseGuard(cfg, stores)
-	userService := user.ProvideService(userRepository, userRepository, sessionService, eventBus, userMailer, accountDeletionPolicy, authAbuseGuard, cfg)
-	userHandler := user.NewHandler(userService, userService, userService, sessionService, userMailer, authAbuseGuard)
+	mailboxRepository := mailbox.NewRepository(db)
 	organizationRepository := organization.NewRepository(db)
-	invitationMailer := organization.NewInvitationMailer(service, cfg)
-	invitationPolicy := organization.NewInvitationPolicy(cfg, stores)
-	membershipEventPublisher := organization.NewMembershipEventPublisher(eventBus)
-	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy, membershipEventPublisher)
-	contextResolver := organization.NewContextResolver(organizationService)
-	organizationHandler := organization.NewHandler(organizationService, contextResolver, accountDeletionPolicy)
-	permissionRepository := permission.NewRepository(db)
-	catalog, err := permission.NewDefaultCatalog()
+	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
+	domainProvider := mailtransport.NewDomainProvider(cfg)
+	transport := mailtransport.New(cfg)
+	catalog, err := mailbox.NewWebhookCatalog()
 	if err != nil {
 		return nil, err
 	}
-	permissionService := permission.NewService(permissionRepository, catalog)
-	guard := permission.NewGuard(permissionService)
-	permissionHandler := permission.NewHandler(permissionService, guard)
+	webhookRepository := webhook.NewRepository(db)
+	secretProtector, err := webhook.NewSecretProtector(cfg)
+	if err != nil {
+		return nil, err
+	}
+	targetPolicy := webhook.NewTargetPolicy(cfg)
+	sender := webhook.NewSender(cfg, targetPolicy)
+	webhookService := webhook.NewService(catalog, webhookRepository, secretProtector, targetPolicy, sender, cfg)
+	webhookNotifier := mailbox.NewWebhookNotifier(cfg, webhookService)
+	settings := mailbox.SettingsFromConfig(cfg)
+	userRepository := user.NewRepository(db)
+	accountDirectory := mailbox.NewAccountDirectory(userRepository)
 	notificationRepository := notification.NewRepository(db)
 	emailSender := notification.ProvideEmailSender(service)
 	eventPublisher := notification.ProvideEventPublisher(eventBus)
 	webPushSender := notification.ProvideWebPushSender(cfg)
 	notificationService := notification.NewService(cfg, notificationRepository, emailSender, eventPublisher, webPushSender)
+	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
+	invitationMailer := organization.NewInvitationMailer(service, cfg)
+	invitationPolicy := organization.NewInvitationPolicy(cfg, stores)
+	membershipEventPublisher := organization.NewMembershipEventPublisher(eventBus)
+	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy, membershipEventPublisher)
+	sessionService := user.NewSessionService(userRepository, cfg)
+	userMailer := user.NewUserMailer(service)
+	accountDeletionPolicy := user.NewAccountDeletionPolicy()
+	authAbuseGuard := user.NewAuthAbuseGuard(cfg, stores)
+	userService := user.ProvideService(userRepository, userRepository, sessionService, eventBus, userMailer, accountDeletionPolicy, authAbuseGuard, cfg)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService)
+	apikeyService := apikey.ProvideService(apikeyRepository, mailboxService)
+	apikeyHandler := apikey.NewHandler(apikeyService)
+	userHandler := user.NewHandler(userService, userService, userService, sessionService, userMailer, authAbuseGuard)
+	contextResolver := organization.NewContextResolver(organizationService)
+	organizationHandler := organization.NewHandler(organizationService, contextResolver, accountDeletionPolicy)
+	permissionRepository := permission.NewRepository(db)
+	permissionCatalog, err := permission.NewDefaultCatalog()
+	if err != nil {
+		return nil, err
+	}
+	permissionService := permission.NewService(permissionRepository, permissionCatalog)
+	guard := permission.NewGuard(permissionService)
+	permissionHandler := permission.NewHandler(permissionService, guard)
 	notificationHandler := notification.NewHandler(notificationService)
 	assetRepository := asset.NewRepository(db)
 	objectStore, err := storage.NewObjectStore(cfg)
@@ -283,25 +306,12 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	usageRepository := usage.NewRepository(db)
 	usageService := usage.NewService(usageCatalog, usageRepository, cfg)
 	usageHandler := usage.NewHandler(usageService, accountDeletionPolicy)
-	webhookCatalog, err := mailbox.NewWebhookCatalog()
-	if err != nil {
-		return nil, err
-	}
-	webhookRepository := webhook.NewRepository(db)
-	secretProtector, err := webhook.NewSecretProtector(cfg)
-	if err != nil {
-		return nil, err
-	}
-	targetPolicy := webhook.NewTargetPolicy(cfg)
-	sender := webhook.NewSender(cfg, targetPolicy)
-	webhookService := webhook.NewService(webhookCatalog, webhookRepository, secretProtector, targetPolicy, sender, cfg)
 	webhookHandler := webhook.NewHandler(webhookService)
 	operatorRepository := operator.NewRepository(db)
 	operatorService := operator.NewService(operatorRepository, userRepository, userService, sessionService, sessionService, userService, auditService)
 	operatorHandler := organization.NewOperatorHandler(organizationRepository)
 	webhookOperatorHandler := webhook.NewOperatorHandler(webhookService)
 	notificationOperatorHandler := notification.NewOperatorHandler(notificationRepository)
-	mailboxRepository := mailbox.NewRepository(db)
 	operatorMetricsHandler := mailbox.NewOperatorMetricsHandler(mailboxRepository, organizationRepository)
 	surfaces := operator.Surfaces{
 		Settings:      settingHandler,
@@ -311,14 +321,6 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		MailMetrics:   operatorMetricsHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, cfg, surfaces)
-	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
-	domainProvider := mailtransport.NewDomainProvider(cfg)
-	transport := mailtransport.New(cfg)
-	webhookNotifier := mailbox.NewWebhookNotifier(cfg, webhookService)
-	settings := mailbox.SettingsFromConfig(cfg)
-	accountDirectory := mailbox.NewAccountDirectory(userRepository)
-	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -374,6 +376,8 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		MailTriage:                 mailboxService,
 		ExternalMail:               mailboxService,
 		MailAgentEvents:            mailboxService,
+		MailClients:                mailboxService,
+		MailSubmissions:            mailboxService,
 	}
 	return application, nil
 }

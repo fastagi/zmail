@@ -4,7 +4,8 @@ import { Bell, KeyRound, Mail, ShieldCheck, SlidersHorizontal, UserRound } from 
 import { Skeleton } from '@/components/ui/skeleton';
 import { TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { isWebFeatureEnabled } from '@/config/features';
-import { ApiKeyPanel } from '@/features/api-key';
+// Loaded on demand; the real ApiKeyPanel renders once the tab opens.
+import { LazyApiKeyPanel as ApiKeyPanel } from '@/features/api-key/components/api-key-panel-lazy';
 import { MailClientsAvailable } from '@/features/mailbox/components/mail-clients-available';
 import { LazyMailClientsTab } from '@/features/mailbox/components/mail-clients-tab-lazy';
 import { MemberFeatureGate } from '@/features/mailbox/components/member-feature-gate';
@@ -70,7 +71,7 @@ export default async function SettingsPage() {
       <h1 className="text-2xl font-semibold">{t('title')}</h1>
 
       <SettingsTabs tabs={tabs} className="mt-5">
-        <TabsList className="max-w-full overflow-x-auto">
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="profile">
             <UserRound aria-hidden="true" />
             {t('tabs.profile')}

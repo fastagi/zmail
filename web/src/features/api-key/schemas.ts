@@ -40,6 +40,16 @@ const apiKeyScopeInputSchema = pipe(
 const positiveIntegerSchema = number().check(int(), positive());
 const nonnegativeIntegerSchema = number().check(int(), nonnegative());
 const apiKeyModeSchema = zEnum(['live', 'test']);
+const sendingDomainPattern =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const canonicalSendingDomainSchema = string().check(minLength(1), maxLength(253));
+// A key limited to an organization may name up to 50 of the domains that organization sends from.
+const sendingDomainInputSchema = string().check(
+  trim(),
+  toLowerCase(),
+  maxLength(253),
+  regex(sendingDomainPattern)
+);
 
 export const apiKeySchema = strictObject({
   id: safeIdSchema,
@@ -54,6 +64,9 @@ export const apiKeySchema = strictObject({
   revoked_at: optional(timestampSchema),
   created_at: timestampSchema,
   updated_at: timestampSchema,
+  // Present only on a key limited to one organization, and to some of its sending domains.
+  organization_id: optional(safeIdSchema),
+  sending_domains: optional(array(canonicalSendingDomainSchema).check(minLength(1), maxLength(50))),
 });
 
 const paginationMetaSchema = strictObject({
@@ -94,7 +107,12 @@ export const createApiKeySchema = strictObject({
   scopes: array(apiKeyScopeInputSchema).check(minLength(1), maxLength(32)),
   expires_at: optional(timestampSchema),
   mode: optional(apiKeyModeSchema),
-});
+  organization_id: optional(safeIdSchema),
+  sending_domains: optional(array(sendingDomainInputSchema).check(minLength(1), maxLength(50))),
+}).check(
+  // Sending domains belong to one organization, so they need it.
+  refine(value => value.sending_domains === undefined || value.organization_id !== undefined)
+);
 
 export const apiKeyRouteIdSchema = pipe(
   pipe(string().check(regex(/^[1-9]\d*$/)), transform(Number)),

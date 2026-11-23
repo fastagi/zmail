@@ -20,9 +20,11 @@ import (
 // featureRouteFixture serves the real route table, as a member of organization 7 whose feature
 // grants each test chooses.
 type featureRouteFixture struct {
-	engine  *gin.Engine
-	service *service
-	viewer  domain.OrganizationContext
+	engine    *gin.Engine
+	service   *service
+	transport *fakeTransport
+	viewer    domain.OrganizationContext
+	scopes    []string
 }
 
 func newFeatureRouteFixture(t *testing.T) *featureRouteFixture {
@@ -30,8 +32,9 @@ func newFeatureRouteFixture(t *testing.T) *featureRouteFixture {
 	gin.SetMode(gin.TestMode)
 	inbox := newInboxRecorder()
 	repo := inbox.fakeRepository
+	transport := &fakeTransport{}
 	svc := NewService(inbox, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil,
-		&fakeTransport{}, &fakeNotifier{}, Settings{Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5},
+		transport, &fakeNotifier{}, Settings{Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5},
 		nil, nil, nil, nil)
 	handler := NewHandler(svc)
 	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
@@ -42,13 +45,17 @@ func newFeatureRouteFixture(t *testing.T) *featureRouteFixture {
 	// ask whether the feature gate let the request through.
 	engine := gin.New()
 	engine.Use(gin.RecoveryWithWriter(io.Discard))
-	f := &featureRouteFixture{engine: engine, service: svc, viewer: viewerOf(7, handlerUser, domain.OrganizationRoleMember)}
+	f := &featureRouteFixture{
+		engine: engine, service: svc, transport: transport,
+		viewer: viewerOf(7, handlerUser, domain.OrganizationRoleMember),
+		scopes: []string{ScopeMailSend, ScopeMailRead, ScopeMailAgent, ScopeMailTransactional},
+	}
 	f.viewer.Features = domain.MemberFeatures{}
 	routes := router.New(f.engine)
 	routes.MiddlewareGroup("auth", func(c *gin.Context) { c.Set("userID", uint(handlerUser)); c.Next() })
 	routes.MiddlewareGroup("api_key", func(c *gin.Context) {
 		c.Set("apiKeyID", uint(41))
-		c.Set("apiKeyScopes", []string{ScopeMailSend, ScopeMailRead, ScopeMailAgent, ScopeMailTransactional})
+		c.Set("apiKeyScopes", f.scopes)
 		c.Set("apiKeyMode", domain.APIKeyModeLive)
 		c.Set("userID", uint(handlerUser))
 		c.Next()

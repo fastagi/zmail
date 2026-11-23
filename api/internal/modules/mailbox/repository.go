@@ -425,6 +425,8 @@ func createAttachments(tx *gorm.DB, messageID uint, attachments []domain.MailAtt
 			ContentType: attachment.ContentType,
 			Size:        len(attachment.Content),
 			Content:     attachment.Content,
+			ContentID:   attachment.ContentID,
+			Inline:      attachment.Inline,
 		}
 		if po.Content == nil {
 			po.Content = []byte{}

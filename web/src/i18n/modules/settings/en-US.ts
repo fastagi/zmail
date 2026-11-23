@@ -114,6 +114,21 @@ const messages = {
     createDescription: 'Name the key and choose what it can do. The key is shown only once.',
     name: 'Name',
     namePlaceholder: 'For example: deployment automation',
+    purpose: 'What is this key for?',
+    purposes: {
+      send: {
+        label: 'Send mail',
+        description: 'The usual first key: send email from mailboxes you may send from.',
+      },
+      sendRead: {
+        label: 'Send mail and check status',
+        description: 'Also look up sent messages and whether they were delivered.',
+      },
+      custom: {
+        label: 'Custom',
+        description: 'Choose the permissions one by one.',
+      },
+    },
     scopes: 'Permissions',
     scopesHint: 'Give each key only what it needs. You can create more keys later.',
     scopeOptions: {
@@ -133,9 +148,43 @@ const messages = {
         label: 'AI agent',
         description: 'Read new mail and draft replies in mailboxes that grant this key agent access.',
       },
+      templatesCreate: {
+        label: 'Create mail templates',
+        description: 'Let an AI tool save organization templates for people to review. It cannot send, edit, or delete.',
+      },
     },
-    scopeRequired: 'Choose at least one permission.',
-    expiresAt: 'Expiry (optional)',
+    expiresAt: 'Expiry',
+    expiry: {
+      d30: '30 days',
+      d90: '90 days',
+      never: 'Never',
+      custom: 'Custom date',
+      date: 'Expiry date',
+    },
+    restriction: {
+      title: 'Limits (optional)',
+      organization: 'Use only in one organization',
+      organizationHint:
+        'A limited key works only in the organization you pick, and your code no longer has to send the Organization-Id header.',
+      anyOrganization: 'Any organization I belong to',
+      organizationsLoading: 'Loading your organizations...',
+      organizationsError: 'Your organizations could not be loaded, so this key cannot be limited right now.',
+      domains: 'Send only from these domains',
+      domainsHint:
+        'Leave all unchecked to send from any domain of this organization. Email from any other domain is refused.',
+      domainsLoading: 'Loading domains...',
+      domainsError: 'Domains could not be loaded. You can still limit the key to the organization.',
+      domainsEmpty: 'This organization has no domains to send from yet.',
+      onlyOrganization: 'Only in {organization}',
+      unknownOrganization: 'organization #{id}',
+      onlyDomains: 'Sends only from {domains}',
+    },
+    errors: {
+      nameRequired: 'Enter a name of up to 100 characters.',
+      scopeRequired: 'Choose at least one permission.',
+      expiryRequired: 'Choose an expiry date.',
+      expiryPast: 'Choose a time in the future.',
+    },
     invalidForm: 'Check the name and expiry.',
     createError: 'The API key could not be created. Try again.',
     createdSuccess: 'API key created',
@@ -147,10 +196,14 @@ const messages = {
     copy: 'Copy key',
     copied: 'API key copied',
     copyError: 'Copy failed. Select the key manually.',
+    secretSaved: 'I have stored this key safely',
+    secretCloseBlocked: 'Copy the key, or confirm you have stored it, before closing.',
     done: 'Done',
     cancel: 'Cancel',
+    revokeLabel: 'Revoke {name}',
     revokeTitle: 'Revoke API key',
-    revokeDescription: 'Revocation cannot be undone. Create a new key first when rotating.',
+    revokeDescription:
+      'Revoke {name} ({prefix})? Code using it stops working at once, and this cannot be undone. Create a new key first when rotating.',
     revokedSuccess: 'API key revoked',
     revokeError: 'The API key could not be revoked. Try again.',
     quickStart: {
@@ -163,6 +216,10 @@ const messages = {
       fromHint: '"from" must be a mailbox you may send from: {from}.',
       organizationHeader:
         'says which organization the key acts in ({organization}). A key belongs to you, so one key works in every organization you are a member of.',
+      boundOrganization:
+        'This key only works in {organization}, so the example sends no Organization-Id header.',
+      noAllowedSender:
+        'This key only sends from {domains}, and you have no mailbox there yet. Change "from" to an address on one of those domains before running it.',
       recipientHint: 'The example sends to you. Every message it sends shows up in',
       emailLog: 'Emails',
       language: 'Language',
@@ -185,7 +242,7 @@ const messages = {
   mailClients: {
     title: 'Mail apps',
     description:
-      'Read your Zmail mail in Apple Mail, Outlook, Thunderbird, or your phone\'s mail app. Each device gets its own password, so you can remove one without touching the others.',
+      'Read and send your Zmail mail in Apple Mail, Outlook, Thunderbird, or your phone\'s mail app. Each device gets its own password, so you can remove one without touching the others.',
     server: {
       title: 'Server settings',
       description: 'Enter these in your mail app when you add the account by hand.',
@@ -196,6 +253,7 @@ const messages = {
       securityValue: 'SSL/TLS',
       username: 'Username',
       usernameValue: 'Your full Zmail address, such as you@acme.zmail.im',
+      copyAddress: 'Copy {address}',
       password: 'Password',
       passwordValue: 'A mail client password from below, never your account password',
       copyHost: 'Copy server',
@@ -203,7 +261,9 @@ const messages = {
       copied: 'Copied',
       copyError: 'Copying failed. Select the text and copy it yourself.',
       outgoing: 'Outgoing mail (SMTP)',
-      outgoingSoon: 'Coming soon: sending from mail apps is not available yet.',
+      starttlsPort: 'Or port (STARTTLS)',
+      copyStarttlsPort: 'Copy STARTTLS port',
+      sameSignIn: 'The same username and password as incoming mail. Turn on authentication for the outgoing server.',
     },
     access: {
       unavailable: 'Mail apps are not set up on this Zmail server yet. Ask whoever runs it.',
@@ -246,7 +306,6 @@ const messages = {
       access: 'Access',
       imap: 'Read mail (IMAP)',
       smtp: 'Send mail (SMTP)',
-      smtpHint: 'Saved for when sending from mail apps arrives.',
       currentPassword: 'Your account password',
       currentPasswordHint:
         'A mail client password skips two-factor sign-in, so confirm it is you first.',
@@ -292,6 +351,8 @@ const messages = {
         ios: 'On iPhone and iPad, new mail arrives when the app fetches it; real-time push is not available.',
         outlook: 'The new Outlook syncs through Microsoft\'s cloud, which keeps a copy of your mail.',
         shared: 'Shared mailboxes appear under Shared/ and are read only for now.',
+        sending:
+          'To send, enter the outgoing server above with port 465 and SSL/TLS (or 587 with STARTTLS). Mail goes out from the address in From, which must be a mailbox you may send from.',
       },
       clients: {
         ios: {

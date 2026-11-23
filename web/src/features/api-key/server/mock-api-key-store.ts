@@ -54,6 +54,11 @@ export class MockApiKeyStore {
       key_hash: createHash('sha256').update(plaintextKey).digest('hex'),
       scopes: [...new Set(input.scopes)].sort(),
       ...(input.expires_at ? { expires_at: input.expires_at } : {}),
+      // The mock trusts the binding; the API checks membership and the organization's domains.
+      ...(input.organization_id ? { organization_id: input.organization_id } : {}),
+      ...(input.organization_id && input.sending_domains
+        ? { sending_domains: [...new Set(input.sending_domains)].sort() }
+        : {}),
       created_at: now,
       updated_at: now,
     };
@@ -90,6 +95,8 @@ function publicApiKey(record: MockApiKeyRecord): ApiKey {
     ...(record.revoked_at ? { revoked_at: record.revoked_at } : {}),
     created_at: record.created_at,
     updated_at: record.updated_at,
+    ...(record.organization_id ? { organization_id: record.organization_id } : {}),
+    ...(record.sending_domains ? { sending_domains: [...record.sending_domains] } : {}),
   };
 }
 

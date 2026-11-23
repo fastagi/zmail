@@ -104,6 +104,7 @@ type Config struct {
 	Asset          AssetConfig
 	Webhook        WebhookConfig
 	Mailbox        MailboxConfig
+	MailGateway    MailGatewayConfig
 	AITriage       AITriageConfig
 	ExternalMail   ExternalMailConfig
 	MailAgent      MailAgentConfig
@@ -506,6 +507,12 @@ const (
 	// members to configure in their mail apps.
 	DefaultMailClientIMAPHost = "imap.zmail.im"
 	DefaultMailClientIMAPPort = 993
+	// DefaultMailClientSMTPHost, DefaultMailClientSMTPPort (implicit TLS), and
+	// DefaultMailClientSubmissionPort (STARTTLS) are the SMTP server the console tells members to
+	// configure in their mail apps.
+	DefaultMailClientSMTPHost       = "smtp.zmail.im"
+	DefaultMailClientSMTPPort       = 465
+	DefaultMailClientSubmissionPort = 587
 )
 
 // MailboxConfig holds optional mailbox starter policy and its mail transport.
@@ -562,6 +569,11 @@ type MailboxConfig struct {
 	// ClientIMAPHost and ClientIMAPPort are the public IMAP server shown to members.
 	ClientIMAPHost string
 	ClientIMAPPort int
+	// ClientSMTPHost, ClientSMTPPort (implicit TLS), and ClientSubmissionPort (STARTTLS) are the
+	// public SMTP server shown to members.
+	ClientSMTPHost       string
+	ClientSMTPPort       int
+	ClientSubmissionPort int
 }
 
 // Resolved fills the development defaults: outside production an unset domain is
@@ -582,6 +594,16 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 	}
 	if m.ClientIMAPPort == 0 {
 		m.ClientIMAPPort = DefaultMailClientIMAPPort
+	}
+	m.ClientSMTPHost = strings.ToLower(strings.TrimSpace(m.ClientSMTPHost))
+	if m.ClientSMTPHost == "" {
+		m.ClientSMTPHost = DefaultMailClientSMTPHost
+	}
+	if m.ClientSMTPPort == 0 {
+		m.ClientSMTPPort = DefaultMailClientSMTPPort
+	}
+	if m.ClientSubmissionPort == 0 {
+		m.ClientSubmissionPort = DefaultMailClientSubmissionPort
 	}
 	m.SimulatorDomain = strings.ToLower(strings.TrimSpace(m.SimulatorDomain))
 	if m.SimulatorDomain == "" {
@@ -866,10 +888,14 @@ func Load() (*Config, error) {
 			TransactionalRecipientPerMinute: env.GetInt("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE", DefaultMailboxTransactionalRecipientPerMinute),
 			TransactionalKeyPerSecond:       env.GetInt("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND", DefaultMailboxTransactionalKeyPerSecond),
 
-			AppPasswordPepper: env.Get("MAIL_APP_PASSWORD_PEPPER", ""),
-			ClientIMAPHost:    env.Get("MAIL_GATEWAY_PUBLIC_IMAP_HOST", DefaultMailClientIMAPHost),
-			ClientIMAPPort:    env.GetInt("MAIL_GATEWAY_PUBLIC_IMAP_PORT", DefaultMailClientIMAPPort),
+			AppPasswordPepper:    env.Get("MAIL_APP_PASSWORD_PEPPER", ""),
+			ClientIMAPHost:       env.Get("MAIL_GATEWAY_PUBLIC_IMAP_HOST", DefaultMailClientIMAPHost),
+			ClientIMAPPort:       env.GetInt("MAIL_GATEWAY_PUBLIC_IMAP_PORT", DefaultMailClientIMAPPort),
+			ClientSMTPHost:       env.Get("MAIL_GATEWAY_PUBLIC_SMTP_HOST", DefaultMailClientSMTPHost),
+			ClientSMTPPort:       env.GetInt("MAIL_GATEWAY_PUBLIC_SMTP_PORT", DefaultMailClientSMTPPort),
+			ClientSubmissionPort: env.GetInt("MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT", DefaultMailClientSubmissionPort),
 		},
+		MailGateway: loadMailGatewayConfig(),
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
 			RequestTimeout:      env.GetDuration("WEBHOOK_REQUEST_TIMEOUT", DefaultWebhookRequestTimeout),
@@ -1206,6 +1232,9 @@ func validate(cfg *Config) error {
 	if err := validateMailboxConfig(cfg.Mailbox, cfg.Starters.Selected(StarterMailbox), isProd); err != nil {
 		return err
 	}
+	if err := validateMailGatewayConfig(cfg.MailGateway, cfg.Mailbox, cfg.Starters.Selected(StarterMailbox)); err != nil {
+		return err
+	}
 	if err := validateAITriageConfig(cfg.AITriage, isProd); err != nil {
 		return err
 	}
@@ -1537,6 +1566,15 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	}
 	if resolved.ClientIMAPPort < 1 || resolved.ClientIMAPPort > 65535 {
 		return fmt.Errorf("MAIL_GATEWAY_PUBLIC_IMAP_PORT must be between 1 and 65535")
+	}
+	if strings.ContainsAny(resolved.ClientSMTPHost, " /:@") || len(resolved.ClientSMTPHost) > 253 {
+		return fmt.Errorf("MAIL_GATEWAY_PUBLIC_SMTP_HOST must be a host name")
+	}
+	if resolved.ClientSMTPPort < 1 || resolved.ClientSMTPPort > 65535 {
+		return fmt.Errorf("MAIL_GATEWAY_PUBLIC_SMTP_PORT must be between 1 and 65535")
+	}
+	if resolved.ClientSubmissionPort < 1 || resolved.ClientSubmissionPort > 65535 {
+		return fmt.Errorf("MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT must be between 1 and 65535")
 	}
 	if resolved.DailySendLimit <= 0 || resolved.DailySendLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_SEND_LIMIT must be between 1 and 100000")
@@ -1886,5 +1924,21 @@ func loadAITriageConfig() AITriageConfig {
 		Provider: provider,
 		Model:    strings.TrimSpace(env.Get("AI_TRIAGE_MODEL", "")),
 		DailyCap: env.GetInt("AI_TRIAGE_DAILY_CAP", DefaultAITriageDailyCap),
+	}
+}
+
+// loadMailGatewayConfig reads MailGatewayConfig (mail_gateway.go) from the environment.
+func loadMailGatewayConfig() MailGatewayConfig {
+	return MailGatewayConfig{
+		IMAPAddr:              env.Get("MAIL_GATEWAY_IMAP_ADDR", ""),
+		SMTPSAddr:             env.Get("MAIL_GATEWAY_SMTPS_ADDR", ""),
+		SubmissionAddr:        env.Get("MAIL_GATEWAY_SUBMISSION_ADDR", ""),
+		TLSCertFile:           env.Get("MAIL_GATEWAY_TLS_CERT_FILE", ""),
+		TLSKeyFile:            env.Get("MAIL_GATEWAY_TLS_KEY_FILE", ""),
+		HealthAddr:            env.Get("MAIL_GATEWAY_HEALTH_ADDR", DefaultMailGatewayHealthAddr),
+		MaxConnections:        env.GetInt("MAIL_GATEWAY_MAX_CONNECTIONS", DefaultMailGatewayMaxConnections),
+		MaxConnectionsPerUser: env.GetInt("MAIL_GATEWAY_MAX_CONNECTIONS_PER_USER", DefaultMailGatewayMaxConnectionsPerUser),
+		MaxConnectionsPerIP:   env.GetInt("MAIL_GATEWAY_MAX_CONNECTIONS_PER_IP", DefaultMailGatewayMaxConnectionsPerIP),
+		RevalidateInterval:    env.GetDuration("MAIL_GATEWAY_REVALIDATE_INTERVAL", DefaultMailGatewayRevalidateInterval),
 	}
 }

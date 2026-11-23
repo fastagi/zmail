@@ -48,6 +48,9 @@ const (
 	CodeAPIKeyExpired  = "API_KEY.EXPIRED"
 	CodeAPIKeyRevoked  = "API_KEY.REVOKED"
 
+	CodeAPIKeyOrganizationMismatch = "API_KEY.ORGANIZATION_MISMATCH"
+	CodeAPIKeyDomainNotAllowed     = "API_KEY.DOMAIN_NOT_ALLOWED"
+
 	CodeOrganizationNotFound                       = "ORGANIZATION.NOT_FOUND"
 	CodeOrganizationContextRequired                = "ORGANIZATION.CONTEXT_REQUIRED"
 	CodeOrganizationContextInvalid                 = "ORGANIZATION.CONTEXT_INVALID"

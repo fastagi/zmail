@@ -16,9 +16,11 @@ type Message struct {
 	FromName    string
 	To          []string
 	Cc          []string
-	Subject     string
-	TextBody    string
-	HTMLBody    string
+	// Bcc are blind copies: delivered like To and Cc but never written into a header.
+	Bcc      []string
+	Subject  string
+	TextBody string
+	HTMLBody string
 	// MessageID is the RFC 5322 Message-ID Zmail chose for the message, without angle brackets.
 	MessageID string
 	// InReplyTo is an RFC 5322 message identifier without angle brackets.
@@ -37,6 +39,11 @@ type Attachment struct {
 	Filename    string
 	ContentType string
 	Content     []byte
+	// ContentID is the part's Content-ID without angle brackets; an HTML body may show the part by
+	// cid:<ContentID>. Empty when the part has none.
+	ContentID string
+	// Inline places the part in the body instead of listing it as an attachment.
+	Inline bool
 }
 
 // Error reports a provider rejection with a stable, non-sensitive code.

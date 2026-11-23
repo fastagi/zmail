@@ -462,6 +462,8 @@ export const mailMessageSchema = strictObject({
   ...summaryShape,
   text_body: string(),
   html_body: string(),
+  // Blind copies: only on the detail the sending member reads; absent everywhere else.
+  bcc: optional(array(string())),
   // True when codes or sign-in links of an inbound message were masked; absent from older APIs.
   secrets_masked: optional(boolean()),
   message_id: string(),

@@ -30,16 +30,21 @@ const (
 	testKeyPrefix = "zmail_test_"
 )
 
-// The scopes a new key may carry: Zmail's mail scopes, or the `*` wildcard.
+// The scopes a new key may carry: Zmail's mail and template scopes, or the `*` wildcard.
 const (
 	ScopeMailAgent         = "mail:agent"
 	ScopeMailRead          = "mail:read"
 	ScopeMailSend          = "mail:send"
 	ScopeMailTransactional = "mail:transactional"
-	ScopeAll               = "*"
+	// ScopeTemplatesCreate lets an AI tool save organization templates; it never sends, edits,
+	// or deletes.
+	ScopeTemplatesCreate = "templates:create"
+	ScopeAll             = "*"
 )
 
-var knownScopes = []string{ScopeMailAgent, ScopeMailRead, ScopeMailSend, ScopeMailTransactional}
+var knownScopes = []string{
+	ScopeMailAgent, ScopeMailRead, ScopeMailSend, ScopeMailTransactional, ScopeTemplatesCreate,
+}
 
 // KnownScopes lists the named scopes a new key may carry, sorted.
 func KnownScopes() []string {
@@ -69,12 +74,25 @@ type CreateResult struct {
 
 type service struct {
 	repo domain.APIKeyRepository
+	// sendingDomains confirms an organization binding and its domains; nil refuses every binding.
+	sendingDomains domain.SendingDomainDirectory
 }
 
-// NewService creates a new API key service.
+// NewService creates a new API key service that issues only unrestricted keys.
 func NewService(repo domain.APIKeyRepository) *service {
 	return &service{repo: repo}
 }
+
+// ProvideService creates the API key service that may also bind keys to an organization and to
+// its sending domains, as confirmed by sendingDomains.
+func ProvideService(repo domain.APIKeyRepository, sendingDomains domain.SendingDomainDirectory) *service {
+	return &service{repo: repo, sendingDomains: sendingDomains}
+}
+
+// MaxAPIKeySendingDomains bounds the domains one key may be restricted to.
+const MaxAPIKeySendingDomains = 50
+
+var sendingDomainPattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCreateRequest) (*CreateResult, error) {
 	if userID == 0 || req == nil {
@@ -109,6 +127,11 @@ func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCre
 		}
 	}
 
+	organizationID, sendingDomains, err := s.resolveRestriction(ctx, userID, req)
+	if err != nil {
+		return nil, err
+	}
+
 	secret, err := crypto.GenerateKeyHex(24)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate api key secret: %w", err)
@@ -128,6 +151,9 @@ func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCre
 		Scopes:    scopes,
 		Mode:      mode,
 		ExpiresAt: req.ExpiresAt,
+		// The binding is fixed at creation: a key never gains or loses a restriction later.
+		OrganizationID: organizationID,
+		SendingDomains: sendingDomains,
 	}
 
 	if err := s.repo.Create(ctx, apiKey); err != nil {
@@ -141,10 +167,12 @@ func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCre
 		TargetID:   strconv.FormatUint(uint64(apiKey.ID), 10),
 		Result:     domain.AuditResultSuccess,
 		Changes: map[string]domain.AuditValueChange{
-			"name":       {After: apiKey.Name},
-			"scopes":     {After: append([]string(nil), apiKey.Scopes...)},
-			"expires_at": {After: apiKey.ExpiresAt},
-			"mode":       {After: string(apiKey.Mode)},
+			"name":            {After: apiKey.Name},
+			"scopes":          {After: append([]string(nil), apiKey.Scopes...)},
+			"expires_at":      {After: apiKey.ExpiresAt},
+			"mode":            {After: string(apiKey.Mode)},
+			"organization_id": {After: apiKey.OrganizationID},
+			"sending_domains": {After: apiKey.SendingDomains},
 		},
 	})
 
@@ -232,6 +260,62 @@ func (s *service) Validate(ctx context.Context, plaintext string, requiredScopes
 	}
 
 	return key, nil
+}
+
+// resolveRestriction checks an optional binding: the owner must be a member of the organization,
+// and every domain must be one the organization's mailboxes may send from. Domains need an
+// organization, and a domain list, when given, must name at least one domain.
+func (s *service) resolveRestriction(ctx context.Context, userID uint, req *APIKeyCreateRequest) (*uint, []string, error) {
+	if req.OrganizationID == nil {
+		if req.SendingDomains != nil {
+			return nil, nil, domain.ErrInvalidInput
+		}
+		return nil, nil, nil
+	}
+	organizationID := *req.OrganizationID
+	if organizationID == 0 {
+		return nil, nil, domain.ErrInvalidInput
+	}
+	var requested []string
+	if req.SendingDomains != nil {
+		normalized, err := normalizeSendingDomains(req.SendingDomains)
+		if err != nil {
+			return nil, nil, err
+		}
+		requested = normalized
+	}
+	if s.sendingDomains == nil {
+		return nil, nil, domain.ErrServiceUnavailable
+	}
+	available, err := s.sendingDomains.SendingDomains(ctx, organizationID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, name := range requested {
+		if !slices.Contains(available, name) {
+			return nil, nil, domain.ErrInvalidInput
+		}
+	}
+	return &organizationID, requested, nil
+}
+
+// normalizeSendingDomains lowercases, trims a trailing dot, removes duplicates, and sorts.
+func normalizeSendingDomains(domains []string) ([]string, error) {
+	if len(domains) == 0 || len(domains) > MaxAPIKeySendingDomains {
+		return nil, domain.ErrInvalidInput
+	}
+	normalized := make([]string, 0, len(domains))
+	for _, name := range domains {
+		name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
+		if len(name) > 253 || !sendingDomainPattern.MatchString(name) {
+			return nil, domain.ErrInvalidInput
+		}
+		if !slices.Contains(normalized, name) {
+			normalized = append(normalized, name)
+		}
+	}
+	slices.Sort(normalized)
+	return normalized, nil
 }
 
 func normalizeAPIKeyScopes(scopes []string) ([]string, error) {

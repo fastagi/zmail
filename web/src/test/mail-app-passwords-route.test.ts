@@ -52,6 +52,30 @@ describe('mail client password browser routes', () => {
     }
   });
 
+  it('accepts the smtp scope and refuses repeated or unknown scopes', async () => {
+    const route = await loadRoute();
+    for (const scopes of [['imap', 'smtp'], ['smtp']]) {
+      const created = await route.createMailAppPasswordRoute(
+        request('/api/mail-app-passwords', {
+          method: 'POST',
+          body: JSON.stringify({ name: 'Phone', scopes, current_password: 'admin123' }),
+        })
+      );
+      expect(created.status).toBe(201);
+      expect((await created.json()).data).toMatchObject({ scopes });
+    }
+    for (const scopes of [['smtp', 'smtp'], ['pop3']]) {
+      const refused = await route.createMailAppPasswordRoute(
+        request('/api/mail-app-passwords', {
+          method: 'POST',
+          body: JSON.stringify({ name: 'Phone', scopes, current_password: 'admin123' }),
+        })
+      );
+      expect(refused.status).toBe(422);
+      expect((await refused.json()).errors).toMatchObject({ scopes: [expect.any(String)] });
+    }
+  });
+
   it('returns the secret once, lists without it, and revokes', async () => {
     const route = await loadRoute();
     const created = await route.createMailAppPasswordRoute(

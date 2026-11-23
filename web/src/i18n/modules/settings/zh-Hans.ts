@@ -115,6 +115,21 @@ const messages = {
     createDescription: '为密钥命名并选择它能做什么。密钥只显示一次。',
     name: '名称',
     namePlaceholder: '例如：部署自动化',
+    purpose: '这把密钥用来做什么？',
+    purposes: {
+      send: {
+        label: '发信',
+        description: '最常用的第一把密钥：以你有发信权限的邮箱发出邮件。',
+      },
+      sendRead: {
+        label: '发信并查询状态',
+        description: '另外可以查询已发邮件及其是否送达。',
+      },
+      custom: {
+        label: '自定义',
+        description: '逐项选择权限。',
+      },
+    },
     scopes: '权限',
     scopesHint: '只给每把密钥它需要的权限，之后可以再创建其他密钥。',
     scopeOptions: {
@@ -134,9 +149,41 @@ const messages = {
         label: 'AI 代理',
         description: '在授权了此密钥的邮箱中读取新邮件、起草回复。',
       },
+      templatesCreate: {
+        label: '创建邮件模板',
+        description: '让 AI 工具保存组织邮件模板供成员审阅；不能发送、修改或删除。',
+      },
     },
-    scopeRequired: '请至少选择一项权限。',
-    expiresAt: '过期时间（可选）',
+    expiresAt: '有效期',
+    expiry: {
+      d30: '30 天',
+      d90: '90 天',
+      never: '不过期',
+      custom: '自定义日期',
+      date: '过期时间',
+    },
+    restriction: {
+      title: '使用范围（可选）',
+      organization: '只在一个组织里使用',
+      organizationHint: '限定后，这把密钥只能在你选的组织里使用，你的代码也不用再带 Organization-Id 请求头。',
+      anyOrganization: '不限，我加入的组织都能用',
+      organizationsLoading: '正在加载你的组织...',
+      organizationsError: '你的组织没能加载出来，暂时无法限定这把密钥。',
+      domains: '只用这些域名发信',
+      domainsHint: '都不勾选，就能用这个组织的任何域名发信。用其他域名发信会被拒绝。',
+      domainsLoading: '正在加载域名...',
+      domainsError: '域名没能加载出来。你仍然可以只限定组织。',
+      domainsEmpty: '这个组织还没有可以发信的域名。',
+      onlyOrganization: '仅限 {organization}',
+      unknownOrganization: '组织 #{id}',
+      onlyDomains: '仅从 {domains} 发信',
+    },
+    errors: {
+      nameRequired: '请输入名称，最多 100 个字符。',
+      scopeRequired: '请至少选择一项权限。',
+      expiryRequired: '请选择过期时间。',
+      expiryPast: '请选择一个未来的时间。',
+    },
     invalidForm: '请检查名称和过期时间。',
     createError: 'API 密钥创建失败，请稍后重试。',
     createdSuccess: 'API 密钥已创建',
@@ -148,10 +195,14 @@ const messages = {
     copy: '复制密钥',
     copied: 'API 密钥已复制',
     copyError: '无法复制，请手动选择密钥。',
+    secretSaved: '我已妥善保存这把密钥',
+    secretCloseBlocked: '关闭前请先复制密钥，或确认你已妥善保存。',
     done: '完成',
     cancel: '取消',
+    revokeLabel: '撤销 {name}',
     revokeTitle: '撤销 API 密钥',
-    revokeDescription: '撤销后无法恢复。需要轮换时，请先创建新密钥。',
+    revokeDescription:
+      '确定撤销 {name}（{prefix}）吗？使用它的代码会立即失效，且无法恢复。需要轮换时，请先创建新密钥。',
     revokedSuccess: 'API 密钥已撤销',
     revokeError: 'API 密钥撤销失败，请稍后重试。',
     quickStart: {
@@ -162,6 +213,8 @@ const messages = {
       fromHint: '“from” 必须是你有发信权限的邮箱：{from}。',
       organizationHeader:
         '指定密钥以哪个组织的身份操作（{organization}）。密钥属于你本人，同一把密钥可以在你加入的每个组织使用。',
+      boundOrganization: '这把密钥只能在 {organization} 里使用，所以示例不带 Organization-Id 请求头。',
+      noAllowedSender: '这把密钥只能从 {domains} 发信，但你在这些域名下还没有邮箱。运行前请把 "from" 改成这些域名下的地址。',
       recipientHint: '示例发给你自己。发出的每封邮件都能在这里查看：',
       emailLog: '收发记录',
       language: '语言',
@@ -181,7 +234,7 @@ const messages = {
   mailClients: {
     title: '邮件客户端',
     description:
-      '在 Apple 邮件、Outlook、Thunderbird 或手机自带的邮件 App 里收 Zmail 的邮件。每台设备使用单独的密码，撤销其中一台不影响其他设备。',
+      '在 Apple 邮件、Outlook、Thunderbird 或手机自带的邮件 App 里收发 Zmail 的邮件。每台设备使用单独的密码，撤销其中一台不影响其他设备。',
     server: {
       title: '服务器设置',
       description: '在邮件 App 里手动添加账户时，填写以下信息。',
@@ -192,6 +245,7 @@ const messages = {
       securityValue: 'SSL/TLS',
       username: '用户名',
       usernameValue: '完整的 Zmail 邮箱地址，例如 you@acme.zmail.im',
+      copyAddress: '复制 {address}',
       password: '密码',
       passwordValue: '下方生成的客户端密码，不是账户登录密码',
       copyHost: '复制服务器',
@@ -199,7 +253,9 @@ const messages = {
       copied: '已复制',
       copyError: '复制失败，请手动选中文字复制。',
       outgoing: '发件服务器（SMTP）',
-      outgoingSoon: '即将支持：暂时还不能从邮件 App 发信。',
+      starttlsPort: '或端口（STARTTLS）',
+      copyStarttlsPort: '复制 STARTTLS 端口',
+      sameSignIn: '用户名和密码与收件服务器相同。发件服务器需要开启身份验证。',
     },
     access: {
       unavailable: '这个 Zmail 服务器还没有开通邮件客户端，请联系服务器管理员。',
@@ -240,7 +296,6 @@ const messages = {
       access: '访问范围',
       imap: '收信（IMAP）',
       smtp: '发信（SMTP）',
-      smtpHint: '先保存下来，等邮件 App 发信功能上线后生效。',
       currentPassword: '账户登录密码',
       currentPasswordHint: '客户端密码不经过两步验证，所以需要先确认是你本人。',
       totp: '验证码',
@@ -284,6 +339,8 @@ const messages = {
         ios: 'iPhone 和 iPad 上，新邮件在 App 拉取时到达，暂不支持后台实时推送。',
         outlook: '新版 Outlook 会经微软云同步，微软会保留一份邮件副本。',
         shared: '共享邮箱显示在 Shared/ 下，目前只能阅读。',
+        sending:
+          '发信时，发件服务器填上方地址，端口 465 + SSL/TLS（或 587 + STARTTLS）。邮件以“发件人”中的地址发出，该地址必须是你有发信权限的邮箱。',
       },
       clients: {
         ios: {

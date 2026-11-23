@@ -408,6 +408,7 @@ const messages = {
     from: '发件人',
     to: '收件人',
     cc: '抄送',
+    bcc: '密送',
     date: '日期',
     failed: '这封邮件没有送达。原因：{code}',
     failedUnknown: '这封邮件没有送达。',

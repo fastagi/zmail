@@ -1585,6 +1585,15 @@ describe('unified inbox', () => {
     view.unmount();
   });
 
+  it('rows carry no mailbox label when the viewer has a single mailbox', () => {
+    state.mailboxes.data = [mailbox(1, 'hello')];
+    state.inbox.data = listing([[singleRow()]]);
+    renderRoute();
+    expect(
+      screen.queryByRole('button', { name: 'Filter by mailbox hello@mail.example.com' })
+    ).toBeNull();
+  });
+
   it('without roles the sidebar lists the mailboxes themselves', () => {
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
     state.roles.data = [];

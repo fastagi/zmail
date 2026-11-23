@@ -340,9 +340,15 @@ type MailMessage struct {
 	FromName    string
 	To          []string
 	Cc          []string
-	Subject     string
-	TextBody    string
-	HTMLBody    string
+	// Bcc are the blind copies of an outbound message: delivered, never written into a header, and
+	// shown only to the member who sent it (SentByMembershipID). Lookups for anyone else leave it empty.
+	Bcc      []string
+	Subject  string
+	TextBody string
+	HTMLBody string
+	// SentByMembershipID is the membership that sent an outbound message from the console or a mail
+	// app; zero for inbound mail, API keys, broadcasts, and mail sent before it was recorded.
+	SentByMembershipID uint
 	// MessageID is the RFC 5322 Message-ID without angle brackets. Inbound messages carry the
 	// sender's value; outbound messages get one only when the provider reports it.
 	MessageID string
@@ -425,6 +431,11 @@ type MailAttachment struct {
 	Size        int
 	// Content is empty when only metadata was loaded.
 	Content []byte
+	// ContentID is the part's Content-ID without angle brackets, empty when it has none; an HTML
+	// body shows an inline part by cid:<ContentID>.
+	ContentID string
+	// Inline places the part in the body rather than listing it as a file.
+	Inline bool
 }
 
 // MailTemplateKind says which sends may use a template. It is fixed when the template is created.

@@ -311,6 +311,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		key.GET("/transactional-messages/:message_id", h.GetTransactional).
 			Name("transactional_messages.show").WhereNumber("message_id").
 			Middleware(apikey.RequireScopesAllowingTest(ScopeMailTransactional))
+
+		// AI tools save templates with their owner's key. Creating needs the owner's templates
+		// grant, exactly as on the session route, and never sends mail.
+		key.POST("/agent-mail-templates", h.CreateTemplate).
+			Name("agent_mail_templates.store").
+			Middleware(requireFeature(domain.MemberFeatureTemplates), apikey.RequireScopes(apikey.ScopeTemplatesCreate))
 	})
 
 	r.POST("/cloudflare-connections/:connection_id/inbound-mail-messages", h.ReceiveInbound).Name("cloudflare_connections.inbound.store")

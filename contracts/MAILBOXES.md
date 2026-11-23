@@ -1831,6 +1831,7 @@ they existed. See [Listing And Search](#listing-and-search) for the filters.
 | `queued_reason` | `send_limit` while a queued message waits for room in the organization's send limit; otherwise `null`. |
 | `from` | `{ "address", "name" }` |
 | `to`, `cc` | Lowercase addresses |
+| `bcc` | Blind copies of an outbound message, only on the detail the sending member reads in the console (`GET` of one message or its thread). Absent for everyone else, in listings, on API-key and agent routes, and in mail app sources. |
 | `read` | Whether the caller has read the message; see [Read State](#read-state). Outbound messages are always read. |
 | `failure_code` | Stable provider or transport reason when `status` is `failed`, otherwise empty |
 | `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
@@ -2362,6 +2363,34 @@ A transactional template serves only transactional messages. Naming one in a mai
 update, or send) is `422 MAILBOX.TEMPLATE_KIND_MISMATCH`. A broadcast copies its template when it
 starts, so a running broadcast is not affected. If the sender domain later loses verification, the template is
 kept and sends from it are refused.
+
+#### Create a template from an AI tool
+
+`POST /v1/agent-mail-templates` creates a template with an API key instead of a session, so an AI
+tool or agent can save a draft template for people to review. Configure the tool runner with a
+user-owned key scoped to `templates:create` and the organization ID; keep the key in the runner's
+secret store, and let the model supply only the JSON body. The body, the validation rules, and the
+response are those of `POST /v1/mail-templates`, and the key acts with its owner's current
+membership (see [Programmatic Sending](#programmatic-sending)):
+
+- a key without `templates:create` (or `*`) is `403 PERMISSION.DENIED`;
+- an owner who is not a member of the `Organization-Id` organization is `404 ORGANIZATION.NOT_FOUND`;
+- a member owner needs both the `api_keys` and the `templates` grant, like the session route:
+  either one missing is `403 ORGANIZATION.FEATURE_NOT_GRANTED`; owners and admins always have both;
+- a transactional template still needs an owner or admin (`403 PERMISSION.DENIED`).
+
+```sh
+curl --fail-with-body -X POST https://zmail.im/v1/agent-mail-templates \
+  -H "X-API-Key: $ZMAIL_API_KEY" \
+  -H "Organization-Id: $ZMAIL_ORG_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Welcome follow-up","subject":"Welcome, {{name}}","text":"Hello {{name}}, how can we help?","sample_variables":{"name":"Alex"}}'
+```
+
+A successful request is `201` with the saved template in `data`; members review it on the
+organization's Templates page. Creation sends no email. A duplicate name is
+`409 MAILBOX.TEMPLATE_NAME_TAKEN`. The scope grants no sending, reading, editing, or deletion, and
+test keys are refused.
 
 ### Contacts
 
@@ -2913,7 +2942,7 @@ them. A route that needs a feature the active membership lacks returns
 ## Mail Client Access
 
 Members can read their mail in a desktop or phone mail app (Apple Mail, Outlook, Thunderbird, and
-others) over IMAP. A mail app never signs in with the account password: each device gets its own
+others) over IMAP and send from it over SMTP submission. A mail app never signs in with the account password: each device gets its own
 mail client password, which the member creates in the console, sees once, and can revoke on its
 own. These are unrelated to the outside provider's app password used under
 [Binding With An App Password](#binding-with-an-app-password).
@@ -2923,13 +2952,13 @@ own. These are unrelated to the outside provider's app password used under
 `POST /v1/mail-app-passwords` (session) creates one for the caller in the active organization:
 
 ```json
-{ "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "current_password": "...", "totp_code": "123456" }
+{ "name": "Alice's iPhone", "scopes": ["imap"], "current_password": "...", "totp_code": "123456" }
 ```
 
 | Field | Rule |
 |---|---|
 | `name` | Required, 1 to 64 characters after trimming, the device's name |
-| `scopes` | Required, one or both of `imap` and `smtp`, no repeats. `smtp` is stored for mail submission, which is not offered yet |
+| `scopes` | Required, no repeats: `imap` to read, `smtp` to send (see [SMTP Submission](#smtp-submission)). The console offers both by default |
 | `current_password` | Required, the caller's account password |
 | `totp_code` | Required when the account has two-factor sign-in on: an authenticator or recovery code |
 
@@ -2943,7 +2972,7 @@ It answers `201` with the password and, only in this response, its `secret`:
 
 ```json
 {
-  "id": 12, "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "hint": "mnop",
+  "id": 12, "name": "Alice's iPhone", "scopes": ["imap"], "hint": "mnop",
   "created_at": "2026-12-24T09:00:00Z", "last_used_at": null, "last_used_protocol": null,
   "secret": "abcd efgh ijkl mnop"
 }
@@ -2965,18 +2994,21 @@ without secrets, and tells the console whether mail apps can sign in and where:
 
 ```json
 {
-  "items": [{ "id": 12, "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "hint": "mnop",
+  "items": [{ "id": 12, "name": "Alice's iPhone", "scopes": ["imap"], "hint": "mnop",
     "created_at": "2026-12-24T09:00:00Z", "last_used_at": "2026-12-24T10:00:00Z", "last_used_protocol": "imap" }],
   "limit": 20,
   "access": { "enabled": false, "reason": "organization_disabled" },
-  "server": { "imap_host": "imap.zmail.im", "imap_port": 993, "imap_security": "ssl_tls" }
+  "server": { "imap_host": "imap.zmail.im", "imap_port": 993, "imap_security": "ssl_tls",
+    "smtp_host": "smtp.zmail.im", "smtp_port": 465, "smtp_security": "ssl_tls", "smtp_starttls_port": 587 }
 }
 ```
 
 `access.reason` is `unavailable` when the instance has no pepper configured,
 `organization_disabled` when the organization switch is off, `feature_not_granted` when the
 membership lacks `mail_clients`, and `null` while `enabled` is `true`, checked in that order. Listing and revoking work without the feature, so a member can always remove a device.
-`server` comes from `MAIL_GATEWAY_PUBLIC_IMAP_HOST` and `MAIL_GATEWAY_PUBLIC_IMAP_PORT`.
+`server` comes from `MAIL_GATEWAY_PUBLIC_IMAP_HOST`, `MAIL_GATEWAY_PUBLIC_IMAP_PORT`,
+`MAIL_GATEWAY_PUBLIC_SMTP_HOST`, `MAIL_GATEWAY_PUBLIC_SMTP_PORT`, and
+`MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT`.
 
 `DELETE /v1/mail-app-passwords/:password_id` revokes one of the caller's own passwords at once and
 answers `204`; anything else, including another member's password or one already revoked, is
@@ -3043,6 +3075,49 @@ references are lost. Mail apps receive the source unmasked: one-time codes and s
 not masked as in [Masked Secrets](#masked-secrets). An organization that must not let codes reach
 devices turns the switch off.
 
+### SMTP Submission
+
+A mail app sends over SMTP submission: port 465 with TLS from the start, or port 587 with
+`STARTTLS` (authentication is neither offered nor accepted before TLS). It signs in with `AUTH
+PLAIN` or `AUTH LOGIN`, a full mailbox address or the account email, and a mail client password
+with the `smtp` scope; sign-in failures share their budget and locks with IMAP. A connection that
+has not signed in within 60 seconds, or sends nothing for 5 minutes, is closed. The password is
+checked again before each message; a revoked one gets `421 4.7.0` and the connection ends.
+
+- **Sender.** The `From` header picks the mailbox: a Zmail mailbox of the organization the member
+  may `send` from (see [Access](#access)). `MAIL FROM` must be such a mailbox too. Anything else,
+  a missing or multi-address `From`, `MAIL FROM:<>`, and connected mailboxes are refused with
+  `550 5.7.1`. The message goes out with the mailbox's own display name, whatever name the app wrote.
+- **Recipients.** The envelope decides who receives it. `To` and `Cc` keep the header addresses the
+  envelope names; every other envelope recipient is a blind copy, delivered and never written into a
+  header, and stored as `bcc`. At most 50 different recipients (`452 4.5.3` from the 51st);
+  repeating one counts once; an address that is not valid is `501 5.1.3`. A message with no `To`
+  recipient (only `Cc` or blind copies) is `554 5.6.0`.
+- **Content.** At most 8 MiB (`SIZE 8388608`; larger is `552 5.3.4`). The limits of
+  [Send](#send) apply and are refused, never cut: a subject over 998 characters, a text or
+  HTML body over 256 KiB, more than 10 attachments, or attachments over 4 MiB in total answer
+  `552 5.3.4` naming the limit. A message without a subject is sent as `(no subject)`; one with only
+  files gets a blank body. Images of a `multipart/related` body keep their `Content-ID` and stay
+  inline. Zmail gives the message its own `Message-ID` and does not keep the submitted bytes.
+- **Retries.** A message is identified by its mailbox and `Message-ID` (by its exact bytes when it
+  has none). Submitting it again answers the first outcome without sending twice; a retry after a
+  failed attempt sends it again, and a different message with the same `Message-ID` is `554 5.6.0`.
+- **Send limit.** It counts in the personal lane with console sends. Past the limit the message
+  waits like a console send and the app hears `250 2.0.0 Queued`; when the waiting queue is full,
+  `452 4.3.1`.
+
+| Outcome | Reply |
+|---|---|
+| Sent | `250 2.0.0 Ok: sent, id <message id>` |
+| Waiting for the send limit | `250 2.0.0 Queued: ...` |
+| Send limit and queue full | `452 4.3.1` |
+| Sending paused by the bounce or complaint rate | `550 5.7.1` |
+| Provider refused or unreachable | `451 4.4.1` |
+| An earlier attempt still in flight | `451 4.4.1` |
+| No outbound provider configured | `451 4.3.5` |
+| Invalid message | `554 5.6.0` with the reason |
+| Server error | `451 4.3.0` |
+
 ## Programmatic Sending
 
 Backend services send with an API key instead of a browser session. Create the key with
@@ -3054,6 +3129,16 @@ the membership's `api_keys` grant (owners and admins always have it): a member's
 `403 ORGANIZATION.FEATURE_NOT_GRANTED` in that organization, though the key itself stays valid.
 Keys owned by an organization are not defined.
 
+A key may be [restricted](API_KEYS.md#restrictions) when it is created. A key bound to an
+organization may omit `Organization-Id` on every route below and then acts in that organization;
+naming any other organization is `403 API_KEY.ORGANIZATION_MISMATCH`, checked before membership.
+A key restricted to sending domains is checked on both sending routes before anything else about the
+sender: `POST /v1/outbound-mail-messages` compares the domain of `from`, and
+`POST /v1/transactional-messages` the domain of the template's `from_address`, ignoring case. Any
+other domain is `403 API_KEY.DOMAIN_NOT_ALLOWED`; nothing is stored, sent, or counted in a send
+limit. The restriction does not change what the key may read, and it does not apply to agent drafts,
+which never send. Unrestricted keys behave exactly as before.
+
 | Route | Required scope |
 |---|---|
 | `POST /v1/outbound-mail-messages` | `mail:send` |
@@ -3063,6 +3148,7 @@ Keys owned by an organization are not defined.
 | `GET /v1/agent-mail-events` | `mail:agent` (see [Agent Grants](#agent-grants)) |
 | `GET /v1/agent-mail-messages/:message_id` | `mail:agent` |
 | `POST /v1/agent-mail-drafts` | `mail:agent` |
+| `POST /v1/agent-mail-templates` | `templates:create`, and the `templates` grant (see [Create a template from an AI tool](#create-a-template-from-an-ai-tool)) |
 
 `mail:transactional` neither includes nor is included by `mail:send`; `*` grants both. Only the two
 transactional routes accept test keys (see [`API_KEYS.md`](API_KEYS.md)); every other route here
