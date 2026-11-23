@@ -228,17 +228,18 @@ func (s *service) ResendMemberWelcome(ctx context.Context, viewer domain.Organiz
 	} else {
 		s.dispatchTransactionalSoon(ctx, message)
 	}
-	mails, err := s.memberWelcomeMails(ctx, viewer, mailbox.ID)
-	if err != nil || len(mails) != 1 {
-		// The resend is stored; answer what is known without the send log state.
-		queuedAt := message.CreatedAt
-		return MemberWelcomeMail{
-			MailboxID: mailbox.ID, Address: mailbox.Address, DisplayName: mailbox.DisplayName,
-			OwnerUserID: mailbox.OwnerUserID, InvitationPending: mailbox.OwnerUserID == nil,
-			Status: MemberWelcomeDeliveryQueued, QueuedAt: &queuedAt, ResendCount: resendCount,
-		}, nil
+	if mails, readErr := s.memberWelcomeMails(ctx, viewer, mailbox.ID); readErr == nil && len(mails) == 1 {
+		return mails[0], nil
 	}
-	return mails[0], nil
+	// The resend is stored; answer what is known without the send log state.
+	slog.WarnContext(ctx, "member_welcome.resend_readback_failed",
+		slog.Uint64("mailbox_id", uint64(mailbox.ID)))
+	queuedAt := message.CreatedAt
+	return MemberWelcomeMail{
+		MailboxID: mailbox.ID, Address: mailbox.Address, DisplayName: mailbox.DisplayName,
+		OwnerUserID: mailbox.OwnerUserID, InvitationPending: mailbox.OwnerUserID == nil,
+		Status: MemberWelcomeDeliveryQueued, QueuedAt: &queuedAt, ResendCount: resendCount,
+	}, nil
 }
 
 // storeMemberWelcomeResend checks the mailbox's resend limits under a lock on its welcome record,
@@ -255,8 +256,8 @@ func (s *service) storeMemberWelcomeResend(ctx context.Context, mailbox *domain.
 		if err != nil {
 			return nil, err
 		}
-		if err := checkMemberWelcomeResend(&record, created, now); err != nil {
-			return nil, err
+		if limitErr := checkMemberWelcomeResend(&record, created, now); limitErr != nil {
+			return nil, limitErr
 		}
 		record.ResendCount++
 		key := memberWelcomeIdempotencyKey(mailbox.ID) + ":" + strconv.Itoa(record.ResendCount)
