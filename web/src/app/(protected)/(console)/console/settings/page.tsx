@@ -71,7 +71,7 @@ export default async function SettingsPage() {
       <h1 className="text-2xl font-semibold">{t('title')}</h1>
 
       <SettingsTabs tabs={tabs} className="mt-5">
-        <TabsList className="max-w-full overflow-x-auto">
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="profile">
             <UserRound aria-hidden="true" />
             {t('tabs.profile')}

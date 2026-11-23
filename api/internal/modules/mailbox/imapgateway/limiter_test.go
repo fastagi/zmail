@@ -11,6 +11,7 @@ import (
 
 func TestLimiterLocksIPAndUserIndependently(t *testing.T) {
 	ctx := context.Background()
+	// The memory store measures its window by the real clock, so the fake clock starts there too.
 	now := time.Now()
 	limiter := newAuthLimiter(ratelimit.NewMemoryStores(), func() time.Time { return now })
 
