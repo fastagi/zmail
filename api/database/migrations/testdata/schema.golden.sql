@@ -398,6 +398,7 @@ TABLE mail_domains
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
   COLUMN cloudflare_connection_id uuid
   COLUMN last_error_code character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN is_default boolean NOT NULL DEFAULT false
 
 TABLE mail_drafts
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_drafts_id_seq'::regclass)
@@ -770,6 +771,9 @@ TABLE organizations
   COLUMN created_by bigint NOT NULL
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN suspended_at timestamp with time zone
+  COLUMN suspension_reason character varying(500) NOT NULL DEFAULT ''::character varying
+  COLUMN daily_send_limit integer
 
 TABLE password_reset_tokens
   COLUMN id bigint NOT NULL DEFAULT nextval('password_reset_tokens_id_seq'::regclass)
@@ -1346,6 +1350,7 @@ CONSTRAINT organization_memberships.fk_organization_memberships_organization FOR
 CONSTRAINT organization_memberships.fk_organization_memberships_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_memberships.organization_memberships_pkey PRIMARY KEY (id)
 CONSTRAINT organization_memberships.organization_memberships_role_check CHECK (((role)::text = ANY ((ARRAY['owner'::character varying, 'admin'::character varying, 'member'::character varying])::text[])))
+CONSTRAINT organizations.chk_organizations_daily_send_limit CHECK (((daily_send_limit IS NULL) OR ((daily_send_limit >= 1) AND (daily_send_limit <= 1000000))))
 CONSTRAINT organizations.fk_organizations_creator FOREIGN KEY (created_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organizations.organizations_pkey PRIMARY KEY (id)
 CONSTRAINT password_reset_tokens.password_reset_tokens_pkey PRIMARY KEY (id)
@@ -1572,6 +1577,7 @@ INDEX CREATE INDEX idx_mail_deleted_sends_lane ON mail_deleted_sends USING btree
 INDEX CREATE INDEX idx_mail_deleted_sends_mailbox ON mail_deleted_sends USING btree (mailbox_id, send_attempted_at)
 INDEX CREATE INDEX idx_mail_deleted_sends_message_id ON mail_deleted_sends USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_deleted_sends_pkey ON mail_deleted_sends USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_domains_default ON mail_domains USING btree (organization_id) WHERE is_default
 INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)

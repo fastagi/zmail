@@ -617,6 +617,20 @@ const messages = {
       "Own domains are not available on this service yet. Your team's addresses use the shared domain below.",
     connectedEmpty: 'No domains connected yet.',
     connectTitle: 'Connect your domain',
+    connectAnotherTitle: 'Connect another domain',
+    connectAnotherHint:
+      'An organization can connect up to {max} domains and create mailboxes on each of them.',
+    domainCount: '{count} of {max} domains connected',
+    addDomainAction: 'Add domain',
+    domainLimitReached:
+      'An organization can connect up to {max} domains. Remove one to add another.',
+    mailboxCount: '{count, plural, =0 {No mailboxes} one {# mailbox} other {# mailboxes}}',
+    showRecords: 'Show DNS records',
+    hideRecords: 'Hide DNS records',
+    defaultBadge: 'Default',
+    defaultHint: 'New mailboxes use this domain unless you pick another one.',
+    makeDefaultAction: 'Make default',
+    defaultSet: 'New mailboxes now use @{domain} by default',
     connectWhen:
       "Works for most domains and needs no token. If the domain's DNS is not on Cloudflare yet, Zmail gives you two name servers to set once at your registrar.",
     connectProviderFailed:
@@ -2004,6 +2018,8 @@ const messages = {
     messageNotFound: 'This message does not exist or was deleted.',
     organizationNotFound:
       'This organization does not exist or you are no longer a member of it. Choose another organization.',
+    organizationSuspended:
+      'This organization is suspended and cannot send or receive here. Contact Zmail support to restore it, or choose another organization.',
     permissionDenied:
       "You don't have permission for this mailbox. Refresh to see your current access.",
     createDenied: 'Only owners and admins of the organization can create mailboxes.',

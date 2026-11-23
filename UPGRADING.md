@@ -22,7 +22,7 @@ else changes, so ship the API first.
 
 ### Medium — Resend columns on `member_welcome_mails`
 
-Migration `2026_12_27_100000_add_member_welcome_resends` adds `last_sent_at`, `resend_count`,
+Migration `2026_12_27_140000_add_member_welcome_resends` adds `last_sent_at`, `resend_count`,
 `resend_window_started_at`, and `resend_window_count` to `member_welcome_mails`, plus a check that
 the counters are not negative. Every column is nullable or has a constant default, so PostgreSQL
 adds them without rewriting the table. The table stays one row per mailbox, now pointing at the
@@ -38,6 +38,37 @@ latest welcome mail. Roll it back before `2026_12_26_100000_add_member_welcome_m
 `member_welcome_mails.resend`. A fork that counts send-log rows by the exact key
 `member-welcome:<mailbox id>` should match the `member-welcome:<mailbox id>:` prefix too. See
 "Welcome Mail Status" and "Resending A Welcome Mail" in `contracts/MAILBOXES.md`.
+## Unreleased — Default mail domain
+
+### High — Deploy the Web before the API
+
+Connected domains (`GET /v1/mail-domains` and every answer carrying one domain) gain the required
+fields `default` and `mailbox_count`, and each `GET /v1/mailbox-domains` item gains `default`. A Web
+that parses these responses with strict schemas rejects the new fields, so ship the Web first: the
+new Web reads an older API's answers as having no default and no mailbox counts.
+
+### Medium — One column and one index on `mail_domains`
+
+Migration `2026_12_27_120000_add_mail_domain_default` adds `mail_domains.is_default`
+(`boolean NOT NULL DEFAULT false`) and the partial unique index `idx_mail_domains_default` on
+`(organization_id) WHERE is_default`. A column with a constant default only changes the catalog,
+but the `ALTER TABLE` takes a short `ACCESS EXCLUSIVE` lock on `mail_domains`, and the plain
+`CREATE UNIQUE INDEX` holds a `SHARE` lock that blocks connecting, checking, and removing domains
+while it builds; the table holds at most ten rows per organization, so both finish quickly. Run it
+off-peak with a `lock_timeout` (for example `SET lock_timeout = '5s'`). Every existing domain starts
+unmarked, so each organization's oldest verified domain is its default until an owner or admin
+chooses one. Down drops the index and the column, and every organization falls back to its oldest
+verified domain.
+
+### Medium — `PUT /v1/mail-domains/:domain_id/default`
+
+Owners and admins mark a verified domain as the organization's default; a pending one is
+`422 MAILBOX.DOMAIN_NOT_VERIFIED`. Without a chosen domain, or while the chosen one is pending, the
+verified domain connected first is the default, and removing the chosen domain falls back to it. The
+default only decides what new-mailbox forms preselect; an empty `domain` on `POST /v1/mailboxes`
+still means the shared domain. `domain.MailDomainRepository` gains `SetDefaultDomain` and
+`CountMailboxesByDomain`, and `mailbox.Service` gains `SetDefaultMailDomain`; a fork with its own
+implementation or test double adds them. See "Domains" in `contracts/MAILBOXES.md`.
 
 ## Unreleased — Member welcome mail
 

@@ -36,6 +36,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_domains.checks.store").WhereNumber("domain_id")
 		auth.POST("/mail-domains/:domain_id/receiving", h.EnableMailDomainReceiving).
 			Name("mail_domains.receiving.store").WhereNumber("domain_id")
+		auth.PUT("/mail-domains/:domain_id/default", h.SetDefaultMailDomain).
+			Name("mail_domains.default.update").WhereNumber("domain_id")
 		auth.GET("/mail-cloudflare-connection", h.GetCloudflare).Name("mail_cloudflare_connection.show")
 		auth.POST("/mail-cloudflare-connection", h.BindCloudflare).Name("mail_cloudflare_connection.store").Middleware(middleware.BodyLimit(2048))
 		auth.DELETE("/mail-cloudflare-connection/:connection_id", h.UnbindCloudflare).Name("mail_cloudflare_connection.destroy")

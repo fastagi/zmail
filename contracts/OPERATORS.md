@@ -184,7 +184,10 @@ has), so the mail metrics views can open an organization's member list.
 | Get organization | `GET /v1/operator/organizations/:id` | `200 operator organization` |
 | List members | `GET /v1/operator/organizations/:id/members?page=&per_page=` | `200` paginated `operator member` list |
 
-An operator organization is `{ id, name, slug, created_by, member_count, created_at, updated_at }`.
+An operator organization is `{ id, name, slug, created_by, member_count, suspended_at,
+suspension_reason, daily_send_limit, created_at, updated_at }`. `suspended_at` is `null` unless the
+organization is suspended, `suspension_reason` is `""` unless it is, and `daily_send_limit` is
+`null` unless an operator set one.
 An operator member is `{ id, user_id, username, nickname, email, role, joined_at }`, where `id` is
 the membership ID and `role` is `owner`, `admin`, or `member`. Memberships of deleted accounts are
 excluded from both the list and `member_count`.
@@ -194,6 +197,32 @@ excluded from both the list and `member_count`.
   ID. `per_page` is 1–100 (default 15). Invalid values return `400 COMMON.INVALID_INPUT`.
 - An unknown organization returns `404 ORGANIZATION.NOT_FOUND`. Operator scope is global, so this
   discloses only that the ID does not exist.
+
+### Organization Controls
+
+These routes need `operator:manage`; unsafe methods also require `Origin` and `X-CSRF-Token`. Each
+answers `200 operator organization` after the change and records one audit entry (`action`
+`suspend`, `restore`, or `set_send_limit`, `resource` `organizations`) with the before and after
+values.
+
+| Operation | Method and path | Request |
+|---|---|---|
+| Suspend | `POST /v1/operator/organizations/:id/suspend` | `{ "reason": "…" }` |
+| Restore | `POST /v1/operator/organizations/:id/restore` | — |
+| Set send limit | `PUT /v1/operator/organizations/:id/send-limit` | `{ "daily_send_limit": 5000 }` or `null` |
+
+- A suspended organization answers every request that names it in `Organization-Id`, browser
+  session or API key, with `403 ORGANIZATION.SUSPENDED`. Nothing more is sent for it: broadcasts
+  pause at the send limit, waiting messages keep waiting, and transactional mail is not sent.
+  Inbound mail is still received. Restoring lifts all of this; it changes nothing else.
+- `reason` is required: 1 to 500 characters after trimming, without control characters, otherwise
+  `422 COMMON.VALIDATION_FAILED`. Suspending a suspended organization replaces the reason and keeps
+  the first `suspended_at`. Restoring an active organization changes nothing.
+- `daily_send_limit` is required and is `null` or an integer from 1 to 1000000, otherwise
+  `422 COMMON.VALIDATION_FAILED`; a body that is not a JSON object is `400 COMMON.INVALID_INPUT`.
+  A limit replaces the instance limit of every send lane (personal, broadcast, transactional) and
+  the new-organization cap; `null` returns the organization to them.
+- An unknown organization returns `404 ORGANIZATION.NOT_FOUND`.
 
 ## Mail Metrics
 

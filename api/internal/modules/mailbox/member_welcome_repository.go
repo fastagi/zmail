@@ -27,7 +27,7 @@ type MemberWelcomeSettingPO struct {
 func (MemberWelcomeSettingPO) TableName() string { return "member_welcome_settings" }
 
 // MemberWelcomeMailPO records a mailbox's welcome mail: one row per mailbox, pointing at the latest
-// welcome sent. The resend columns are owned by 2026_12_27_100000_add_member_welcome_resends.
+// welcome sent. The resend columns are owned by 2026_12_27_140000_add_member_welcome_resends.
 type MemberWelcomeMailPO struct {
 	ID                     uint `gorm:"primaryKey"`
 	OrganizationID         uint

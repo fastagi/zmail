@@ -85,11 +85,19 @@ type MailDomain struct {
 	// ZoneCheckLimited is true when the provider refused this check's request to look for the
 	// zone's name servers now because one ran too recently; it is not stored.
 	ZoneCheckLimited bool
-	CheckedAt        *time.Time
-	VerifiedAt       *time.Time
-	CreatedBy        uint
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// MarkedDefault is true on the one domain an owner or admin chose as the organization's default.
+	MarkedDefault bool
+	// Default is true on the domain new mailboxes use unless another is picked: the chosen one while
+	// it is verified, else the oldest verified domain. It is filled on reads; it is not stored.
+	Default bool
+	// MailboxCount is how many live mailboxes have an address on the domain, filled on reads; it is
+	// not stored.
+	MailboxCount int
+	CheckedAt    *time.Time
+	VerifiedAt   *time.Time
+	CreatedBy    uint
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // MailDomainRepository defines persistence for connected domains.
@@ -104,6 +112,11 @@ type MailDomainRepository interface {
 	// managed zone, so a setup that read the domain earlier cannot undo a capability change.
 	UpdateDomain(ctx context.Context, domain *MailDomain) error
 	SetDomainCapability(ctx context.Context, organizationID, id uint, capability MailDomainCapability) error
+	// SetDefaultDomain makes the verified domain the organization's chosen default and clears the
+	// mark on every other domain of the organization.
+	SetDefaultDomain(ctx context.Context, organizationID, id uint) error
+	// CountMailboxesByDomain counts the organization's live mailboxes per lowercase address domain.
+	CountMailboxesByDomain(ctx context.Context, organizationID uint) (map[string]int, error)
 	// DeleteDomain removes a domain that no live mailbox uses.
 	DeleteDomain(ctx context.Context, organizationID, id uint) error
 	SetMailboxRoutingRule(ctx context.Context, mailboxID uint, ruleID string) error

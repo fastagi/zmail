@@ -63,6 +63,11 @@ func (h *Handler) ListDomains(c *gin.Context) {
 		response.HandleError(c, "Failed to list mailbox domains", err)
 		return
 	}
+	limits, err := h.service.OrganizationDailyLimits(c.Request.Context(), organizationID)
+	if err != nil {
+		response.HandleError(c, "Failed to list mailbox domains", err)
+		return
+	}
 	items := make([]MailboxDomainResponse, 0, len(domains))
 	transactional := h.service.TransactionalPolicy()
 	for _, mailboxDomain := range domains {
@@ -73,12 +78,13 @@ func (h *Handler) ListDomains(c *gin.Context) {
 		items = append(items, MailboxDomainResponse{
 			Domain:                  mailboxDomain.Name,
 			Kind:                    kind,
+			Default:                 mailboxDomain.Default,
 			MaxMailboxes:            h.service.MaxMailboxes(),
 			Provider:                h.service.Provider(),
 			InboundEnabled:          h.service.InboundEnabled(),
-			DailySendLimit:          h.service.DailySendLimit(),
-			DailyBroadcastLimit:     h.service.DailyBroadcastLimit(),
-			DailyTransactionalLimit: h.service.DailyTransactionalLimit(),
+			DailySendLimit:          limits.Personal,
+			DailyBroadcastLimit:     limits.Broadcast,
+			DailyTransactionalLimit: limits.Transactional,
 			BroadcastsEnabled:       h.service.BroadcastsEnabled(),
 			CustomDomainsEnabled:    h.service.CustomDomainsEnabled(),
 

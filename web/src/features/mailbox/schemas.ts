@@ -158,6 +158,8 @@ export const mailboxDomainSchema = strictObject({
   domain: string(),
   // `shared` is the instance domain; `organization` a verified domain the organization connected.
   kind: union([literal('shared'), literal('organization')]),
+  // True on the one domain new mailbox forms preselect. Optional so an older API still parses.
+  default: optional(boolean()),
   max_mailboxes: number().check(int()),
   // `cloudflare` delivers; `log` only records and is for development.
   provider: union([literal('cloudflare'), literal('log')]),
@@ -219,6 +221,9 @@ export const mailDomainSchema = strictObject({
   setting_up: boolean(),
   // Cloudflare refused to look for the pending zone's name servers now; check again later.
   zone_check_limited: boolean(),
+  // The organization's default domain, and its live mailboxes. Optional so an older API still parses.
+  default: optional(boolean()),
+  mailbox_count: optional(nonnegativeIntegerSchema),
   last_error: optional(string()),
   // Stable class of last_error; an unknown code reads like domain.setup_failed.
   last_error_code: optional(string()),

@@ -412,7 +412,11 @@ export class MockMailboxStore {
   }
 
   /** The shared domain first, then the organization's verified domains. */
-  domains(verifiedDomains: readonly string[] = []): MailboxDomain[] {
+  /** `defaultDomain` is the organization's default; without one the shared domain is the default. */
+  domains(
+    verifiedDomains: readonly string[] = [],
+    defaultDomain: string | null = null
+  ): MailboxDomain[] {
     const settings = {
       max_mailboxes: MAILBOX_MAX_PER_ORGANIZATION,
       provider: 'log' as const,
@@ -429,9 +433,23 @@ export class MockMailboxStore {
       transactional_enabled: mockTransactionalStore.isEnabled(),
     };
     return [
-      { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', ...settings },
-      ...verifiedDomains.map(domain => ({ domain, kind: 'organization' as const, ...settings })),
+      { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', default: defaultDomain === null, ...settings },
+      ...verifiedDomains.map(domain => ({
+        domain,
+        kind: 'organization' as const,
+        default: domain === defaultDomain,
+        ...settings,
+      })),
     ];
+  }
+
+  /** The organization's live mailboxes with an address on the domain. */
+  countOnDomain(organizationId: number, name: string): number {
+    let count = 0;
+    for (const state of this.organizations.get(organizationId)?.values() ?? []) {
+      if (state.mailbox.address.endsWith(`@${name}`)) count += 1;
+    }
+    return count;
   }
 
   /** Whether a live mailbox of any organization has an address on the domain. */

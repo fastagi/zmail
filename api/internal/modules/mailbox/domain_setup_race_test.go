@@ -24,6 +24,18 @@ func (d lockedDomains) FindDomain(ctx context.Context, organizationID, id uint) 
 	return d.fakeDomains.FindDomain(ctx, organizationID, id)
 }
 
+func (d lockedDomains) ListDomains(ctx context.Context, organizationID uint) ([]*domain.MailDomain, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.fakeDomains.ListDomains(ctx, organizationID)
+}
+
+func (d lockedDomains) CountMailboxesByDomain(ctx context.Context, organizationID uint) (map[string]int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.fakeDomains.CountMailboxesByDomain(ctx, organizationID)
+}
+
 func (d lockedDomains) UpdateDomain(ctx context.Context, mailDomain *domain.MailDomain) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()

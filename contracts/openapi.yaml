@@ -3303,6 +3303,148 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/suspend:
+    post:
+      operationId: suspendOperatorOrganization
+      summary: Suspend an organization
+      description: Requires `operator:manage`. Members and API keys get `403 ORGANIZATION.SUSPENDED` for the organization and nothing more is sent for it. Suspending again replaces the reason and keeps the first `suspended_at`.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/restore:
+    post:
+      operationId: restoreOperatorOrganization
+      summary: Restore a suspended organization
+      description: Requires `operator:manage`. Restoring an active organization changes nothing.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/send-limit:
+    put:
+      operationId: setOperatorOrganizationSendLimit
+      summary: Set or clear an organization's daily send limit
+      description: Requires `operator:manage`. The limit replaces the instance limit of every send lane and the new-organization cap; `null` returns the organization to them.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - daily_send_limit
+              properties:
+                daily_send_limit:
+                  type:
+                    - integer
+                    - 'null'
+                  minimum: 1
+                  maximum: 1000000
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/operator/organizations/{organization_id}/webhook-deliveries:
     get:
       operationId: listOperatorWebhookDeliveries
@@ -4314,6 +4456,44 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The domain's managed zone is not active yet (`MAILBOX.ZONE_PENDING`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains/{domain_id}/default:
+    put:
+      operationId: setDefaultMailDomain
+      summary: Make a verified domain the organization's default
+      description: Marks the domain as the one forms preselect for new mailboxes and clears the mark on the
+        organization's other domains. Without a chosen domain, or while the chosen one is pending, the verified
+        domain connected first is the default. Choosing the default again changes nothing. Only owners and admins
+        may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '200':
+          description: The domain, now with `default` true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`).
           content:
             application/json:
               schema:
@@ -12101,6 +12281,7 @@ components:
         - ORGANIZATION.NOT_FOUND
         - ORGANIZATION.CONTEXT_REQUIRED
         - ORGANIZATION.CONTEXT_INVALID
+        - ORGANIZATION.SUSPENDED
         - ORGANIZATION.SLUG_ALREADY_EXISTS
         - ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED
         - ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID
@@ -14975,6 +15156,9 @@ components:
         - slug
         - created_by
         - member_count
+        - suspended_at
+        - suspension_reason
+        - daily_send_limit
         - created_at
         - updated_at
       properties:
@@ -14991,6 +15175,23 @@ components:
         member_count:
           type: integer
           minimum: 0
+        suspended_at:
+          description: Set while a platform operator has suspended the organization.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        suspension_reason:
+          description: Why the organization is suspended; empty when it is not.
+          type: string
+          maxLength: 500
+        daily_send_limit:
+          description: The operator's daily send limit for every lane; null takes the instance limits.
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 1000000
         created_at:
           type: string
           format: date-time
@@ -15643,11 +15844,16 @@ components:
         - simulator_domain
         - broadcasts_enabled
         - custom_domains_enabled
+        - default
       properties:
         domain:
           type: string
           minLength: 1
           maxLength: 253
+        default:
+          type: boolean
+          description: True on exactly one item, the domain forms preselect for new mailboxes; the organization's
+            default domain, or the shared domain while the organization has no verified domain.
         kind:
           type: string
           description: '`shared` is the instance domain every organization may use; `organization` is a verified
@@ -20782,6 +20988,8 @@ components:
         - records
         - setting_up
         - zone_check_limited
+        - default
+        - mailbox_count
         - checked_at
         - verified_at
         - created_at
@@ -20821,6 +21029,15 @@ components:
           type: boolean
           description: True on a check answer when Cloudflare refused to look for the pending zone's name servers
             now because it looked too recently; check again later.
+        default:
+          type: boolean
+          description: The organization's default domain, which forms preselect for new mailboxes. The verified
+            domain an owner or admin chose, else the verified domain connected first; at most one domain is the
+            default, and none while no domain is verified.
+        mailbox_count:
+          type: integer
+          description: The organization's live mailboxes with an address on the domain.
+          minimum: 0
         last_error:
           type: string
           description: The provider's explanation of the last failed setup step, while the domain is pending.

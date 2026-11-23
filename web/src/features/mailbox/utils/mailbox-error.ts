@@ -44,6 +44,7 @@ export type MailboxErrorKey =
   | 'errors.messageInvalid'
   | 'errors.messageNotFound'
   | 'errors.organizationNotFound'
+  | 'errors.organizationSuspended'
   | 'errors.createDenied'
   | 'errors.permissionDenied'
   | 'errors.platformAccountNotFound'
@@ -100,6 +101,7 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.COMMON_REQUEST_TOO_LARGE]: 'errors.tooLarge',
   [ApiErrorCode.PERMISSION_DENIED]: 'errors.permissionDenied',
   [ApiErrorCode.ORGANIZATION_NOT_FOUND]: 'errors.organizationNotFound',
+  [ApiErrorCode.ORGANIZATION_SUSPENDED]: 'errors.organizationSuspended',
   [ApiErrorCode.MAILBOX_NOT_FOUND]: 'errors.mailboxNotFound',
   [ApiErrorCode.MAILBOX_MESSAGE_NOT_FOUND]: 'errors.messageNotFound',
   [ApiErrorCode.MAILBOX_ADDRESS_TAKEN]: 'errors.addressTaken',

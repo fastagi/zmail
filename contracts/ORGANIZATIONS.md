@@ -328,6 +328,7 @@ An invitation view contains no plaintext token:
 |---|---|---|
 | 400 | `ORGANIZATION.CONTEXT_REQUIRED` | A context-protected route received no organization selection |
 | 400 | `ORGANIZATION.CONTEXT_INVALID` | The organization selection is malformed or ambiguous |
+| 403 | `ORGANIZATION.SUSPENDED` | A platform operator suspended the selected organization |
 | 404 | `ORGANIZATION.NOT_FOUND` | The caller has no visible membership for the organization |
 | 404 | `ORGANIZATION.INVITATION.NOT_FOUND` | The invitation is not visible in the managed organization |
 | 404 | `ORGANIZATION.INVITATION.INVALID` | The acceptance token is malformed, unknown, revoked, or already consumed |

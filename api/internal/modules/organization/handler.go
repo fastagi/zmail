@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/modules/user"
 	"github.com/fastagi/zmail/api/internal/starter/assembly"
@@ -287,4 +288,23 @@ func (h *Handler) AcceptInvitation(c *gin.Context) {
 		return
 	}
 	response.Success(c, toResponse(membership))
+}
+
+// activeOnly stops administration of an organization the platform operator suspended.
+func (h *Handler) activeOnly(next gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, ok := handler.GetUserID(c)
+		if !ok {
+			return
+		}
+		organizationID, ok := handler.ParseID(c, "id")
+		if !ok {
+			return
+		}
+		if _, err := h.service.ResolveContext(c.Request.Context(), userID, organizationID); errors.Is(err, domain.ErrOrganizationSuspended) {
+			abortOrganizationContext(c, err)
+			return
+		}
+		next(c)
+	}
 }
