@@ -22,6 +22,11 @@ import { getAuthErrorCode } from '@/features/auth/utils/auth-failure';
 import { ApiErrorCode } from '@/http/codes';
 import { hasAuthFieldError, resolveAuthErrorKey } from '@/features/auth/utils/auth-error';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
+import { GoogleSignInButton } from '@/features/auth/components/google-sign-in-button';
+import {
+  GOOGLE_SIGN_IN_ERROR_PARAM,
+  resolveGoogleSignInErrorKey,
+} from '@/features/auth/utils/google-sign-in';
 import { useT } from '@/i18n';
 
 interface LoginFormProps {
@@ -31,13 +36,24 @@ interface LoginFormProps {
   };
   /** False when the API only creates accounts through invitations. */
   registrationEnabled?: boolean;
+  /** True when the API has a Google OAuth client, so "Continue with Google" works. */
+  googleEnabled?: boolean;
 }
 
 /** Login entry point with localized, contract-aware mutation feedback. */
-export function LoginForm({ demoCredentials, registrationEnabled = true }: LoginFormProps) {
+export function LoginForm({
+  demoCredentials,
+  registrationEnabled = true,
+  googleEnabled = false,
+}: LoginFormProps) {
   const t = useT();
   const { mutate: login, isPending, error, reset } = useLogin();
-  const returnUrl = useSearchParams()?.get('returnUrl') ?? null;
+  const searchParams = useSearchParams();
+  const returnUrl = searchParams?.get('returnUrl') ?? null;
+  // A Google sign-in that failed comes back here with a code; only known codes map to copy.
+  const googleErrorKey = resolveGoogleSignInErrorKey(
+    searchParams?.get(GOOGLE_SIGN_IN_ERROR_PARAM) ?? null
+  );
   const [email, setEmail] = useState(demoCredentials?.email ?? '');
   const [password, setPassword] = useState(demoCredentials?.password ?? '');
   const [totpCode, setTotpCode] = useState('');
@@ -79,12 +95,17 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
       </CardHeader>
       <CardContent className="px-0 pt-4">
         <form onSubmit={handleSubmit} className="space-y-4" aria-busy={isPending}>
-          {error && (
+          {error ? (
             <Alert variant="destructive">
               <AlertCircle aria-hidden="true" className="size-4" />
               <AlertDescription>{t(resolveAuthErrorKey(error, 'login'))}</AlertDescription>
             </Alert>
-          )}
+          ) : googleErrorKey ? (
+            <Alert variant="destructive">
+              <AlertCircle aria-hidden="true" className="size-4" />
+              <AlertDescription>{t(googleErrorKey)}</AlertDescription>
+            </Alert>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="email">{t.auth('email')}</Label>
@@ -177,6 +198,12 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
             {t.auth('login')}
           </Button>
         </form>
+
+        {googleEnabled && (
+          <div className="mt-4">
+            <GoogleSignInButton returnUrl={returnUrl} />
+          </div>
+        )}
 
         {demoCredentials && (
           <div className="mt-4 rounded-lg border border-border/60 bg-bg-surface/80 p-3 text-sm text-text-subtle">

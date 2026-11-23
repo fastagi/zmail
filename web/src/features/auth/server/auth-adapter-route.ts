@@ -19,7 +19,8 @@ import { ApiErrorCode } from '@/http/codes';
 
 let adapter: GoApiAuthAdapter | undefined;
 
-function configuredAdapter(): GoApiAuthAdapter {
+/** The process's Go API auth adapter; it throws when the adapter has no upstream URL. */
+export function configuredAdapter(): GoApiAuthAdapter {
   if (!serverEnv.API_UPSTREAM_URL) {
     throw new Error('API_UPSTREAM_URL is required by the production API adapter');
   }

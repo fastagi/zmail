@@ -138,6 +138,8 @@ restart-scoped; no JWT signing key or browser-readable claim is involved:
 | `AUTH_SESSION_RETENTION` | `720h` | Terminal-row retention, zero through 365 days |
 | `AUTH_REGISTRATION_ENABLED` | `true` | Boolean; `false` closes public registration (`POST /v1/register` answers `403 AUTH.FORBIDDEN`) |
 | `AUTH_TOTP_ENCRYPTION_KEY` | empty | Encrypts authenticator secrets for two-factor sign-in (at least 32 characters). Empty turns new enrollment off; existing factors are still enforced and recovery codes still work. Changing it makes existing authenticator codes fail until users sign in with a recovery code and re-enroll |
+| `GOOGLE_OAUTH_CLIENT_ID` | empty | OAuth client ID of "Sign in with Google"; set together with the secret, at most 255 characters. Empty hides the button and `/v1/auth/google/*` answers `503 AUTH.GOOGLE_NOT_CONFIGURED`. The client's authorized redirect URI is `<NEXT_PUBLIC_APP_URL>/api/auth/google/callback` |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | empty | OAuth client secret of "Sign in with Google"; set together with the client ID. Separate from `EXTERNAL_MAIL_GMAIL_CLIENT_SECRET` |
 
 The API remains authoritative even when a browser cookie has a longer local lifetime: revocation,
 idle expiry, account state, password security events, and persistence availability are checked on

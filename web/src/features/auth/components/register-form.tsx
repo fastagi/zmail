@@ -30,6 +30,7 @@ import { authConfig } from '@/config/auth';
 import { env } from '@/config/env';
 import { ApiErrorCode } from '@/http/codes';
 import { useT } from '@/i18n';
+import { GoogleSignInButton } from '@/features/auth/components/google-sign-in-button';
 
 /** Seconds before another code can be requested; the API refuses sooner requests silently. */
 const resendCooldownSeconds = 60;
@@ -38,7 +39,12 @@ const resendCooldownSeconds = 60;
  * Two-step registration on one page: mail a 6-digit code to the address, then register with the
  * code, a name, and a password. The code request never reveals whether the address is taken.
  */
-export function RegisterForm() {
+interface RegisterFormProps {
+  /** True when the API has a Google OAuth client, so "Continue with Google" works. */
+  googleEnabled?: boolean;
+}
+
+export function RegisterForm({ googleEnabled = false }: RegisterFormProps = {}) {
   const t = useT();
   // Consent is asked only for the legal documents the deployment links to (#83): asking users to
   // accept documents they cannot open is not meaningful consent.
@@ -292,6 +298,12 @@ export function RegisterForm() {
             </>
           )}
         </form>
+
+        {googleEnabled && (
+          <div className="mt-4">
+            <GoogleSignInButton returnUrl={returnUrl} />
+          </div>
+        )}
       </CardContent>
       <CardFooter className="px-0 flex flex-wrap items-center justify-center gap-1.5 text-sm text-muted-foreground mt-2">
         {t.auth('hasAccount')}

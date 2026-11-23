@@ -106,6 +106,12 @@ type service struct {
 	runRegistrationCode func(ctx context.Context, task func(context.Context))
 	// totp enforces and manages two-factor sign-in; nil without a factor store.
 	totp *totpGuard
+	// google is the "Sign in with Google" OAuth client; nil when it is not configured.
+	google *googleOIDCClient
+	// googleStore keeps Google links and pending Google sign-ins; the repository provides it.
+	googleStore googleIdentityStore
+	// production refuses plain-http redirect URIs.
+	production bool
 }
 
 var (
@@ -149,6 +155,9 @@ func NewService(
 	if store, ok := repo.(registrationEmailCodeStore); ok {
 		svc.emailCodes = store
 	}
+	if store, ok := repo.(googleIdentityStore); ok {
+		svc.googleStore = store
+	}
 	return svc
 }
 
@@ -168,6 +177,10 @@ func ProvideService(
 	if cfg != nil {
 		svc.registrationOpen = !cfg.Authentication.RegistrationDisabled
 		svc.emailCodeRequired = cfg.Authentication.RegistrationEmailCodeRequired
+		svc.production = cfg.IsProduction()
+		if cfg.Authentication.GoogleSignInConfigured() {
+			svc.google = newGoogleOIDCClient(cfg.Authentication.GoogleClientID, cfg.Authentication.GoogleClientSecret)
+		}
 	}
 	if store, ok := repo.(totpStore); ok {
 		key := ""
@@ -202,7 +215,7 @@ func (s *service) Register(ctx context.Context, req *UserRegisterRequest) (*doma
 	} else {
 		var hashedPassword string
 		if hashedPassword, err = hashRegistrationPassword(req.Password); err == nil {
-			user, err = s.createAccount(ctx, req, hashedPassword)
+			user, err = s.createAccount(ctx, req, hashedPassword, nil)
 		}
 	}
 	if err != nil {
@@ -227,7 +240,12 @@ func hashRegistrationPassword(password string) (string, error) {
 
 // createAccount checks the username and email are free and inserts the account. It runs inside the
 // registration-code transaction when codes are required.
-func (s *service) createAccount(ctx context.Context, req *UserRegisterRequest, hashedPassword string) (*domain.User, error) {
+func (s *service) createAccount(
+	ctx context.Context,
+	req *UserRegisterRequest,
+	hashedPassword string,
+	emailVerifiedAt *time.Time,
+) (*domain.User, error) {
 	existingByUsername, err := s.repo.FindByUsername(ctx, req.Username)
 	if err == nil && existingByUsername != nil {
 		return nil, domain.ErrUsernameAlreadyExists
@@ -252,6 +270,8 @@ func (s *service) createAccount(ctx context.Context, req *UserRegisterRequest, h
 		Nickname: req.Nickname,
 		Phone:    req.Phone,
 		Status:   1,
+
+		EmailVerifiedAt: emailVerifiedAt,
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
@@ -348,12 +368,26 @@ func (s *service) signIn(
 		}
 	}
 
+	issued, err := s.issueSignInSession(ctx, user, audience)
+	if err != nil {
+		return nil, nil, err
+	}
+	return user, issued, nil
+}
+
+// issueSignInSession is the one place a verified sign-in becomes a session, for passwords and
+// Google alike: it issues the session and records the login time.
+func (s *service) issueSignInSession(
+	ctx context.Context,
+	user *domain.User,
+	audience domain.SessionAudience,
+) (*IssuedAuthenticationSession, error) {
 	if s.sessions == nil {
-		return nil, nil, domain.ErrServiceUnavailable
+		return nil, domain.ErrServiceUnavailable
 	}
 	issued, err := s.sessions.Issue(ctx, user, audience)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Update last login. Auth has already succeeded; a write failure
@@ -366,7 +400,7 @@ func (s *service) signIn(
 			"err", err,
 		)
 	}
-	return user, issued, nil
+	return issued, nil
 }
 
 // signInThrottleKey keys known accounts by ID, so every identifier for one account shares a

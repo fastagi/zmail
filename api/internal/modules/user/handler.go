@@ -22,6 +22,7 @@ type Handler struct {
 	sessions  *SessionService
 	mailer    UserMailer
 	authGuard *AuthAbuseGuard
+	google    GoogleSignInService
 }
 
 var (
@@ -39,6 +40,7 @@ func NewHandler(
 	sessions *SessionService,
 	mailer UserMailer,
 	authGuard *AuthAbuseGuard,
+	google GoogleSignInService,
 ) *Handler {
 	return &Handler{
 		auth:      auth,
@@ -47,6 +49,7 @@ func NewHandler(
 		sessions:  sessions,
 		mailer:    mailer,
 		authGuard: authGuard,
+		google:    google,
 	}
 }
 

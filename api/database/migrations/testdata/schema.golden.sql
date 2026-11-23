@@ -737,6 +737,16 @@ TABLE notifications
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE oauth_sign_in_states
+  COLUMN state_hash character varying(64) NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN nonce_hash character varying(64) NOT NULL
+  COLUMN code_verifier character varying(128) NOT NULL
+  COLUMN redirect_uri character varying(2048) NOT NULL
+  COLUMN return_url character varying(2048) NOT NULL
+  COLUMN expires_at timestamp with time zone NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
 TABLE organization_invitation_developer_grants
   COLUMN invitation_id bigint NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL
@@ -965,6 +975,16 @@ TABLE usage_quotas
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
 
+TABLE user_identities
+  COLUMN id bigint NOT NULL DEFAULT nextval('user_identities_id_seq'::regclass)
+  COLUMN user_id bigint NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN subject character varying(255) NOT NULL
+  COLUMN email character varying(100) NOT NULL
+  COLUMN last_sign_in_at timestamp with time zone
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE user_recovery_codes
   COLUMN id bigint NOT NULL DEFAULT nextval('user_recovery_codes_id_seq'::regclass)
   COLUMN user_id bigint NOT NULL
@@ -994,6 +1014,7 @@ TABLE users
   COLUMN bio character varying(500)
   COLUMN status bigint DEFAULT 1
   COLUMN last_login timestamp with time zone
+  COLUMN email_verified_at timestamp with time zone
 
 TABLE webhook_deliveries
   COLUMN id bigint NOT NULL DEFAULT nextval('webhook_deliveries_id_seq'::regclass)
@@ -1358,6 +1379,10 @@ CONSTRAINT notification_web_push_subscriptions.fk_web_push_subscriptions_user FO
 CONSTRAINT notification_web_push_subscriptions.notification_web_push_subscriptions_pkey PRIMARY KEY (id)
 CONSTRAINT notifications.fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT notifications.notifications_pkey PRIMARY KEY (id)
+CONSTRAINT oauth_sign_in_states.chk_oauth_sign_in_states_nonce_hash CHECK (((nonce_hash)::text ~ '^[0-9a-f]{64}$'::text))
+CONSTRAINT oauth_sign_in_states.chk_oauth_sign_in_states_provider CHECK (((provider)::text = 'google'::text))
+CONSTRAINT oauth_sign_in_states.chk_oauth_sign_in_states_state_hash CHECK (((state_hash)::text ~ '^[0-9a-f]{64}$'::text))
+CONSTRAINT oauth_sign_in_states.oauth_sign_in_states_pkey PRIMARY KEY (state_hash)
 CONSTRAINT organization_invitation_developer_grants.fk_organization_invitation_developer_grants_invitation FOREIGN KEY (invitation_id) REFERENCES organization_invitations(id) ON DELETE CASCADE
 CONSTRAINT organization_invitation_developer_grants.organization_invitation_developer_grants_pkey PRIMARY KEY (invitation_id)
 CONSTRAINT organization_invitations.fk_organization_invitations_acceptor FOREIGN KEY (accepted_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
@@ -1455,6 +1480,10 @@ CONSTRAINT usage_quotas.usage_quotas_scope_check CHECK (((scope)::text = ANY ((A
 CONSTRAINT usage_quotas.usage_quotas_state_check CHECK ((((is_overridden = true) AND (limit_value IS NOT NULL)) OR ((is_overridden = false) AND (limit_value IS NULL))))
 CONSTRAINT usage_quotas.usage_quotas_subject_check CHECK (((((scope)::text = 'user'::text) AND (subject_id = user_id) AND (user_id IS NOT NULL) AND (organization_id IS NULL)) OR (((scope)::text = 'organization'::text) AND (subject_id = organization_id) AND (organization_id IS NOT NULL) AND (user_id IS NULL))))
 CONSTRAINT usage_quotas.usage_quotas_version_check CHECK ((version > 0))
+CONSTRAINT user_identities.chk_user_identities_provider CHECK (((provider)::text = 'google'::text))
+CONSTRAINT user_identities.chk_user_identities_subject CHECK (((char_length((subject)::text) >= 1) AND (char_length((subject)::text) <= 255)))
+CONSTRAINT user_identities.fk_user_identities_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+CONSTRAINT user_identities.user_identities_pkey PRIMARY KEY (id)
 CONSTRAINT user_recovery_codes.user_recovery_codes_code_hash_check CHECK ((code_hash ~ '^[0-9a-f]{64}$'::text))
 CONSTRAINT user_recovery_codes.user_recovery_codes_pkey PRIMARY KEY (id)
 CONSTRAINT user_recovery_codes.user_recovery_codes_user_id_code_hash_key UNIQUE (user_id, code_hash)
@@ -1704,6 +1733,8 @@ INDEX CREATE INDEX idx_notifications_user_created ON notifications USING btree (
 INDEX CREATE UNIQUE INDEX idx_notifications_user_idempotency ON notifications USING btree (user_id, idempotency_key)
 INDEX CREATE INDEX idx_notifications_user_read ON notifications USING btree (user_id, read_at)
 INDEX CREATE UNIQUE INDEX notifications_pkey ON notifications USING btree (id)
+INDEX CREATE INDEX idx_oauth_sign_in_states_expires ON oauth_sign_in_states USING btree (expires_at)
+INDEX CREATE UNIQUE INDEX oauth_sign_in_states_pkey ON oauth_sign_in_states USING btree (state_hash)
 INDEX CREATE UNIQUE INDEX organization_invitation_developer_grants_pkey ON organization_invitation_developer_grants USING btree (invitation_id)
 INDEX CREATE INDEX idx_organization_invitations_accepted_at ON organization_invitations USING btree (accepted_at)
 INDEX CREATE INDEX idx_organization_invitations_accepted_by ON organization_invitations USING btree (accepted_by)
@@ -1780,6 +1811,9 @@ INDEX CREATE UNIQUE INDEX idx_usage_quotas_identity ON usage_quotas USING btree 
 INDEX CREATE INDEX idx_usage_quotas_organization ON usage_quotas USING btree (organization_id)
 INDEX CREATE INDEX idx_usage_quotas_user ON usage_quotas USING btree (user_id)
 INDEX CREATE UNIQUE INDEX usage_quotas_pkey ON usage_quotas USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_user_identities_subject ON user_identities USING btree (provider, subject)
+INDEX CREATE INDEX idx_user_identities_user ON user_identities USING btree (user_id)
+INDEX CREATE UNIQUE INDEX user_identities_pkey ON user_identities USING btree (id)
 INDEX CREATE UNIQUE INDEX user_recovery_codes_pkey ON user_recovery_codes USING btree (id)
 INDEX CREATE UNIQUE INDEX user_recovery_codes_user_id_code_hash_key ON user_recovery_codes USING btree (user_id, code_hash)
 INDEX CREATE UNIQUE INDEX user_totp_factors_pkey ON user_totp_factors USING btree (user_id)

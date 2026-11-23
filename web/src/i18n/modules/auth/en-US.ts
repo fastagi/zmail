@@ -59,6 +59,20 @@ const messages = {
   demoCredentials: 'Demo credentials',
   demoCredentialsHint: 'Use the preset login',
 
+  // Sign in with Google
+  continueWithGoogle: 'Continue with Google',
+  orDivider: 'or',
+  googleCancelled: 'Google sign-in was cancelled.',
+  googleEmailUnverified: 'Google has not verified the email of this account. Verify it with Google, or use another account.',
+  googleRegistrationClosed:
+    'This Google account has no Zmail account, and sign-up is closed. Ask an organization admin to invite you.',
+  googleAccountUnavailable: 'This account cannot sign in. Contact your administrator.',
+  googleTotpRequired:
+    'This account uses an authenticator app. Sign in with your email, password, and authenticator code.',
+  googleStateInvalid: 'The Google sign-in expired or was started in another browser. Try again.',
+  googleNotConfigured: 'Google sign-in is not available on this site.',
+  googleFailed: 'Google sign-in failed. Try again in a moment.',
+
   // Links
   noAccount: "Don't have an account?",
   inviteOnly: 'No account yet? Ask an organization admin to invite you.',

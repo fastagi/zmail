@@ -156,6 +156,8 @@ func TestValidate_RejectsUnsafeAuthenticationSessionPolicy(t *testing.T) {
 		{name: "touch exceeds idle", mutate: func(cfg *AuthenticationConfig) { cfg.SessionTouchInterval = cfg.SessionIdleTimeout + time.Second }},
 		{name: "negative retention", mutate: func(cfg *AuthenticationConfig) { cfg.SessionRetention = -time.Second }},
 		{name: "short authenticator key", mutate: func(cfg *AuthenticationConfig) { cfg.TOTPEncryptionKey = "x" }},
+		{name: "google client id without secret", mutate: func(cfg *AuthenticationConfig) { cfg.GoogleClientID = "id.apps.googleusercontent.com" }},
+		{name: "google client secret without id", mutate: func(cfg *AuthenticationConfig) { cfg.GoogleClientSecret = "secret" }},
 	}
 
 	for _, test := range tests {
@@ -166,6 +168,18 @@ func TestValidate_RejectsUnsafeAuthenticationSessionPolicy(t *testing.T) {
 				t.Fatal("validate() error = nil, want unsafe session policy rejection")
 			}
 		})
+	}
+}
+
+func TestValidate_AcceptsGoogleSignInClient(t *testing.T) {
+	cfg := baseValidConfig("production")
+	cfg.Authentication.GoogleClientID = "id.apps.googleusercontent.com"
+	cfg.Authentication.GoogleClientSecret = "secret"
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate() error = %v", err)
+	}
+	if !cfg.Authentication.GoogleSignInConfigured() {
+		t.Fatal("GoogleSignInConfigured() = false with both halves set")
 	}
 }
 

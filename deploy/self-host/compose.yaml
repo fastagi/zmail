@@ -47,6 +47,9 @@ x-api-environment: &api-environment
   DB_MAX_OPEN_CONNS: "20"
   QUEUE_DRIVER: postgres
   AUTH_REGISTRATION_ENABLED: ${AUTH_REGISTRATION_ENABLED:-false}
+  # Sign in with Google; empty hides the button. Register <public origin>/api/auth/google/callback.
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
   MIDDLEWARE_RATE_LIMIT_MAX: ${ZMAIL_RATE_LIMIT_MAX:-600}
   # Mail: addresses on MAILBOX_DOMAIN, sent through Cloudflare Email Sending, received from the
   # Cloudflare Email Worker, which signs with MAILBOX_INBOUND_SECRET.
