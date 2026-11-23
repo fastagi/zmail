@@ -139,14 +139,19 @@ function isNotificationRoute(path: string): boolean {
     route.startsWith('notifications/') ||
     route === 'notification-status/route.ts' ||
     route === 'notification-read-state/route.ts' ||
-    route === 'notification-preferences/route.ts'
+    route === 'notification-preferences/route.ts' ||
+    route === 'web-push-config/route.ts' ||
+    route === 'web-push-subscriptions/route.ts' ||
+    route.startsWith('web-push-subscriptions/')
   );
 }
 
 function delegatesNotificationGuard(path: string, handler: RouteHandlerSource): boolean {
   return (
     isNotificationRoute(path) &&
-    /\b(?:get|list|mark|replace)Notification[A-Za-z]*Route\b/.test(handler.source)
+    /\b(?:get|list|mark|replace|register|remove)(?:Notification|WebPush)[A-Za-z]*Route\b/.test(
+      handler.source
+    )
   );
 }
 
@@ -673,6 +678,7 @@ describe('mock BFF route contract', () => {
       'replaceNotificationReadStateRoute',
       'markNotificationsReadRoute',
       'replaceNotificationPreferenceRoute',
+      'registerWebPushSubscriptionRoute',
     ]) {
       const handler = exportedFunction(source, name);
       const mutationGuard = handler.indexOf('resolveMutationRoute(');

@@ -15,7 +15,7 @@ selected; optional starters are enabled with `OPTIONAL_STARTERS`.
 | `user` | default | - | 8 | Registration with email codes, sign-in, revocable sessions, profile, and password reset. |
 | `organization` | optional | - | 6 | Organization ownership, membership, invitations, active context, and ownership transfer. |
 | `permission` | optional | `organization` | 1 | Organization-scoped access roles, exact permission keys, member assignments, and fail-closed checks. |
-| `notification` | optional | `user`, `audit` | 2 | User-scoped in-app notifications and durable email delivery with preferences and leases. |
+| `notification` | optional | `user`, `audit` | 3 | User-scoped in-app notifications and durable email delivery with preferences and leases. |
 | `asset` | optional | `user`, `audit` | 1 | User-owned private objects with bounded transfer grants and inspection. |
 | `setting` | optional | `user`, `audit`, `organization` | 1 | Finite typed app, organization, and user overrides with versioned replacement. |
 | `usage` | optional | `user`, `audit`, `organization` | 1 | Trusted idempotent metering, atomic quota decisions, and private summaries. |

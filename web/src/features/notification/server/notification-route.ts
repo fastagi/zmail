@@ -10,6 +10,7 @@ import {
 import { readJsonBody } from '@/app/api/_shared/json-body';
 import { guardSameOriginMutation } from '@/app/api/_shared/mock-bff';
 import {
+  apiNoContentResponse,
   apiPaginatedResponse,
   apiSuccessResponse,
 } from '@/app/api/_shared/success-response';
@@ -22,8 +23,9 @@ import { getSessionUser } from '@/features/auth/server/session';
 import type { AuthUser } from '@/features/auth/types';
 import {
   markNotificationsReadSchema,
-  notificationPreferenceSchema,
   notificationRouteIdSchema,
+  registerWebPushSubscriptionSchema,
+  replaceNotificationPreferenceSchema,
   replaceNotificationReadStateSchema,
 } from '@/features/notification/schemas';
 import { mockNotificationStore } from '@/features/notification/server/mock-notification-store';
@@ -189,7 +191,7 @@ export async function replaceNotificationPreferenceRoute(request: Request): Prom
   if (!route.available) return route.response;
   const payload = await readJsonBody(request, maxMutationBodyBytes);
   if (!payload.ok) return apiJsonBodyErrorResponse(payload.error);
-  const parsed = notificationPreferenceSchema.safeParse(payload.data);
+  const parsed = replaceNotificationPreferenceSchema.safeParse(payload.data);
   if (!parsed.success) {
     return apiValidationErrorResponse('Invalid notification preferences', parsed.error);
   }
@@ -202,12 +204,103 @@ export async function replaceNotificationPreferenceRoute(request: Request): Prom
       fieldMap: {
         in_app_enabled: 'in_app_enabled',
         email_enabled: 'email_enabled',
+        web_push_enabled: 'web_push_enabled',
       },
     });
   }
   return apiSuccessResponse(
     mockNotificationStore.replacePreference(route.authentication.user, parsed.data)
   );
+}
+
+export async function getWebPushConfigRoute(request: Request): Promise<NextResponse> {
+  const route = await resolveAuthenticatedRoute();
+  if (!route.available) return route.response;
+  if (route.authentication.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'web-push-config',
+      accessToken: route.authentication.accessToken,
+    });
+  }
+  return apiSuccessResponse(mockNotificationStore.webPushConfig());
+}
+
+export async function listWebPushSubscriptionsRoute(request: Request): Promise<NextResponse> {
+  const route = await resolveAuthenticatedRoute();
+  if (!route.available) return route.response;
+  if (route.authentication.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'web-push-subscriptions',
+      accessToken: route.authentication.accessToken,
+    });
+  }
+  return apiSuccessResponse(
+    mockNotificationStore.listWebPushSubscriptions(route.authentication.user)
+  );
+}
+
+export async function registerWebPushSubscriptionRoute(request: Request): Promise<NextResponse> {
+  const route = await resolveMutationRoute(request);
+  if (!route.available) return route.response;
+  const payload = await readJsonBody(request, maxMutationBodyBytes);
+  if (!payload.ok) return apiJsonBodyErrorResponse(payload.error);
+  const parsed = registerWebPushSubscriptionSchema.safeParse(payload.data);
+  if (!parsed.success) {
+    return apiValidationErrorResponse('Invalid web push subscription', parsed.error);
+  }
+  if (route.authentication.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: 'web-push-subscriptions',
+      accessToken: route.authentication.accessToken,
+      body: parsed.data,
+      fieldMap: {
+        endpoint: 'endpoint',
+        'keys.p256dh': 'keys.p256dh',
+        'keys.auth': 'keys.auth',
+        device_label: 'device_label',
+      },
+    });
+  }
+  const result = mockNotificationStore.registerWebPushSubscription(
+    route.authentication.user,
+    parsed.data
+  );
+  if (result.ok) return apiSuccessResponse(result.subscription);
+  if (result.error === 'disabled') return webPushDisabled();
+  return apiErrorResponse({
+    status: 422,
+    errorCode:
+      result.error === 'endpoint'
+        ? ApiErrorCode.NOTIFICATION_WEB_PUSH_ENDPOINT_INVALID
+        : ApiErrorCode.NOTIFICATION_WEB_PUSH_KEYS_INVALID,
+    message:
+      result.error === 'endpoint'
+        ? 'The push endpoint is not on a known browser push service'
+        : 'The push subscription keys are invalid',
+  });
+}
+
+export async function removeWebPushSubscriptionRoute(
+  request: Request,
+  rawSubscriptionId: string
+): Promise<NextResponse> {
+  const route = await resolveMutationRoute(request);
+  if (!route.available) return route.response;
+  const subscriptionId = parseRouteId(rawSubscriptionId);
+  if (!subscriptionId) return webPushSubscriptionNotFound();
+  if (route.authentication.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `web-push-subscriptions/${subscriptionId}`,
+      accessToken: route.authentication.accessToken,
+    });
+  }
+  return mockNotificationStore.removeWebPushSubscription(route.authentication.user, subscriptionId)
+    ? apiNoContentResponse()
+    : webPushSubscriptionNotFound();
 }
 
 async function resolveMutationRoute(request: Request) {
@@ -306,5 +399,21 @@ function notificationNotFound(): NextResponse {
     status: 404,
     errorCode: ApiErrorCode.NOTIFICATION_NOT_FOUND,
     message: 'Notification not found',
+  });
+}
+
+function webPushSubscriptionNotFound(): NextResponse {
+  return apiErrorResponse({
+    status: 404,
+    errorCode: ApiErrorCode.NOTIFICATION_WEB_PUSH_SUBSCRIPTION_NOT_FOUND,
+    message: 'Web push subscription not found',
+  });
+}
+
+function webPushDisabled(): NextResponse {
+  return apiErrorResponse({
+    status: 503,
+    errorCode: ApiErrorCode.NOTIFICATION_WEB_PUSH_DISABLED,
+    message: 'Web push is not configured on this instance',
   });
 }

@@ -306,6 +306,10 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 	if _, err := normalizeDisplayName(input.DisplayName); err != nil {
 		return nil, err
 	}
+	// A personal mailbox without an owner belongs to whoever creates it.
+	if input.Type == domain.MailboxTypePersonal && input.OwnerUserID == 0 && len(input.Members) == 0 {
+		input.OwnerUserID = viewer.UserID
+	}
 	if err := validateMailboxAccess(input); err != nil {
 		return nil, err
 	}

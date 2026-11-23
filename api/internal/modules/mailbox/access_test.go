@@ -590,7 +590,6 @@ func TestCreateValidation(t *testing.T) {
 	_, err := f.service.CreateMailbox(ctx, f.b, CreateMailboxInput{LocalPart: "mine", Type: domain.MailboxTypePersonal, OwnerUserID: accessB})
 	expectError(t, "member creates a mailbox", err, domain.ErrPermissionDenied)
 	for name, input := range map[string]CreateMailboxInput{
-		"personal without owner":     {LocalPart: "x", Type: domain.MailboxTypePersonal},
 		"personal with members":      {LocalPart: "x", Type: domain.MailboxTypePersonal, OwnerUserID: accessB, Members: []MailboxMemberInput{member(accessC, "view")}},
 		"shared without members":     {LocalPart: "x", Type: domain.MailboxTypeShared},
 		"shared with owner":          {LocalPart: "x", Type: domain.MailboxTypeShared, OwnerUserID: accessB, Members: []MailboxMemberInput{member(accessC, "view")}},
@@ -610,11 +609,7 @@ func TestCreateValidation(t *testing.T) {
 	}
 
 	router := accessRouter(f.service, f.admin)
-	recorder, body := serve(router, http.MethodPost, "/mailboxes", `{"local_part":"x","type":"personal"}`)
-	if recorder.Code != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeMailboxAccessInvalid {
-		t.Fatalf("POST personal without owner = %d %v; want 422", recorder.Code, body)
-	}
-	recorder, body = serve(router, http.MethodPost, "/mailboxes", `{"local_part":"x","type":"shared","members":[]}`)
+	recorder, body := serve(router, http.MethodPost, "/mailboxes", `{"local_part":"x","type":"shared","members":[]}`)
 	if recorder.Code != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeMailboxAccessInvalid {
 		t.Fatalf("POST shared without members = %d %v; want 422", recorder.Code, body)
 	}
@@ -914,5 +909,18 @@ func TestSettingTheSamePermissionRecordsNothing(t *testing.T) {
 	}
 	if after := len(accessEvents(t, f, f.admin, f.team.ID)); after != before {
 		t.Fatalf("access events went from %d to %d for an unchanged permission", before, after)
+	}
+}
+
+// A personal mailbox created without owner_user_id belongs to the person who creates it, so a
+// developer's first API call to give themselves an address works.
+func TestPersonalMailboxWithoutOwnerBelongsToTheCreator(t *testing.T) {
+	f := newAccessFixture(t)
+	created, err := f.service.CreateMailbox(context.Background(), f.admin, CreateMailboxInput{LocalPart: "me", Type: domain.MailboxTypePersonal})
+	if err != nil {
+		t.Fatalf("create personal without owner: %v", err)
+	}
+	if created.OwnerUserID == nil || *created.OwnerUserID != f.admin.UserID {
+		t.Fatalf("owner = %v; want the creator %d", created.OwnerUserID, f.admin.UserID)
 	}
 }

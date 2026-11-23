@@ -47,7 +47,8 @@ var ProviderSet = wire.NewSet(
 )
 
 // ProvideService builds the service with the organization starter's roster inviter, which sends
-// the invitations of a roster import.
+// the invitations of a roster import, and the notification starter's publisher, which receives the
+// mail.received notifications of new inbound mail.
 func ProvideService(
 	repo domain.MailboxRepository,
 	memberships membershipDirectory,
@@ -66,10 +67,12 @@ func ProvideService(
 	accounts accountDirectory,
 	notices broadcastNoticeSender,
 	inviter domain.OrganizationRosterInviter,
+	notifications domain.NotificationPublisher,
 ) *service {
 	svc := NewService(repo, memberships, templates, contacts, broadcasts, organize, domains, zones, domainProvider,
 		transport, notifier, settings, transactional, limits, accounts, notices)
 	svc.inviter = inviter
+	svc.notifications = notifications
 	return svc
 }
 

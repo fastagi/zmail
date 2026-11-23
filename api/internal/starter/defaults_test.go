@@ -111,7 +111,9 @@ func TestConfiguredManifestsEnableNotificationWithoutOrganization(t *testing.T) 
 
 	migrations, err := ConfiguredMigrations(cfg)
 	require.NoError(t, err)
-	assert.Len(t, migrations, 18)
+	assert.Len(t, migrations, 19)
+	_, hasWebPush := migrations["2026_12_23_090000_add_web_push"]
+	assert.True(t, hasWebPush, "web push belongs to the notification starter")
 	notificationMigration, exists := migrations["2026_07_15_020000_create_notification_tables"]
 	require.True(t, exists)
 	assert.True(t, notificationMigration.WithinTransaction())

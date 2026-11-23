@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { isWebFeatureEnabled } from '@/config/features';
 import {
   emptyDraft,
   forwardDraft,
@@ -152,6 +153,11 @@ const ConnectedMailboxesDialog = lazy(async () => ({
 const ExternalReconnectBanner = lazy(async () => ({
   default: (await import('@/features/mailbox/components/external-reconnect-banner'))
     .ExternalReconnectBanner,
+}));
+// The new-mail alerts offer exists only with the notification feature, which owns web push.
+const webPushOffered = isWebFeatureEnabled('notification');
+const WebPushBanner = lazy(async () => ({
+  default: (await import('@/features/notification/components/web-push-banner')).WebPushBanner,
 }));
 const MailboxAccessPanel = lazy(async () => {
   const feature = await import('@/features/mailbox/components/mailbox-access-panel');
@@ -1178,6 +1184,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
               connectors={connectors.data}
               onReconnectWithPassword={openConnect}
             />
+          </Suspense>
+        ) : null}
+        {webPushOffered ? (
+          <Suspense fallback={null}>
+            <WebPushBanner />
           </Suspense>
         ) : null}
         {triageCounts !== null &&

@@ -66,9 +66,13 @@ const (
 	CodeOrganizationFeatureNotGranted              = "ORGANIZATION.FEATURE_NOT_GRANTED"
 	CodeOrganizationMemberFeaturesFixed            = "ORGANIZATION.MEMBER_FEATURES_FIXED"
 
-	CodeNotificationNotFound            = "NOTIFICATION.NOT_FOUND"
-	CodeNotificationIdempotencyConflict = "NOTIFICATION.IDEMPOTENCY_CONFLICT"
-	CodeNotificationInvalidChannel      = "NOTIFICATION.INVALID_CHANNEL"
+	CodeNotificationNotFound                    = "NOTIFICATION.NOT_FOUND"
+	CodeNotificationIdempotencyConflict         = "NOTIFICATION.IDEMPOTENCY_CONFLICT"
+	CodeNotificationInvalidChannel              = "NOTIFICATION.INVALID_CHANNEL"
+	CodeNotificationWebPushDisabled             = "NOTIFICATION.WEB_PUSH_DISABLED"
+	CodeNotificationWebPushEndpointInvalid      = "NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID"
+	CodeNotificationWebPushKeysInvalid          = "NOTIFICATION.WEB_PUSH_KEYS_INVALID"
+	CodeNotificationWebPushSubscriptionNotFound = "NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND"
 
 	CodeAssetNotFound            = "ASSET.NOT_FOUND"
 	CodeAssetNotReady            = "ASSET.NOT_READY"

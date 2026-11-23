@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { authConfig } from '@/config/auth';
+import { isWebFeatureEnabled } from '@/config/features';
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { authService } from '@/features/auth/services/auth-service';
 import { useAuthStore } from '@/features/auth/store/auth-store';
@@ -68,7 +69,15 @@ export function useLogout() {
   };
 
   return useMutation({
-    mutationFn: () => authService.logout(),
+    // This device stops receiving the account's pushes first, while the session still works.
+    mutationFn: async () => {
+      if (isWebFeatureEnabled('notification')) {
+        await import('@/features/notification/web-push/sign-out')
+          .then(feature => feature.releaseWebPushOnSignOut())
+          .catch(() => undefined);
+      }
+      return authService.logout();
+    },
     meta: LOCAL_ERROR_HANDLING_META,
     retry: false,
     onSuccess: () => {

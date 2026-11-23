@@ -202,7 +202,7 @@ describe('organization browser workflow', () => {
     expect(screen.getByLabelText('Organization name')).toBeDisabled();
     expect(screen.getByLabelText('Organization slug')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
-    expect(screen.getByText('Context verified')).toBeInTheDocument();
+    expect(screen.queryByText('Context verified')).not.toBeInTheDocument();
   });
 
   it('isolates editable state when switching between cached organization contexts', () => {
@@ -291,6 +291,42 @@ describe('organization browser workflow', () => {
     expect(screen.queryByText('alex@example.com')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Change role: alex' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Actions: alex' })).toBeInTheDocument();
+  });
+
+  it('puts the role under the name on a phone and hides generated usernames', async () => {
+    const width = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
+    try {
+      state.context.data = organizationContext('owner');
+      state.members.data = {
+        items: [
+          memberView({
+            id: 91,
+            user_id: 17,
+            username: 'user_0b9cc186946e4bfbadb26e8677974d99',
+            nickname: 'Wang',
+            role: 'owner',
+          }),
+          memberView({ id: 92, user_id: 18, username: 'alex', role: 'member' }),
+        ],
+        meta: { total: 2 },
+      };
+
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Members');
+
+      const alexRow = screen.getByText('@alex').closest('tr') as HTMLElement;
+      const nameCell = alexRow.querySelector('td') as HTMLElement;
+      expect(
+        await within(nameCell).findByRole('combobox', { name: 'Change role: alex' })
+      ).toBeInTheDocument();
+      expect(screen.getAllByRole('combobox', { name: 'Change role: alex' })).toHaveLength(1);
+      expect(screen.queryByRole('columnheader', { name: 'Role' })).not.toBeInTheDocument();
+      expect(screen.getByText('Wang')).toBeInTheDocument();
+      expect(screen.queryByText(/@user_0b9cc186/u)).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    }
   });
 
   describe('member feature grants', () => {

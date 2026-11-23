@@ -522,8 +522,8 @@ mailbox (removed as a member, handed over as the former owner, or gone from the 
 their read records and stars for it, so access granted again starts with everything unread and
 nothing starred.
 
-Only owners and admins create mailboxes. At creation, a personal mailbox needs `owner_user_id` and
-no `members`; a shared one needs 1 to 100 `members`, each a different `user_id` with `view`,
+Only owners and admins create mailboxes. At creation, a personal mailbox takes an optional
+`owner_user_id` (without it the mailbox belongs to the caller) and no `members`; a shared one needs 1 to 100 `members`, each a different `user_id` with `view`,
 `send`, or `manage`, and no `owner_user_id`. Every owner and member must be a current member of the
 organization. Anything else, including a missing or unknown `type`, is
 `422 MAILBOX.ACCESS_INVALID`, and nothing is created. A member who tries is `403 PERMISSION.DENIED`.
@@ -3565,6 +3565,33 @@ The inbound route carries no organization header: the recipient address identifi
 and the mailbox its organization. A message is identified by its `Message-ID`, or by a hash of its
 content when it has none, once per mailbox. The API stores the first `text/plain` and first `text/html` part, converted to UTF-8 and
 truncated to 256 KiB each. Attachments are not stored.
+
+### New-Mail Notifications
+
+When the optional notification starter runs (see [`NOTIFICATIONS.md`](NOTIFICATIONS.md)), a newly
+stored inbound delivery (`201`, never a `200` duplicate) publishes one `mail.received` notification to
+every user who can read the mailbox at that moment, and to no one else:
+
+- a personal mailbox: its owner, while the owner is a member of the organization;
+- a shared mailbox: each member whose permission includes `view`, while still a member of the
+  organization.
+
+The audience is the same rule as reading the mail (`MailboxAccessFor` granting `View`): organization
+owners and admins who only administer the mailbox are not notified. Mail synced from a connected
+outside account does not publish.
+
+| Field | Value |
+|---|---|
+| `kind` | `mail.received` |
+| `idempotency_key` | `mail.received:<message_id>` |
+| `title` | The sender's display name, or address without one; control characters folded, at most 160 characters |
+| `body` | The subject with codes and sensitive links masked as in [Masked Secrets](#masked-secrets), at most 80 characters (cut with `…`), or `(no subject)` |
+| `action_url` | `/console/mailboxes?org=<organization_id>&mailbox=<mailbox_id>&open=<message_id>` |
+| `channels` | `web_push` only, not required; the inbox already lists new mail, so it never enters the notification center |
+
+No message body, recipient list, or attachment name is published. Publishing runs after the message
+is stored; a failure is logged at `warn` with mailbox, message, and user ids only and never changes the
+inbound response. Without the notification starter nothing is published.
 
 ## Errors
 

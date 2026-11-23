@@ -241,6 +241,9 @@ describe('mock BFF and browser service parity', () => {
     await notificationService.status();
     const preference = await notificationService.preference();
     await notificationService.replacePreference(preference);
+    const config = await notificationService.webPushConfig();
+    expect(config.enabled).toBe(false);
+    await notificationService.listWebPushSubscriptions();
   });
 
   it('assets', async () => {
