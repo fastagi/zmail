@@ -552,7 +552,9 @@ describe('mailbox workspace', () => {
         members: [{ user_id: 5, permission: 'send' }],
       })
     );
-    expect(toast.success).toHaveBeenCalledWith('Mailbox created');
+    expect(toast.success).toHaveBeenCalledWith('Mailbox created', {
+      description: 'It starts receiving mail in a minute or two.',
+    });
     expect(screen.getByLabelText('Address')).toHaveValue('');
     // The new mailbox becomes the open one.
     expect(new URLSearchParams(window.location.search).get('mailbox')).toBe('3');

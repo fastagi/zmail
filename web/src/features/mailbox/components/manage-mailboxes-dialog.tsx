@@ -20,7 +20,7 @@ import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useAssignMailboxRole, useMailRoles } from '@/features/mailbox/hooks/use-inbox';
 import { useDeleteMailbox } from '@/features/mailbox/hooks/use-mailbox';
-import type { MailRole, Mailbox, MailboxDomain } from '@/features/mailbox/types';
+import type { MailRole, Mailbox, MailboxDomain, MailboxType } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -39,6 +39,7 @@ export function ManageMailboxesDialog({
   onClose,
   onCreated,
   onOpenAccess,
+  initialType,
 }: {
   open: boolean;
   mailboxes: readonly Mailbox[];
@@ -47,11 +48,15 @@ export function ManageMailboxesDialog({
   onClose: () => void;
   onCreated: (mailbox: Mailbox) => void;
   onOpenAccess: (mailbox: Mailbox) => void;
+  /** The mailbox type the create form opens with. */
+  initialType?: MailboxType;
 }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const roles = useMailRoles(organizationId);
   const [deleteTarget, setDeleteTarget] = useState<Mailbox | null>(null);
+  // A company with a verified domain of its own wants its mailboxes there, not on the shared one.
+  const companyDomain = domains.find(item => item.kind === 'organization')?.domain;
 
   return (
     <Dialog open={open} onOpenChange={next => !next && onClose()}>
@@ -77,8 +82,8 @@ export function ManageMailboxesDialog({
           ) : (
             <ul className="divide-y rounded-md border" aria-labelledby="manage-mailboxes-list">
               {mailboxes.map(mailbox => (
-                <li key={mailbox.id} className="flex items-center gap-2 px-3 py-2">
-                  <span className="min-w-0 flex-1">
+                <li key={mailbox.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                  <span className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                     <span className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium">{mailbox.address}</span>
                       <MailboxMarks mailbox={mailbox} />
@@ -125,6 +130,8 @@ export function ManageMailboxesDialog({
           <CreateMailboxForm
             domain={domain}
             domains={domains}
+            initialDomain={companyDomain}
+            initialType={initialType}
             onCreated={onCreated}
           />
         ) : null}
