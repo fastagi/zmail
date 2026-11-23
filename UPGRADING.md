@@ -11,6 +11,34 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Web push and new-mail notifications
+
+### High — Deploy the Web before the API
+
+`GET/PUT /v1/notification-preferences` returns `web_push_enabled` beside `in_app_enabled` and
+`email_enabled`. A Web console from before this change validates preferences strictly and reports the
+preferences as failed against the new API, so roll the Web forward first. `PUT` keeps accepting the
+old two-field body; an omitted `web_push_enabled` keeps the stored value.
+
+### Medium — Migration `2026_12_23_090000_add_web_push` and new constructor arguments
+
+The migration (notification starter) replaces the `notification_deliveries_channel_check` constraint
+to allow `web_push`, adds `notification_preferences.web_push_enabled boolean NOT NULL DEFAULT true`,
+and creates `notification_web_push_subscriptions`. PostgreSQL validates the new check by scanning
+`notification_deliveries` and adds the column with a constant default without rewriting the table;
+both `ALTER TABLE` statements take brief `ACCESS EXCLUSIVE` locks, so run it outside peak
+notification traffic on large ledgers. Existing users read as push enabled, which sends nothing until
+they register a device.
+
+`notification.NewService` takes a last `webPushSender` argument (nil disables push), provided by
+`ProvideWebPushSender` from `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and
+`WEB_PUSH_SUBJECT`; `Service.ReplacePreference` takes a `*bool` for web push.
+`mailbox.ProvideService` takes a last `domain.NotificationPublisher`: a newly stored inbound message
+now publishes `mail.received` (`in_app`, `web_push`) to everyone who can read the mailbox (see
+`contracts/MAILBOXES.md`, "New-Mail Notifications"), so with the notification starter on, every new
+inbound message appears in the readers' notification centers. The `notification:work` worker now also
+sends pushes (see `contracts/NOTIFICATIONS.md`, "Web Push").
+
 ## Unreleased — Broadcast progress and notices
 
 ### High — Deploy the Web before the API

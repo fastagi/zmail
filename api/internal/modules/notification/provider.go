@@ -16,6 +16,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(notificationStore), new(*repository)),
 	ProvideEmailSender,
 	ProvideEventPublisher,
+	ProvideWebPushSender,
 	NewService,
 	wire.Bind(new(Service), new(*service)),
 	wire.Bind(new(domain.NotificationPublisher), new(*service)),
@@ -40,6 +41,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 		assembly.WithStarterMigrationNames(
 			"2026_07_15_020000_create_notification_tables",
 			"2026_10_02_000000_drop_notification_preferences_user_id_sequence",
+			"2026_12_23_090000_add_web_push",
 		),
 	)
 }

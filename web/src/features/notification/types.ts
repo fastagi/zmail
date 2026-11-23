@@ -41,6 +41,33 @@ export interface NotificationReadStateResult {
 export interface NotificationPreference {
   in_app_enabled: boolean;
   email_enabled: boolean;
+  web_push_enabled: boolean;
+}
+
+export interface ReplaceNotificationPreferenceInput {
+  in_app_enabled: boolean;
+  email_enabled: boolean;
+  /** Omitted keeps the stored value. */
+  web_push_enabled?: boolean;
+}
+
+export interface WebPushConfig {
+  enabled: boolean;
+  /** Base64url VAPID application server key; empty when push is not configured. */
+  public_key: string;
+}
+
+export interface WebPushSubscription {
+  id: number;
+  device_label: string;
+  created_at: string;
+  last_success_at: string | null;
+}
+
+export interface RegisterWebPushSubscriptionInput {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  device_label?: string;
 }
 
 export interface ReplaceNotificationReadStateInput {

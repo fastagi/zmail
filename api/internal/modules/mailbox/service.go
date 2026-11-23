@@ -392,9 +392,12 @@ type service struct {
 	notifier       mailNotifier
 	// notices tells the person who started a broadcast how it ended or why it stopped; nil sends
 	// no notices.
-	notices  broadcastNoticeSender
-	settings Settings
-	now      func() time.Time
+	notices broadcastNoticeSender
+	// notifications publishes mail.received to the notification starter; nil, or a starter that
+	// does not run, publishes nothing.
+	notifications domain.NotificationPublisher
+	settings      Settings
+	now           func() time.Time
 	// recordAudit enriches the request's audit entry; tests capture it.
 	recordAudit func(context.Context, auditstarter.Change)
 	// transactional stores transactional messages and suppressions; nil when a test does not
@@ -1483,6 +1486,9 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 	})
 	if err != nil {
 		return nil, false, err
+	}
+	if created {
+		s.publishMailReceived(ctx, mailbox, message)
 	}
 	return message, created, nil
 }

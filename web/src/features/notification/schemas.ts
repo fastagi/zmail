@@ -1,4 +1,5 @@
 import {
+  _default,
   array,
   boolean,
   int,
@@ -6,6 +7,7 @@ import {
   literal,
   maximum,
   maxLength,
+  minLength,
   nonnegative,
   nullable,
   number,
@@ -81,9 +83,42 @@ export const notificationReadStateResultSchema = strictObject({
   unread_count: nonnegativeIntegerSchema,
 });
 
+// `web_push_enabled` defaults to true so responses from an API that predates web push still parse.
 export const notificationPreferenceSchema = strictObject({
   in_app_enabled: boolean(),
   email_enabled: boolean(),
+  web_push_enabled: _default(boolean(), true),
+});
+
+// Omitting `web_push_enabled` keeps the stored value, so older clients cannot turn push back on.
+export const replaceNotificationPreferenceSchema = strictObject({
+  in_app_enabled: boolean(),
+  email_enabled: boolean(),
+  web_push_enabled: optional(boolean()),
+});
+
+export const webPushConfigSchema = strictObject({
+  enabled: boolean(),
+  public_key: string().check(maxLength(256), regex(/^[A-Za-z0-9_-]*$/)),
+});
+
+export const webPushSubscriptionSchema = strictObject({
+  id: safeIdSchema,
+  device_label: string().check(maxLength(480)),
+  created_at: timestampSchema,
+  last_success_at: nullable(timestampSchema),
+});
+
+export const webPushSubscriptionListSchema = array(webPushSubscriptionSchema);
+
+// The BFF checks only the shape; the API owns the push-service allowlist and key validation.
+export const registerWebPushSubscriptionSchema = strictObject({
+  endpoint: string().check(minLength(1), maxLength(2_048)),
+  keys: strictObject({
+    p256dh: string().check(minLength(1), maxLength(256)),
+    auth: string().check(minLength(1), maxLength(64)),
+  }),
+  device_label: optional(string().check(maxLength(480))),
 });
 
 export const replaceNotificationReadStateSchema = strictObject({

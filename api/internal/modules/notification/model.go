@@ -40,7 +40,7 @@ func (NotificationPO) TableName() string { return "notifications" }
 type NotificationDeliveryPO struct {
 	ID              uint       `gorm:"primaryKey"`
 	NotificationID  uint       `gorm:"not null;uniqueIndex:idx_notification_deliveries_notification_channel,priority:1;index"`
-	Channel         string     `gorm:"size:24;not null;uniqueIndex:idx_notification_deliveries_notification_channel,priority:2;index:idx_notification_deliveries_pending,priority:1;index:idx_notification_deliveries_leased,priority:1;check:notification_deliveries_channel_check,channel IN ('in_app','email')"`
+	Channel         string     `gorm:"size:24;not null;uniqueIndex:idx_notification_deliveries_notification_channel,priority:2;index:idx_notification_deliveries_pending,priority:1;index:idx_notification_deliveries_leased,priority:1;check:notification_deliveries_channel_check,channel IN ('in_app','email','web_push')"`
 	Status          string     `gorm:"size:24;not null;index:idx_notification_deliveries_pending,priority:2;index:idx_notification_deliveries_leased,priority:2;check:notification_deliveries_status_check,status IN ('pending','processing','delivered','failed')"`
 	Attempts        uint8      `gorm:"not null;default:0"`
 	AvailableAt     time.Time  `gorm:"not null;index:idx_notification_deliveries_pending,priority:3"`
@@ -59,16 +59,40 @@ func (NotificationDeliveryPO) TableName() string { return "notification_deliveri
 
 // NotificationPreferencePO stores explicit global channel choices for one user.
 type NotificationPreferencePO struct {
-	UserID       uint      `gorm:"primaryKey"`
-	InAppEnabled bool      `gorm:"not null"`
-	EmailEnabled bool      `gorm:"not null"`
-	CreatedAt    time.Time `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
+	UserID         uint      `gorm:"primaryKey"`
+	InAppEnabled   bool      `gorm:"not null"`
+	EmailEnabled   bool      `gorm:"not null"`
+	WebPushEnabled bool      `gorm:"not null"`
+	CreatedAt      time.Time `gorm:"not null"`
+	UpdatedAt      time.Time `gorm:"not null"`
 
 	User user.UserPO `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (NotificationPreferencePO) TableName() string { return "notification_preferences" }
+
+// NotificationWebPushSubscriptionPO is one browser push subscription. The endpoint is unique by its
+// SHA-256 digest, so a browser that subscribes again under another account moves to that account.
+// Endpoint and keys are secrets of the device: they never leave the API.
+type NotificationWebPushSubscriptionPO struct {
+	ID            uint   `gorm:"primaryKey"`
+	UserID        uint   `gorm:"not null;index:idx_web_push_subscriptions_user"`
+	Endpoint      string `gorm:"size:2048;not null"`
+	EndpointHash  string `gorm:"size:64;not null;uniqueIndex:idx_web_push_subscriptions_endpoint"`
+	P256dh        string `gorm:"column:p256dh;size:256;not null"`
+	Auth          string `gorm:"size:64;not null"`
+	DeviceLabel   string `gorm:"size:120;not null;default:''"`
+	LastSuccessAt *time.Time
+	FailureCount  int16     `gorm:"not null;default:0"`
+	CreatedAt     time.Time `gorm:"not null"`
+	UpdatedAt     time.Time `gorm:"not null"`
+
+	User user.UserPO `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (NotificationWebPushSubscriptionPO) TableName() string {
+	return "notification_web_push_subscriptions"
+}
 
 func notificationFromPO(po *NotificationPO) *domain.Notification {
 	if po == nil {
@@ -93,11 +117,12 @@ func preferenceFromPO(po *NotificationPreferencePO) *domain.NotificationPreferen
 		return nil
 	}
 	return &domain.NotificationPreference{
-		UserID:       po.UserID,
-		InAppEnabled: po.InAppEnabled,
-		EmailEnabled: po.EmailEnabled,
-		CreatedAt:    po.CreatedAt,
-		UpdatedAt:    po.UpdatedAt,
+		UserID:         po.UserID,
+		InAppEnabled:   po.InAppEnabled,
+		EmailEnabled:   po.EmailEnabled,
+		WebPushEnabled: po.WebPushEnabled,
+		CreatedAt:      po.CreatedAt,
+		UpdatedAt:      po.UpdatedAt,
 	}
 }
 

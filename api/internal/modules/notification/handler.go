@@ -146,10 +146,79 @@ func (h *Handler) ReplacePreference(c *gin.Context) {
 		userID,
 		*request.InAppEnabled,
 		*request.EmailEnabled,
+		request.WebPushEnabled,
 	)
 	if err != nil {
 		response.HandleError(c, "Failed to update notification preferences", err)
 		return
 	}
 	response.Success(c, toNotificationPreferenceResponse(preference))
+}
+
+// GetWebPushConfig tells the browser whether push is available and with which VAPID public key.
+func (h *Handler) GetWebPushConfig(c *gin.Context) {
+	if _, ok := httphandler.GetUserID(c); !ok {
+		return
+	}
+	cfg := h.service.WebPushConfig()
+	response.Success(c, &WebPushConfigResponse{Enabled: cfg.Enabled, PublicKey: cfg.PublicKey})
+}
+
+// PutWebPushSubscription registers the caller's browser subscription idempotently by endpoint.
+func (h *Handler) PutWebPushSubscription(c *gin.Context) {
+	userID, ok := httphandler.GetUserID(c)
+	if !ok {
+		return
+	}
+	var request putWebPushSubscriptionRequest
+	if !httphandler.BindJSON(c, &request) {
+		return
+	}
+	subscription, err := h.service.RegisterWebPushSubscription(c.Request.Context(), userID, WebPushSubscriptionInput{
+		Endpoint:    request.Endpoint,
+		P256dh:      request.Keys.P256dh,
+		Auth:        request.Keys.Auth,
+		DeviceLabel: request.DeviceLabel,
+	})
+	if err != nil {
+		response.HandleError(c, "Failed to register web push subscription", err)
+		return
+	}
+	response.Success(c, toWebPushSubscriptionResponse(subscription))
+}
+
+// ListWebPushSubscriptions lists the caller's registered devices without endpoints or keys.
+// fastbuild:bounded-list max=20 reason=a user keeps at most maxWebPushSubscriptionsPerUser subscriptions
+func (h *Handler) ListWebPushSubscriptions(c *gin.Context) {
+	userID, ok := httphandler.GetUserID(c)
+	if !ok {
+		return
+	}
+	subscriptions, err := h.service.ListWebPushSubscriptions(c.Request.Context(), userID)
+	if err != nil {
+		response.HandleError(c, "Failed to list web push subscriptions", err)
+		return
+	}
+	items := make([]*WebPushSubscriptionResponse, len(subscriptions))
+	for index := range subscriptions {
+		items[index] = toWebPushSubscriptionResponse(subscriptions[index])
+	}
+	response.Success(c, items)
+}
+
+// DeleteWebPushSubscription removes one of the caller's devices.
+func (h *Handler) DeleteWebPushSubscription(c *gin.Context) {
+	userID, ok := httphandler.GetUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := httphandler.ParseID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteWebPushSubscription(c.Request.Context(), userID, id); err != nil {
+		response.HandleError(c, "Failed to delete web push subscription", err)
+		return
+	}
+	response.NoContent(c)
 }

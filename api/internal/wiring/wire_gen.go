@@ -83,7 +83,8 @@ func InitApplication() (*app.Application, error) {
 	notificationRepository := notification.NewRepository(db)
 	emailSender := notification.ProvideEmailSender(service)
 	eventPublisher := notification.ProvideEventPublisher(eventBus)
-	notificationService := notification.NewService(configConfig, notificationRepository, emailSender, eventPublisher)
+	webPushSender := notification.ProvideWebPushSender(configConfig)
+	notificationService := notification.NewService(configConfig, notificationRepository, emailSender, eventPublisher, webPushSender)
 	notificationHandler := notification.NewHandler(notificationService)
 	assetRepository := asset.NewRepository(db)
 	objectStore, err := storage.NewObjectStore(configConfig)
@@ -146,7 +147,7 @@ func InitApplication() (*app.Application, error) {
 	settings := mailbox.SettingsFromConfig(configConfig)
 	accountDirectory := mailbox.NewAccountDirectory(userRepository)
 	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -253,7 +254,8 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	notificationRepository := notification.NewRepository(db)
 	emailSender := notification.ProvideEmailSender(service)
 	eventPublisher := notification.ProvideEventPublisher(eventBus)
-	notificationService := notification.NewService(cfg, notificationRepository, emailSender, eventPublisher)
+	webPushSender := notification.ProvideWebPushSender(cfg)
+	notificationService := notification.NewService(cfg, notificationRepository, emailSender, eventPublisher, webPushSender)
 	notificationHandler := notification.NewHandler(notificationService)
 	assetRepository := asset.NewRepository(db)
 	objectStore, err := storage.NewObjectStore(cfg)
@@ -316,7 +318,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	settings := mailbox.SettingsFromConfig(cfg)
 	accountDirectory := mailbox.NewAccountDirectory(userRepository)
 	broadcastNoticeSender := mailbox.NewBroadcastNoticeSender(notificationService, service)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,

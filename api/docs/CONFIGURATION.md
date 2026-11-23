@@ -253,6 +253,19 @@ The timeout is a duration value such as `3s` or `500ms`, not a bare millisecond 
 provider call independently and composes with caller cancellation. See [`EMAIL.md`](EMAIL.md) for the
 64 KiB response cap, privacy rules, best-effort semantics, and downstream adapter boundary.
 
+## Web Push Configuration
+
+The notification starter's `web_push` channel reads `WEB_PUSH_VAPID_PUBLIC_KEY`,
+`WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_SUBJECT`. The keys are a base64url P-256 VAPID pair (RFC
+8292): the public key is the 65-byte uncompressed point browsers subscribe with, the private key the
+32-byte scalar. `WEB_PUSH_SUBJECT` is a `mailto:` or `https:` contact for push services. Push is on
+only when all three are set and the pair is valid; otherwise it is off without failing startup,
+`GET /v1/web-push-config` answers `enabled: false`, subscription registration answers
+`503 NOTIFICATION.WEB_PUSH_DISABLED`, and pending push deliveries fail with
+`WEB_PUSH.NOT_CONFIGURED`. A partial or invalid setting logs one `notification.web_push_disabled`
+warning at boot that names the problem, never the values. See
+[`../../contracts/NOTIFICATIONS.md`](../../contracts/NOTIFICATIONS.md).
+
 ## Mailbox Starter Configuration
 
 The optional `mailbox` starter requires the `organization` starter and reads `MAILBOX_DOMAIN`, `MAILBOX_PROVIDER`,

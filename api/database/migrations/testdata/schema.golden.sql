@@ -624,6 +624,20 @@ TABLE notification_preferences
   COLUMN email_enabled boolean NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
+  COLUMN web_push_enabled boolean NOT NULL DEFAULT true
+
+TABLE notification_web_push_subscriptions
+  COLUMN id bigint NOT NULL DEFAULT nextval('notification_web_push_subscriptions_id_seq'::regclass)
+  COLUMN user_id bigint NOT NULL
+  COLUMN endpoint character varying(2048) NOT NULL
+  COLUMN endpoint_hash character varying(64) NOT NULL
+  COLUMN p256dh character varying(256) NOT NULL
+  COLUMN auth character varying(64) NOT NULL
+  COLUMN device_label character varying(120) NOT NULL DEFAULT ''::character varying
+  COLUMN last_success_at timestamp with time zone
+  COLUMN failure_count smallint NOT NULL DEFAULT 0
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
 
 TABLE notifications
   COLUMN id bigint NOT NULL DEFAULT nextval('notifications_id_seq'::regclass)
@@ -1194,11 +1208,16 @@ CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
 CONSTRAINT migrations.migrations_pkey PRIMARY KEY (id)
 CONSTRAINT notification_deliveries.fk_notifications_deliveries FOREIGN KEY (notification_id) REFERENCES notifications(id) ON UPDATE CASCADE ON DELETE CASCADE
-CONSTRAINT notification_deliveries.notification_deliveries_channel_check CHECK (((channel)::text = ANY ((ARRAY['in_app'::character varying, 'email'::character varying])::text[])))
+CONSTRAINT notification_deliveries.notification_deliveries_channel_check CHECK (((channel)::text = ANY ((ARRAY['in_app'::character varying, 'email'::character varying, 'web_push'::character varying])::text[])))
 CONSTRAINT notification_deliveries.notification_deliveries_pkey PRIMARY KEY (id)
 CONSTRAINT notification_deliveries.notification_deliveries_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'processing'::character varying, 'delivered'::character varying, 'failed'::character varying])::text[])))
 CONSTRAINT notification_preferences.fk_notification_preferences_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT notification_preferences.notification_preferences_pkey PRIMARY KEY (user_id)
+CONSTRAINT notification_web_push_subscriptions.chk_web_push_endpoint CHECK (((endpoint)::text <> ''::text))
+CONSTRAINT notification_web_push_subscriptions.chk_web_push_endpoint_hash CHECK (((endpoint_hash)::text ~ '^[0-9a-f]{64}$'::text))
+CONSTRAINT notification_web_push_subscriptions.chk_web_push_keys CHECK ((((p256dh)::text <> ''::text) AND ((auth)::text <> ''::text)))
+CONSTRAINT notification_web_push_subscriptions.fk_web_push_subscriptions_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT notification_web_push_subscriptions.notification_web_push_subscriptions_pkey PRIMARY KEY (id)
 CONSTRAINT notifications.fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT notifications.notifications_pkey PRIMARY KEY (id)
 CONSTRAINT organization_invitations.fk_organization_invitations_acceptor FOREIGN KEY (accepted_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
@@ -1518,6 +1537,9 @@ INDEX CREATE INDEX idx_notification_deliveries_notification_id ON notification_d
 INDEX CREATE INDEX idx_notification_deliveries_pending ON notification_deliveries USING btree (channel, status, available_at)
 INDEX CREATE UNIQUE INDEX notification_deliveries_pkey ON notification_deliveries USING btree (id)
 INDEX CREATE UNIQUE INDEX notification_preferences_pkey ON notification_preferences USING btree (user_id)
+INDEX CREATE UNIQUE INDEX idx_web_push_subscriptions_endpoint ON notification_web_push_subscriptions USING btree (endpoint_hash)
+INDEX CREATE INDEX idx_web_push_subscriptions_user ON notification_web_push_subscriptions USING btree (user_id)
+INDEX CREATE UNIQUE INDEX notification_web_push_subscriptions_pkey ON notification_web_push_subscriptions USING btree (id)
 INDEX CREATE INDEX idx_notifications_kind ON notifications USING btree (kind)
 INDEX CREATE INDEX idx_notifications_user_created ON notifications USING btree (user_id, created_at DESC)
 INDEX CREATE UNIQUE INDEX idx_notifications_user_idempotency ON notifications USING btree (user_id, idempotency_key)

@@ -55,6 +55,14 @@ const nextConfig: NextConfig = {
           production: process.env.NODE_ENV === 'production',
         }),
       },
+      {
+        // The push service worker must update promptly; it never caches anything itself.
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache, max-age=0' },
+          { key: 'Content-Type', value: 'application/javascript; charset=utf-8' },
+        ],
+      },
     ];
   },
 };

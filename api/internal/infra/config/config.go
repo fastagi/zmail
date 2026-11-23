@@ -97,6 +97,7 @@ type Config struct {
 	Sentry         SentryConfig
 	CORS           CORSConfig
 	Email          EmailConfig
+	WebPush        WebPushConfig
 	Organization   OrganizationConfig
 	AI             AIConfig
 	ObjectStorage  ObjectStorageConfig
@@ -405,6 +406,26 @@ type CORSConfig struct {
 	AllowHeaders     []string
 	ExposeHeaders    []string
 	AllowCredentials bool
+}
+
+// WebPushConfig holds the VAPID application server key pair and contact subject of browser push
+// notifications. Push is on only when all three are set and the key pair is valid; otherwise it
+// is off and the API boots without it.
+type WebPushConfig struct {
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	// Subject is the push services' contact for this server: a mailto: or https: URL.
+	Subject string
+}
+
+// Configured reports whether every web push value is set.
+func (c WebPushConfig) Configured() bool {
+	return c.VAPIDPublicKey != "" && c.VAPIDPrivateKey != "" && c.Subject != ""
+}
+
+// PartiallyConfigured reports whether some, but not all, web push values are set.
+func (c WebPushConfig) PartiallyConfigured() bool {
+	return !c.Configured() && (c.VAPIDPublicKey != "" || c.VAPIDPrivateKey != "" || c.Subject != "")
 }
 
 type EmailConfig struct {
@@ -732,6 +753,11 @@ func Load() (*Config, error) {
 			RequestTimeout:      env.GetDuration("MAIL_REQUEST_TIMEOUT", DefaultEmailRequestTimeout),
 			CloudflareAccountID: env.Get("MAIL_CLOUDFLARE_ACCOUNT_ID", env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", "")),
 			CloudflareAPIToken:  env.Get("MAIL_CLOUDFLARE_API_TOKEN", env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", "")),
+		},
+		WebPush: WebPushConfig{
+			VAPIDPublicKey:  strings.TrimSpace(env.Get("WEB_PUSH_VAPID_PUBLIC_KEY", "")),
+			VAPIDPrivateKey: strings.TrimSpace(env.Get("WEB_PUSH_VAPID_PRIVATE_KEY", "")),
+			Subject:         strings.TrimSpace(env.Get("WEB_PUSH_SUBJECT", "")),
 		},
 		Organization: OrganizationConfig{
 			InvitationTTL: env.GetDuration("ORGANIZATION_INVITATION_TTL", DefaultOrganizationInvitationTTL),

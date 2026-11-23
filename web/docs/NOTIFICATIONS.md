@@ -31,7 +31,10 @@ The feature owns explicit same-origin Route Handlers for:
 - `PATCH /api/notifications/:id`;
 - `GET /api/notification-status`;
 - `PUT /api/notification-read-state`;
-- `GET` and `PUT /api/notification-preferences`.
+- `GET` and `PUT /api/notification-preferences`;
+- `GET /api/web-push-config`;
+- `GET` and `PUT /api/web-push-subscriptions`;
+- `DELETE /api/web-push-subscriptions/:id`.
 
 Production handlers forward only their fixed `/v1` counterparts with the server-owned API session.
 Unsafe requests enforce same-origin checks before authentication or body parsing. Responses are
@@ -59,6 +62,25 @@ newest-first pagination, unread filtering, read high-water behavior, preferences
 stable errors. Its seed notifications are development scaffold examples, not API seed data or
 product content.
 
+## Web Push
+
+New-mail alerts use the browser Push API. `public/sw.js` shows each pushed `{title, body, url, tag}`
+and, on click, focuses an open Zmail window and navigates it to the same-origin path (anything else
+falls back to `/console/mailboxes`). It has no fetch handler and caches nothing. `src/app/manifest.ts`
+and the icons under `public/icons` make Zmail installable, which iPhone and iPad require for push.
+
+Settings → Notifications turns alerts on for this device: it asks for permission, registers the
+worker, subscribes with the VAPID key from `/api/web-push-config`, and stores the subscription with a
+device label such as `Chrome · macOS`. The server id of this browser's subscription is kept in
+`localStorage` (`zmail.webPush.device`) so the device list can mark "this device" and sign-out can
+delete it: `useLogout` deletes the row and unsubscribes before ending the session, bounded to three
+seconds and never blocking sign-out. The inbox shows a dismissible offer only where alerts can be
+turned on. Preference replacement omits `web_push_enabled` unless the user changes it, and responses
+without it parse as `true`.
+
+The mock BFF reports push as not configured (`enabled: false`), refuses registration with
+`503 NOTIFICATION.WEB_PUSH_DISABLED`, and never records a delivery.
+
 ## Downstream Replacement Or Removal
 
 To keep the feature with another backend, preserve the documented browser contract or replace the
@@ -68,7 +90,7 @@ catch-all proxy or expose a provider API directly to browser JavaScript.
 To remove it:
 
 1. Remove `notification` from `NEXT_PUBLIC_OPTIONAL_FEATURES` and rebuild Web.
-2. Delete `src/features/notification`, its five `/api` resource directories, notification i18n
+2. Delete `src/features/notification`, its eight `/api` resource directories, `public/sw.js`, `public/icons`, `src/app/manifest.ts`, notification i18n
    module/namespace, route tests, and console layout contribution.
 3. Remove the matching API starter and data only through the staged process in
    [`../../api/docs/NOTIFICATIONS.md`](../../api/docs/NOTIFICATIONS.md).
@@ -81,7 +103,8 @@ cd web
 pnpm vitest run \
   src/test/notification-contract.test.ts \
   src/test/notification-route.test.ts \
-  src/test/notification-ui.test.tsx
+  src/test/notification-ui.test.tsx \
+  src/test/web-push-*.test.ts*
 pnpm type-check
 pnpm lint
 NEXT_PUBLIC_OPTIONAL_FEATURES=notification pnpm build
