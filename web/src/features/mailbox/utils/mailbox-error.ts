@@ -44,6 +44,7 @@ export type MailboxErrorKey =
   | 'errors.messageInvalid'
   | 'errors.messageNotFound'
   | 'errors.organizationNotFound'
+  | 'errors.organizationSuspended'
   | 'errors.createDenied'
   | 'errors.permissionDenied'
   | 'errors.platformAccountNotFound'
@@ -75,6 +76,9 @@ export type MailboxErrorKey =
   | 'errors.labelLimitReached'
   | 'errors.searchTooBroad'
   | 'errors.sessionEnded'
+  | 'errors.welcomeNotEligible'
+  | 'errors.welcomeDisabled'
+  | 'errors.welcomeResendLimited'
   | 'errors.roleNotFound'
   | 'errors.roleNameTaken'
   | 'errors.roleLimitReached'
@@ -97,6 +101,7 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.COMMON_REQUEST_TOO_LARGE]: 'errors.tooLarge',
   [ApiErrorCode.PERMISSION_DENIED]: 'errors.permissionDenied',
   [ApiErrorCode.ORGANIZATION_NOT_FOUND]: 'errors.organizationNotFound',
+  [ApiErrorCode.ORGANIZATION_SUSPENDED]: 'errors.organizationSuspended',
   [ApiErrorCode.MAILBOX_NOT_FOUND]: 'errors.mailboxNotFound',
   [ApiErrorCode.MAILBOX_MESSAGE_NOT_FOUND]: 'errors.messageNotFound',
   [ApiErrorCode.MAILBOX_ADDRESS_TAKEN]: 'errors.addressTaken',
@@ -153,6 +158,9 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_FOLDER_LIMIT_REACHED]: 'errors.folderLimitReached',
   [ApiErrorCode.MAILBOX_LABEL_LIMIT_REACHED]: 'errors.labelLimitReached',
   [ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD]: 'errors.searchTooBroad',
+  [ApiErrorCode.MAILBOX_WELCOME_NOT_ELIGIBLE]: 'errors.welcomeNotEligible',
+  [ApiErrorCode.MAILBOX_WELCOME_DISABLED]: 'errors.welcomeDisabled',
+  [ApiErrorCode.MAILBOX_WELCOME_RESEND_LIMITED]: 'errors.welcomeResendLimited',
   [ApiErrorCode.MAILBOX_ROLE_NOT_FOUND]: 'errors.roleNotFound',
   [ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN]: 'errors.roleNameTaken',
   [ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED]: 'errors.roleLimitReached',

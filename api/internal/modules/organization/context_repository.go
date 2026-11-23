@@ -25,6 +25,7 @@ type organizationContextRow struct {
 	DeveloperGrantID      *uint   `gorm:"column:developer_grant_id"`
 	DeveloperAllDomains   *bool   `gorm:"column:developer_all_domains"`
 	DeveloperSendingNames *string `gorm:"column:developer_scope_domains"`
+	Suspended             bool    `gorm:"column:suspended"`
 }
 
 func (r *repository) ResolveContext(
@@ -56,7 +57,8 @@ func (r *repository) ResolveContext(
 			memberships.can_use_mail_clients,
 			grants.membership_id AS developer_grant_id,
 			grants.all_domains AS developer_all_domains,
-			grants.scope_domains AS developer_scope_domains
+			grants.scope_domains AS developer_scope_domains,
+			organizations.suspended_at IS NOT NULL AS suspended
 		`).
 		Joins("JOIN organizations ON organizations.id = memberships.organization_id").
 		Joins("LEFT JOIN member_developer_grants AS grants ON grants.membership_id = memberships.id").
@@ -67,6 +69,9 @@ func (r *repository) ResolveContext(
 	}
 	if err != nil {
 		return nil, err
+	}
+	if row.Suspended {
+		return nil, domain.ErrOrganizationSuspended
 	}
 
 	resolved := &domain.OrganizationContext{

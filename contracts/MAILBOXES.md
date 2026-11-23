@@ -29,7 +29,7 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 | Role | May |
 |---|---|
 | `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see; read the platform accounts registered with a mailbox they may read or that they own, with their history |
-| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create, rename, and delete mailboxes; list the mailbox directory, and import and export mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; list, create, change, and delete every platform account and hand over an owner's accounts; read the usage of each send lane; list the suppression list and remove addresses from it |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create, rename, and delete mailboxes; list the mailbox directory, and import and export mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, make the default, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; list, create, change, and delete every platform account and hand over an owner's accounts; read the usage of each send lane; list the suppression list and remove addresses from it |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
 mailbox only as a member of it, and the access history records how they became one. A member who
@@ -46,6 +46,7 @@ recorded but has no special rights to it. A removed member loses access on their
 | Check a domain | `POST /api/mail-domains/:id/checks` | `POST /v1/mail-domains/:domain_id/checks` | `200` envelope |
 | Remove a domain | `DELETE /api/mail-domains/:id` | `DELETE /v1/mail-domains/:domain_id` | `204` |
 | Enable receiving on a domain | none yet | `POST /v1/mail-domains/:domain_id/receiving` | `200` envelope |
+| Make a domain the default | `PUT /api/mail-domains/:id/default` | `PUT /v1/mail-domains/:domain_id/default` | `200` envelope |
 | Preview a domain | none yet | `POST /v1/mail-domain-previews` | `200` envelope |
 | List managed zones | none yet | `GET /v1/mail-zones` | `200` envelope, at most 20 items |
 | Get a managed zone | none yet | `GET /v1/mail-zones/:zone_id` | `200` envelope |
@@ -65,6 +66,8 @@ recorded but has no special rights to it. A removed member loses access on their
 | Read the welcome mail setting | `GET /api/member-welcome-mail-setting` | `GET /v1/member-welcome-mail-setting` | `200` envelope |
 | Replace the welcome mail setting | `PUT /api/member-welcome-mail-setting` | `PUT /v1/member-welcome-mail-setting` | `200` envelope |
 | Preview a welcome mail | `POST /api/member-welcome-mail-previews` | `POST /v1/member-welcome-mail-previews` | `200` envelope |
+| List welcome mail status | `GET /api/member-welcome-mails` | `GET /v1/member-welcome-mails` | `200` envelope, at most the mailbox ceiling |
+| Resend a welcome mail | `POST /api/member-welcome-mails` | `POST /v1/member-welcome-mails` | `201` envelope |
 | List members | `GET /api/mailboxes/:id/members` | `GET /v1/mailboxes/:mailbox_id/members` | `200` envelope, at most 100 items |
 | Set a member | `PUT /api/mailboxes/:id/members/:userId` | `PUT /v1/mailboxes/:mailbox_id/members/:user_id` | `200` envelope |
 | Remove a member | `DELETE /api/mailboxes/:id/members/:userId` | `DELETE /v1/mailboxes/:mailbox_id/members/:user_id` | `204` |
@@ -188,6 +191,9 @@ has no browser route: only the mail edge calls it.
   `transactional_recipient_limit_per_minute`, `transactional_key_limit_per_second`, and
   `simulator_domain` (see [Transactional Mail](#transactional-mail)), `broadcasts_enabled`, and
   `custom_domains_enabled`.
+- Exactly one item has `default: true`: the organization's default domain (see Domains), or the
+  shared domain while the organization has no verified domain. Forms that create mailboxes
+  preselect it; it never changes what an empty `domain` means.
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
@@ -469,9 +475,10 @@ The new mailbox itself is never the recipient: the person cannot read it before 
 manager creating a mailbox for themselves, a mailbox on the shared domain, and a connected mailbox
 send no welcome mail.
 
-Each mailbox is welcomed at most once, ever: the welcome is recorded with the mailbox in the same
-transaction that stores the message, so uploading a roster again or retrying a row answers
-`already_sent` and sends nothing. Welcome mails are [transactional messages](#transactional-mail)
+Each mailbox is welcomed automatically at most once, ever: the welcome is recorded with the mailbox
+in the same transaction that stores the message, so uploading a roster again or retrying a row
+answers `already_sent` and sends nothing. Only an owner or admin sends one again, explicitly (see
+[Resending A Welcome Mail](#resending-a-welcome-mail)). Welcome mails are [transactional messages](#transactional-mail)
 created by Zmail itself (no API key, `mode` `live`), sent from `no-reply@<mailbox domain>` under the
 organization's name: they are stored first and sent off the request path with the usual retries,
 count in the transactional lane, honor the suppression list and the simulator domain, and appear in
@@ -533,6 +540,77 @@ with `sign_in_url` and the settings link made clickable. Saving is audited as
 `POST /v1/member-welcome-mail-previews` takes `{ "language", "subject", "body" }` with the same rules
 and answers `{ "subject", "text", "html" }`: the whole mail, fixed section included, rendered with
 sample values and the organization's name. It stores and sends nothing.
+
+#### Welcome Mail Status
+
+`GET /v1/member-welcome-mails` lists, for owners and admins only (`403 PERMISSION.DENIED`
+otherwise), every mailbox that can be welcomed today, oldest first, with its latest welcome. A
+mailbox can be welcomed when it is a Zmail `personal` mailbox on an organization domain (not the
+shared domain) that is either reserved for an invitee or owned by a current member other than the
+caller; a mailbox awaiting handover, a connected mailbox, and the caller's own mailbox are absent.
+The list holds at most the organization's mailbox ceiling and is not paginated.
+
+```json
+[
+  {
+    "mailbox_id": 51,
+    "address": "alice@acme.example",
+    "display_name": "Alice",
+    "owner_user_id": 902,
+    "invitation_pending": false,
+    "status": "failed",
+    "failure_code": "transport.permanent_bounce",
+    "queued_at": "2026-11-23T08:00:00Z",
+    "sent_at": null,
+    "resend_count": 1
+  }
+]
+```
+
+| `status` | Meaning |
+|---|---|
+| `not_sent` | No welcome mail was ever stored for the mailbox: it predates welcome mails, they were off or not configured, or every try failed before storing |
+| `queued` | The latest welcome mail waits to be sent |
+| `sent` | The provider accepted the latest welcome mail at `sent_at` |
+| `failed` | Sending the latest welcome mail failed for good; `failure_code` is its send log failure code, such as `transport.permanent_bounce` or `send.sender_unverified` |
+| `suppressed` | The latest welcome mail was not sent: its recipient is on the suppression list |
+| `expired` | The latest welcome mail went out, but its send log entry is past retention |
+
+`invitation_pending` is true for a mailbox reserved for an invitee who has not joined yet
+(`owner_user_id` is then null). `queued_at` is when the latest welcome mail was stored, null for
+`not_sent`; `sent_at` is set only for `sent`; `failure_code` only for `failed`. `resend_count`
+counts the explicit resends. The list never carries a recipient address.
+
+#### Resending A Welcome Mail
+
+`POST /v1/member-welcome-mails` with `{ "mailbox_id": 51 }` sends that mailbox's welcome mail
+again, with the current setting's copy and language. It answers `201` with the mailbox's entry as
+in the list above, whose `status` is `queued` (or `suppressed` when the recipient is on the
+suppression list; nothing is then sent). The recipient follows the rule of the first welcome: the
+invitation address while the mailbox is reserved for an invitee, otherwise the owner's account
+email. A mailbox never welcomed before may be resent too: that is how an admin completes a welcome
+that failed.
+
+Each resend is a new [transactional message](#transactional-mail), like the first welcome, with
+`idempotency_key` `member-welcome:<mailbox id>:<n>`, where `n` is the new `resend_count`. The record
+of the mailbox stays one row and now points at the latest welcome, so a later roster upload still
+answers `already_sent`. Resending is audited as `member_welcome_mails.resend` with `mailbox_id`,
+`resend_count`, and `status`.
+
+| Error | When |
+|---|---|
+| `403 PERMISSION.DENIED` | The caller is not an owner or admin |
+| `404 MAILBOX.NOT_FOUND` | No mailbox with that id in the organization |
+| `409 MAILBOX.WELCOME_NOT_ELIGIBLE` | The mailbox cannot be welcomed (see the list above) |
+| `409 MAILBOX.WELCOME_DISABLED` | The organization turned welcome mails off |
+| `422 COMMON.VALIDATION_FAILED` | `mailbox_id` is missing or not a positive integer |
+| `422 MAILBOX.DOMAIN_NOT_VERIFIED` | The mailbox's domain is not verified, so `no-reply@` cannot send |
+| `429 MAILBOX.WELCOME_RESEND_LIMITED` | A welcome mail of this mailbox was stored less than a minute ago, or it was resent 5 times in the current 24-hour window; `Retry-After` gives the seconds to wait |
+| `429 MAILBOX.SEND_LIMIT_REACHED` | The transactional lane is full; nothing is stored |
+| `503 COMMON.SERVICE_UNAVAILABLE` | This instance cannot send welcome mails (`not_configured`) |
+
+The 24-hour window starts at the first resend after the previous window ended. A refused resend
+stores nothing and counts toward no limit.
 
 ## Access
 
@@ -1776,6 +1854,14 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
   not Cloudflare Email Routing's (`*.mx.cloudflare.net`), else `send_receive`. A failed lookup,
   including a name without MX records, answers `existing_mx: []` and `send_receive`. An unusable
   name is `422 MAILBOX.DOMAIN_INVALID`, and the shared domain `409 MAILBOX.DOMAIN_TAKEN`.
+- Every domain carries `mailbox_count`, the organization's live mailboxes with an address on it,
+  and `default`. The default domain is the one an owner or admin chose with
+  `PUT /v1/mail-domains/:domain_id/default` while it is `verified`; with none chosen, or while the
+  chosen one is `pending`, it is the verified domain connected first. At most one domain is the
+  default, and none while no domain is verified. Choosing a `pending` domain is
+  `422 MAILBOX.DOMAIN_NOT_VERIFIED`; choosing the default again changes nothing. The answer is the
+  domain with `default: true`. Removing the chosen domain makes the verified domain connected first
+  the default again.
 - Removing a domain that a mailbox still uses, or that a transactional template sends from, is
   `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
   domain and leaves its DNS and Cloudflare settings as they are, including a managed zone, which is
@@ -1801,6 +1887,8 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
     ],
     "setting_up": false,
     "zone_check_limited": false,
+    "default": true,
+    "mailbox_count": 4,
     "checked_at": "2026-11-17T10:00:00Z",
     "verified_at": "2026-11-17T10:00:00Z",
     "created_at": "2026-11-17T09:59:58Z"
@@ -4028,6 +4116,9 @@ inbound response. Without the notification starter nothing is published.
 | `MAILBOX.FOLDER_LIMIT_REACHED` | 422 |
 | `MAILBOX.LABEL_LIMIT_REACHED` | 422 |
 | `MAILBOX.SEARCH_TOO_BROAD` | 422 |
+| `MAILBOX.WELCOME_NOT_ELIGIBLE` | 409 |
+| `MAILBOX.WELCOME_DISABLED` | 409 |
+| `MAILBOX.WELCOME_RESEND_LIMITED` | 429 |
 | `MAILBOX.ROLE_NOT_FOUND` | 404 |
 | `MAILBOX.ROLE_NAME_TAKEN` | 409 |
 | `MAILBOX.ROLE_LIMIT_REACHED` | 422 |

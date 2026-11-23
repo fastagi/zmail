@@ -185,6 +185,20 @@ export function useEnableReceiving(organizationId: number) {
   });
 }
 
+/** Moves the default mark, which changes every listed domain, so both lists are read again. */
+export function useSetDefaultMailDomain(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (domainId: number) => mailboxService.setDefaultMailDomain(organizationId, domainId),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSuccess: domain =>
+      queryClient.setQueryData<MailDomain[]>(mailboxKeys.mailDomains(organizationId), current =>
+        current?.map(item => (item.id === domain.id ? domain : { ...item, default: false }))
+      ),
+    onSettled: () => refreshDomains(queryClient, organizationId),
+  });
+}
+
 /** Managed zones; only loaded when the instance allows custom domains. */
 export function useListMailZones(organizationId: number, enabled: boolean) {
   return useQuery({

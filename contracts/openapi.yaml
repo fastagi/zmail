@@ -3305,6 +3305,148 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/suspend:
+    post:
+      operationId: suspendOperatorOrganization
+      summary: Suspend an organization
+      description: Requires `operator:manage`. Members and API keys get `403 ORGANIZATION.SUSPENDED` for the organization and nothing more is sent for it. Suspending again replaces the reason and keeps the first `suspended_at`.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/restore:
+    post:
+      operationId: restoreOperatorOrganization
+      summary: Restore a suspended organization
+      description: Requires `operator:manage`. Restoring an active organization changes nothing.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/send-limit:
+    put:
+      operationId: setOperatorOrganizationSendLimit
+      summary: Set or clear an organization's daily send limit
+      description: Requires `operator:manage`. The limit replaces the instance limit of every send lane and the new-organization cap; `null` returns the organization to them.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - daily_send_limit
+              properties:
+                daily_send_limit:
+                  type:
+                    - integer
+                    - 'null'
+                  minimum: 1
+                  maximum: 1000000
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/operator/organizations/{organization_id}/webhook-deliveries:
     get:
       operationId: listOperatorWebhookDeliveries
@@ -4316,6 +4458,44 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The domain's managed zone is not active yet (`MAILBOX.ZONE_PENDING`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains/{domain_id}/default:
+    put:
+      operationId: setDefaultMailDomain
+      summary: Make a verified domain the organization's default
+      description: Marks the domain as the one forms preselect for new mailboxes and clears the mark on the
+        organization's other domains. Without a chosen domain, or while the chosen one is pending, the verified
+        domain connected first is the default. Choosing the default again changes nothing. Only owners and admins
+        may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '200':
+          description: The domain, now with `default` true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`).
           content:
             application/json:
               schema:
@@ -6248,6 +6428,86 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /v1/member-welcome-mails:
+    get:
+      operationId: listMemberWelcomeMails
+      summary: List the latest welcome mail of every mailbox that can be welcomed
+      description: Needs the `owner` or `admin` organization role. Lists Zmail personal mailboxes on an
+        organization domain that are reserved for an invitee or owned by a current member other than the
+        caller, oldest first, bounded by the organization's mailbox ceiling. No recipient address is listed.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The mailboxes with their latest welcome mail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberWelcomeMailListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: resendMemberWelcomeMail
+      summary: Send a mailbox's welcome mail again
+      description: Needs the `owner` or `admin` organization role. Stores a new transactional message with
+        the current welcome copy, to the invitation address while the mailbox is reserved for an invitee and
+        to the owner's account email otherwise, with the idempotency key `member-welcome:<mailbox id>:<n>`.
+        Audited as `member_welcome_mails.resend`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendMemberWelcomeMailRequest'
+      responses:
+        '201':
+          description: The mailbox with its new latest welcome mail, `queued` or `suppressed`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberWelcomeMailResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: '`MAILBOX.NOT_FOUND`: no mailbox with that id in the organization.'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: '`MAILBOX.WELCOME_NOT_ELIGIBLE` when the mailbox cannot be welcomed, or
+            `MAILBOX.WELCOME_DISABLED` when the organization turned welcome mails off.'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          description: '`COMMON.VALIDATION_FAILED` for a missing `mailbox_id`, or `MAILBOX.DOMAIN_NOT_VERIFIED`
+            when the mailbox domain cannot send.'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+          description: '`MAILBOX.WELCOME_RESEND_LIMITED`: a welcome mail of the mailbox was stored less than a
+            minute ago, or it was resent 5 times in the current 24-hour window; or `MAILBOX.SEND_LIMIT_REACHED`
+            when the transactional lane is full. `Retry-After` gives the seconds to wait.'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailbox-exports:
     get:
       operationId: exportMailboxes
@@ -12024,6 +12284,7 @@ components:
         - ORGANIZATION.NOT_FOUND
         - ORGANIZATION.CONTEXT_REQUIRED
         - ORGANIZATION.CONTEXT_INVALID
+        - ORGANIZATION.SUSPENDED
         - ORGANIZATION.SLUG_ALREADY_EXISTS
         - ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED
         - ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID
@@ -12155,6 +12416,9 @@ components:
         - MAILBOX.SEARCH_TOO_BROAD
         - MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND
         - MAILBOX.PLATFORM_ACCOUNT_TAKEN
+        - MAILBOX.WELCOME_NOT_ELIGIBLE
+        - MAILBOX.WELCOME_DISABLED
+        - MAILBOX.WELCOME_RESEND_LIMITED
         - MAILBOX.ROLE_NOT_FOUND
         - MAILBOX.ROLE_NAME_TAKEN
         - MAILBOX.ROLE_LIMIT_REACHED
@@ -14953,6 +15217,9 @@ components:
         - slug
         - created_by
         - member_count
+        - suspended_at
+        - suspension_reason
+        - daily_send_limit
         - created_at
         - updated_at
       properties:
@@ -14969,6 +15236,23 @@ components:
         member_count:
           type: integer
           minimum: 0
+        suspended_at:
+          description: Set while a platform operator has suspended the organization.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        suspension_reason:
+          description: Why the organization is suspended; empty when it is not.
+          type: string
+          maxLength: 500
+        daily_send_limit:
+          description: The operator's daily send limit for every lane; null takes the instance limits.
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 1000000
         created_at:
           type: string
           format: date-time
@@ -15621,11 +15905,16 @@ components:
         - simulator_domain
         - broadcasts_enabled
         - custom_domains_enabled
+        - default
       properties:
         domain:
           type: string
           minLength: 1
           maxLength: 253
+        default:
+          type: boolean
+          description: True on exactly one item, the domain forms preselect for new mailboxes; the organization's
+            default domain, or the shared domain while the organization has no verified domain.
         kind:
           type: string
           description: '`shared` is the instance domain every organization may use; `organization` is a verified
@@ -17011,6 +17300,112 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MemberWelcomeMailPreview'
+    MemberWelcomeMailDeliveryStatus:
+      type: string
+      description: '`not_sent` means no welcome mail was ever stored for the mailbox; `queued`, `sent`, `failed`,
+        and `suppressed` are the send log status of the latest one; `expired` means it went out but its send
+        log entry is past retention.'
+      enum:
+        - not_sent
+        - queued
+        - sent
+        - failed
+        - suppressed
+        - expired
+    MemberWelcomeMail:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+        - address
+        - display_name
+        - owner_user_id
+        - invitation_pending
+        - status
+        - failure_code
+        - queued_at
+        - sent_at
+        - resend_count
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
+        address:
+          type: string
+        display_name:
+          type: string
+        owner_user_id:
+          description: Null while the mailbox is reserved for an invitee.
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+        invitation_pending:
+          description: True while the mailbox is reserved for an invitee who has not joined.
+          type: boolean
+        status:
+          $ref: '#/components/schemas/MemberWelcomeMailDeliveryStatus'
+        failure_code:
+          description: The send log failure code; set only when `status` is `failed`.
+          type:
+            - string
+            - 'null'
+        queued_at:
+          description: When the latest welcome mail was stored; null for `not_sent`.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        sent_at:
+          description: When the provider accepted the latest welcome mail; set only when `status` is `sent`.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        resend_count:
+          description: How many times an owner or admin sent the welcome mail again.
+          type: integer
+          minimum: 0
+    MemberWelcomeMailListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/MemberWelcomeMail'
+    MemberWelcomeMailResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MemberWelcomeMail'
+    ResendMemberWelcomeMailRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
     MemberImportResultResponse:
       type: object
       additionalProperties: false
@@ -20654,6 +21049,8 @@ components:
         - records
         - setting_up
         - zone_check_limited
+        - default
+        - mailbox_count
         - checked_at
         - verified_at
         - created_at
@@ -20693,6 +21090,15 @@ components:
           type: boolean
           description: True on a check answer when Cloudflare refused to look for the pending zone's name servers
             now because it looked too recently; check again later.
+        default:
+          type: boolean
+          description: The organization's default domain, which forms preselect for new mailboxes. The verified
+            domain an owner or admin chose, else the verified domain connected first; at most one domain is the
+            default, and none while no domain is verified.
+        mailbox_count:
+          type: integer
+          description: The organization's live mailboxes with an address on the domain.
+          minimum: 0
         last_error:
           type: string
           description: The provider's explanation of the last failed setup step, while the domain is pending.

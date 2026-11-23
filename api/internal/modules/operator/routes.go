@@ -76,6 +76,14 @@ func (h *Handler) registerManageRoutes(operator *router.Router) {
 				Name("operator.webhook-deliveries.replay").WhereNumber("id").WhereNumber("delivery_id")
 		})
 	}
+	if h.organizations != nil {
+		operator.POST("/organizations/:id/suspend", h.organizations.Suspend).
+			Name("operator.organization-suspension.store").WhereNumber("id")
+		operator.POST("/organizations/:id/restore", h.organizations.Restore).
+			Name("operator.organization-suspension.destroy").WhereNumber("id")
+		operator.PUT("/organizations/:id/send-limit", h.organizations.SetSendLimit).
+			Name("operator.organization-send-limit.update").WhereNumber("id")
+	}
 	if h.notifications != nil {
 		operator.GET("/notification-deliveries", h.notifications.ListDeliveries).
 			Name("operator.notification-deliveries.index")

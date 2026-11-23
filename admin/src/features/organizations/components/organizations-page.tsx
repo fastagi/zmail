@@ -1,6 +1,7 @@
 import { Building2, Search } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { SectionCard } from '@/components/layout/section-card';
 import { Button } from '@/components/ui/button';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
@@ -33,7 +34,12 @@ export function OrganizationsPage({ search, onSearchChange, onOpen }: Organizati
       header: t('organizations.columns.organization'),
       cell: (organization) => (
         <>
-          <div className="font-medium">{organization.name}</div>
+          <div className="flex items-center gap-2 font-medium">
+            {organization.name}
+            {organization.suspended_at ? (
+              <StatusBadge tone="danger">{t('organizations.status.suspended')}</StatusBadge>
+            ) : null}
+          </div>
           <div className="text-xs text-muted-foreground">
             {organization.slug} · #{organization.id}
           </div>

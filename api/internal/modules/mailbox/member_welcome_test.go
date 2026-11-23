@@ -255,6 +255,22 @@ func (failingWelcomeStore) LinkMemberWelcomeMessage(context.Context, uint, uint)
 	return domain.ErrServiceUnavailable
 }
 
+func (failingWelcomeStore) LockMemberWelcome(context.Context, uint, uint, string, time.Time) (MemberWelcomeMailPO, bool, error) {
+	return MemberWelcomeMailPO{}, false, domain.ErrServiceUnavailable
+}
+
+func (failingWelcomeStore) SaveMemberWelcomeResend(context.Context, MemberWelcomeMailPO) error {
+	return domain.ErrServiceUnavailable
+}
+
+func (failingWelcomeStore) ListWelcomeCandidates(context.Context, uint, uint) ([]*domain.Mailbox, error) {
+	return nil, domain.ErrServiceUnavailable
+}
+
+func (failingWelcomeStore) ListMemberWelcomeDeliveries(context.Context, uint, uint) ([]memberWelcomeDelivery, error) {
+	return nil, domain.ErrServiceUnavailable
+}
+
 func TestRosterReportsWelcomeFailuresWithoutFailingTheImport(t *testing.T) {
 	f := newRosterFixture(t)
 	f.service.welcome = failingWelcomeStore{}

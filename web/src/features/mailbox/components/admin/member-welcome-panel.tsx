@@ -1,10 +1,12 @@
 'use client';
 
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { AlertCircle, Eye, RefreshCw, RotateCcw } from 'lucide-react';
+import { AlertCircle, Eye, RefreshCw, RotateCcw, Send } from 'lucide-react';
+import { useFormatter } from 'next-intl';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,15 +21,19 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  useMemberWelcomeMails,
   useMemberWelcomeSetting,
   usePreviewMemberWelcome,
+  useResendMemberWelcome,
   useUpdateMemberWelcomeSetting,
 } from '@/features/mailbox/hooks/use-member-welcome';
 import {
   MEMBER_WELCOME_BODY_MAX_LENGTH,
   MEMBER_WELCOME_SUBJECT_MAX_LENGTH,
   memberWelcomeLanguageSchema,
+  type MemberWelcomeDeliveryStatus,
   type MemberWelcomeLanguage,
+  type MemberWelcomeMail,
   type MemberWelcomeSetting,
   type MemberWelcomeVariable,
 } from '@/features/mailbox/member-welcome-schemas';
@@ -83,6 +89,7 @@ export function MemberWelcomePanel({ organizationId }: { organizationId: number 
           setting={query.data}
         />
       )}
+      <MemberWelcomeMails organizationId={organizationId} />
     </section>
   );
 }
@@ -290,6 +297,197 @@ function MemberWelcomeForm({
         </div>
       ) : null}
     </form>
+  );
+}
+
+/** Send log failure codes with a plain explanation; any other shows a generic one. */
+const KNOWN_FAILURES = {
+  'send.sender_unverified': 'senderUnverified',
+  'transport.permanent_bounce': 'permanentBounce',
+  'transport.not_configured': 'notConfigured',
+} as const satisfies Record<string, string>;
+
+function failureKey(
+  code: string | null
+): (typeof KNOWN_FAILURES)[keyof typeof KNOWN_FAILURES] | 'other' {
+  return code !== null && Object.hasOwn(KNOWN_FAILURES, code)
+    ? KNOWN_FAILURES[code as keyof typeof KNOWN_FAILURES]
+    : 'other';
+}
+
+const STATUS_VARIANT: Record<
+  MemberWelcomeDeliveryStatus,
+  'default' | 'secondary' | 'destructive' | 'outline'
+> = {
+  not_sent: 'outline',
+  queued: 'secondary',
+  sent: 'default',
+  expired: 'default',
+  failed: 'destructive',
+  suppressed: 'destructive',
+};
+
+/**
+ * Each member mailbox's latest welcome email, with a button to send it again. The list carries no
+ * recipient address; see `contracts/MAILBOXES.md`, Welcome Mail Status.
+ */
+function MemberWelcomeMails({ organizationId }: { organizationId: number }) {
+  const t = useT('mailbox');
+  const query = useMemberWelcomeMails(organizationId);
+  const resend = useResendMemberWelcome(organizationId);
+
+  const send = (mail: MemberWelcomeMail) => {
+    resend.mutate(mail.mailbox_id, {
+      onSuccess: next => {
+        if (next.status === 'suppressed') {
+          toast.warning(t('admin.memberWelcome.mails.suppressedToast', { address: next.address }));
+          return;
+        }
+        toast.success(
+          t(
+            mail.status === 'not_sent'
+              ? 'admin.memberWelcome.mails.sentFirst'
+              : 'admin.memberWelcome.mails.resent',
+            { address: next.address }
+          )
+        );
+      },
+      onError: error => toast.error(t(resolveMailboxErrorKey(error))),
+    });
+  };
+
+  return (
+    <div className="mt-8 max-w-2xl" aria-labelledby="member-welcome-mails-heading" role="region">
+      <h3 id="member-welcome-mails-heading" className="text-sm font-semibold">
+        {t('admin.memberWelcome.mails.title')}
+      </h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {t('admin.memberWelcome.mails.description')}
+      </p>
+      <div className="mt-4">
+        {query.isPending ? (
+          <div className="space-y-2" aria-hidden="true">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : query.error || !query.data ? (
+          <Alert variant="destructive">
+            <AlertCircle aria-hidden="true" className="size-4" />
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{t('admin.memberWelcome.mails.loadFailed')}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                icon={<RefreshCw className="size-3.5" />}
+                onClick={() => void query.refetch()}
+              >
+                {t('admin.memberWelcome.retry')}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : query.data.length === 0 ? (
+          <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+            {t('admin.memberWelcome.mails.empty')}
+          </p>
+        ) : (
+          <ul className="divide-y rounded-md border">
+            {query.data.map(mail => (
+              <MemberWelcomeMailRow
+                key={mail.mailbox_id}
+                mail={mail}
+                sending={resend.isPending && resend.variables === mail.mailbox_id}
+                disabled={resend.isPending}
+                onSend={() => send(mail)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MemberWelcomeMailRow({
+  mail,
+  sending,
+  disabled,
+  onSend,
+}: {
+  mail: MemberWelcomeMail;
+  sending: boolean;
+  disabled: boolean;
+  onSend: () => void;
+}) {
+  const t = useT('mailbox');
+  const format = useFormatter();
+  const time = (value: string | null) =>
+    value ? format.dateTime(new Date(value), { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  const detail = (() => {
+    switch (mail.status) {
+      case 'failed':
+        return t(`admin.memberWelcome.mails.failure.${failureKey(mail.failure_code)}`);
+      case 'sent':
+        return t('admin.memberWelcome.mails.detail.sent', {
+          time: time(mail.sent_at ?? mail.queued_at),
+        });
+      case 'queued':
+      case 'expired':
+        return t(`admin.memberWelcome.mails.detail.${mail.status}`, { time: time(mail.queued_at) });
+      default:
+        return t(`admin.memberWelcome.mails.detail.${mail.status}`);
+    }
+  })();
+
+  return (
+    <li className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+      <div className="min-w-0 space-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="min-w-0 break-all text-sm font-medium">{mail.address}</span>
+          <Badge variant={STATUS_VARIANT[mail.status]}>
+            {t(`admin.memberWelcome.mails.status.${mail.status}`)}
+          </Badge>
+        </div>
+        <p className="break-words text-xs text-muted-foreground">
+          {[
+            mail.display_name || null,
+            mail.invitation_pending ? t('admin.memberWelcome.mails.invitationPending') : null,
+            mail.resend_count > 0
+              ? t('admin.memberWelcome.mails.resendCount', { count: mail.resend_count })
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' \u00b7 ')}
+        </p>
+        <p
+          className={
+            mail.status === 'failed'
+              ? 'break-words text-xs text-error'
+              : 'break-words text-xs text-muted-foreground'
+          }
+        >
+          {detail}
+          {mail.status === 'failed' && mail.failure_code ? (
+            <span className="ml-1 font-mono">({mail.failure_code})</span>
+          ) : null}
+        </p>
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="w-full shrink-0 sm:w-auto"
+        icon={<Send className="size-3.5" />}
+        loading={sending}
+        disabled={disabled}
+        aria-label={t('admin.memberWelcome.mails.resendLabel', { address: mail.address })}
+        onClick={onSend}
+      >
+        {mail.status === 'not_sent'
+          ? t('admin.memberWelcome.mails.send')
+          : t('admin.memberWelcome.mails.resend')}
+      </Button>
+    </li>
   );
 }
 

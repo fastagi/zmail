@@ -301,7 +301,12 @@ export async function listMailboxDomainsRoute(request: Request): Promise<NextRes
       organizationId: String(target.organizationId),
     });
   }
-  return success(mockMailboxStore.domains(mockDomainStore.verifiedNames(target.organizationId)));
+  return success(
+    mockMailboxStore.domains(
+      mockDomainStore.verifiedNames(target.organizationId),
+      mockDomainStore.defaultName(target.organizationId)
+    )
+  );
 }
 
 export async function listMailDomainsRoute(request: Request): Promise<NextResponse> {
@@ -403,6 +408,27 @@ export async function enableMailDomainReceivingRoute(
   return mockDomainResponse(mockDomainStore.enableReceiving(target.organizationId, domainId.value));
 }
 
+/** Makes a verified domain the organization's default; reads no body. */
+export async function setDefaultMailDomainRoute(
+  request: Request,
+  rawDomainId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const domainId = parseRouteId(rawDomainId);
+  if (!domainId.ok) return domainId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mail-domains/${domainId.value}/default`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return mockDomainResponse(mockDomainStore.setDefault(target.organizationId, domainId.value));
+}
+
 /** Changes nothing, so members may preview too. */
 export async function previewMailDomainRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
@@ -473,6 +499,8 @@ function mockDomainResponse(result: MockDomainResult, status: 200 | 201 = 200): 
       return failure(409, ApiErrorCode.MAILBOX_ZONE_PENDING, 'Managed zone is not active yet');
     case 'zone_limit':
       return failure(422, ApiErrorCode.MAILBOX_ZONE_LIMIT_REACHED, 'Managed zone limit reached');
+    case 'not_verified':
+      return failure(422, ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED, 'Mail domain is not verified');
     default:
       return failure(422, ApiErrorCode.MAILBOX_DOMAIN_INVALID, 'Mail domain name is invalid');
   }
@@ -6020,6 +6048,68 @@ export async function previewMemberWelcomeRoute(request: Request): Promise<NextR
   }
   const result = mockMemberWelcomeStore.preview(target.context.organization_name, input.value);
   return result.ok ? success(result.value) : validationFailed(result.fields);
+}
+
+/** Every mailbox that can be welcomed, with its latest welcome mail. */
+export async function listMemberWelcomeMailsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'member-welcome-mails',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const candidates = mockMailboxStore.welcomeCandidates(
+    target.organizationId,
+    target.context.user_id
+  );
+  return success(mockMemberWelcomeStore.list(target.organizationId, candidates));
+}
+
+/** Sends a mailbox's welcome mail again. */
+export async function resendMemberWelcomeMailRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const raw = await jsonObject(request, maxMemberWelcomeBodyBytes);
+  if (!raw.ok) return raw.response;
+  const mailboxId = raw.value.mailbox_id;
+  if (typeof mailboxId !== 'number' || !Number.isSafeInteger(mailboxId) || mailboxId < 1) {
+    return validationFailed({ mailbox_id: ['The mailbox_id field must be a positive integer'] });
+  }
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'member-welcome-mails',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { mailbox_id: mailboxId },
+      fieldMap: { mailbox_id: 'mailbox_id' },
+    });
+  }
+  if (!mockMailboxStore.hasMailbox(target.organizationId, mailboxId)) return mailboxNotFound();
+  const candidate = mockMailboxStore
+    .welcomeCandidates(target.organizationId, target.context.user_id)
+    .find(item => item.mailbox_id === mailboxId);
+  if (!candidate) {
+    return failure(409, ApiErrorCode.MAILBOX_WELCOME_NOT_ELIGIBLE, 'Mailbox cannot be welcomed');
+  }
+  const result = mockMemberWelcomeStore.resend(target.organizationId, candidate);
+  if (result.ok) return success(result.value, 201);
+  if (result.error === 'disabled') {
+    return failure(409, ApiErrorCode.MAILBOX_WELCOME_DISABLED, 'Member welcome mails are off');
+  }
+  const limited = failure(
+    429,
+    ApiErrorCode.MAILBOX_WELCOME_RESEND_LIMITED,
+    'Member welcome mail resent too often'
+  );
+  limited.headers.set('Retry-After', String(result.retryAfterSeconds));
+  return limited;
 }
 
 /* Thread assignment (`contracts/MAILBOXES.md`, Assignment): shared Zmail mailboxes only. */

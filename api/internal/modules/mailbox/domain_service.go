@@ -34,6 +34,9 @@ type MailboxDomain struct {
 	Name string
 	// Shared is true for the instance's MAILBOX_DOMAIN, false for a domain the organization connected.
 	Shared bool
+	// Default is true on the one domain new mailboxes use unless another is picked: the
+	// organization's default domain, or the shared domain while it has no verified domain.
+	Default bool
 }
 
 func (s *service) CustomDomainsEnabled() bool {
@@ -50,12 +53,76 @@ func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]Ma
 	if err != nil {
 		return nil, err
 	}
+	defaultID := s.defaultDomainID(connected)
 	for _, mailDomain := range connected {
 		if mailDomain.Status == domain.MailDomainStatusVerified && mailDomain.Name != s.settings.Domain {
-			domains = append(domains, MailboxDomain{Name: mailDomain.Name})
+			domains = append(domains, MailboxDomain{Name: mailDomain.Name, Default: mailDomain.ID == defaultID})
 		}
 	}
+	domains[0].Default = defaultID == 0
 	return domains, nil
+}
+
+// defaultDomainID picks the organization's default among its domains: the one an owner or admin
+// chose while it is verified, else the oldest verified domain. Zero means none is verified. The
+// shared domain is never an organization's own, even when the operator promoted one of them to it.
+func (s *service) defaultDomainID(domains []*domain.MailDomain) uint {
+	var oldest *domain.MailDomain
+	for _, mailDomain := range domains {
+		if mailDomain.Status != domain.MailDomainStatusVerified || mailDomain.Name == s.settings.Domain {
+			continue
+		}
+		if mailDomain.MarkedDefault {
+			return mailDomain.ID
+		}
+		if oldest == nil || mailDomain.CreatedAt.Before(oldest.CreatedAt) ||
+			(mailDomain.CreatedAt.Equal(oldest.CreatedAt) && mailDomain.ID < oldest.ID) {
+			oldest = mailDomain
+		}
+	}
+	if oldest == nil {
+		return 0
+	}
+	return oldest.ID
+}
+
+// annotate fills Default and MailboxCount on targets, which are some or all of the organization's
+// domains.
+func (s *service) annotate(ctx context.Context, organizationID uint, targets []*domain.MailDomain) error {
+	all := targets
+	if len(targets) == 1 {
+		listed, err := s.domains.ListDomains(ctx, organizationID)
+		if err != nil {
+			return err
+		}
+		all = listed
+	}
+	counts, err := s.domains.CountMailboxesByDomain(ctx, organizationID)
+	if err != nil {
+		return err
+	}
+	defaultID := s.defaultDomainID(all)
+	for _, mailDomain := range targets {
+		mailDomain.Default = defaultID != 0 && mailDomain.ID == defaultID
+		mailDomain.MailboxCount = counts[strings.ToLower(mailDomain.Name)]
+	}
+	return nil
+}
+
+// SetDefaultMailDomain marks a verified domain as the organization's default. A pending one is
+// refused, since no mailbox may be created on it.
+func (s *service) SetDefaultMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error) {
+	if err := s.requireDomains(); err != nil {
+		return nil, err
+	}
+	if err := s.domains.SetDefaultDomain(ctx, organizationID, id); err != nil {
+		return nil, err
+	}
+	mailDomain, err := s.domains.FindDomain(ctx, organizationID, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.present(ctx, mailDomain)
 }
 
 func (s *service) domainsEnabled() bool {
@@ -80,6 +147,9 @@ func (s *service) ListMailDomains(ctx context.Context, organizationID uint) ([]*
 	if err := s.attachZones(ctx, organizationID, domains); err != nil {
 		return nil, err
 	}
+	if err := s.annotate(ctx, organizationID, domains); err != nil {
+		return nil, err
+	}
 	for _, mailDomain := range domains {
 		s.markSettingUp(mailDomain)
 	}
@@ -100,6 +170,9 @@ func (s *service) GetMailDomain(ctx context.Context, organizationID, id uint) (*
 // present fills what a domain returned to a caller carries besides its stored fields.
 func (s *service) present(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
 	if err := s.attachZones(ctx, mailDomain.OrganizationID, []*domain.MailDomain{mailDomain}); err != nil {
+		return nil, err
+	}
+	if err := s.annotate(ctx, mailDomain.OrganizationID, []*domain.MailDomain{mailDomain}); err != nil {
 		return nil, err
 	}
 	return s.markSettingUp(mailDomain), nil

@@ -11,7 +11,9 @@ import {
   useOrganization,
   useOrganizationMembers,
 } from '@/features/organizations/hooks/use-organizations';
+import { OrganizationControls } from '@/features/organizations/components/organization-controls';
 import type { OperatorMember } from '@/features/organizations/types';
+import { useOperatorCapability } from '@/features/operator-session/hooks/use-operator-session';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/client';
 
@@ -29,6 +31,7 @@ export function OrganizationDetailPage({
 }: OrganizationDetailPageProps) {
   const { t, i18n } = useTranslation();
   const organization = useOrganization(organizationId);
+  const canManage = useOperatorCapability('operator:manage');
   const notFound =
     organization.error instanceof ApiError &&
     organization.error.errorCode === ApiErrorCode.ORGANIZATION_NOT_FOUND;
@@ -70,6 +73,38 @@ export function OrganizationDetailPage({
               <dd>{organization.data.id}</dd>
             </div>
             <div className="definition-row">
+              <dt>{t('organizations.fields.status')}</dt>
+              <dd>
+                {organization.data.suspended_at ? (
+                  <span className="grid gap-1">
+                    <span>
+                      <StatusBadge tone="danger">{t('organizations.status.suspended')}</StatusBadge>{' '}
+                      <span className="text-xs text-muted-foreground">
+                        {t('organizations.status.suspendedSince', {
+                          date: dateFormat.format(new Date(organization.data.suspended_at)),
+                        })}
+                      </span>
+                    </span>
+                    <span className="break-words text-muted-foreground">
+                      {organization.data.suspension_reason}
+                    </span>
+                  </span>
+                ) : (
+                  <StatusBadge tone="success">{t('organizations.status.active')}</StatusBadge>
+                )}
+              </dd>
+            </div>
+            <div className="definition-row">
+              <dt>{t('organizations.fields.sendLimit')}</dt>
+              <dd>
+                {organization.data.daily_send_limit === null
+                  ? t('organizations.sendLimit.instance')
+                  : t('organizations.sendLimit.value', {
+                      count: organization.data.daily_send_limit,
+                    })}
+              </dd>
+            </div>
+            <div className="definition-row">
               <dt>{t('organizations.fields.slug')}</dt>
               <dd>{organization.data.slug}</dd>
             </div>
@@ -91,6 +126,7 @@ export function OrganizationDetailPage({
 
       {organization.isSuccess ? (
         <>
+          {canManage ? <OrganizationControls organization={organization.data} /> : null}
           <OrganizationMembers organizationId={organizationId} />
           {children}
         </>

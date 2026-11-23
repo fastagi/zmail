@@ -398,6 +398,7 @@ TABLE mail_domains
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
   COLUMN cloudflare_connection_id uuid
   COLUMN last_error_code character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN is_default boolean NOT NULL DEFAULT false
 
 TABLE mail_drafts
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_drafts_id_seq'::regclass)
@@ -667,6 +668,10 @@ TABLE member_welcome_mails
   COLUMN recipient character varying(320) NOT NULL
   COLUMN transactional_message_id bigint
   COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN last_sent_at timestamp with time zone
+  COLUMN resend_count integer NOT NULL DEFAULT 0
+  COLUMN resend_window_started_at timestamp with time zone
+  COLUMN resend_window_count integer NOT NULL DEFAULT 0
 
 TABLE member_welcome_settings
   COLUMN organization_id bigint NOT NULL
@@ -775,6 +780,9 @@ TABLE organizations
   COLUMN created_by bigint NOT NULL
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN suspended_at timestamp with time zone
+  COLUMN suspension_reason character varying(500) NOT NULL DEFAULT ''::character varying
+  COLUMN daily_send_limit integer
 
 TABLE password_reset_tokens
   COLUMN id bigint NOT NULL DEFAULT nextval('password_reset_tokens_id_seq'::regclass)
@@ -1322,6 +1330,7 @@ CONSTRAINT member_developer_grants.fk_member_developer_grants_granted_by FOREIGN
 CONSTRAINT member_developer_grants.fk_member_developer_grants_membership FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
 CONSTRAINT member_developer_grants.fk_member_developer_grants_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT member_developer_grants.member_developer_grants_pkey PRIMARY KEY (membership_id)
+CONSTRAINT member_welcome_mails.chk_member_welcome_mails_resends CHECK (((resend_count >= 0) AND (resend_window_count >= 0)))
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_message FOREIGN KEY (transactional_message_id) REFERENCES transactional_messages(id) ON DELETE SET NULL
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -1356,6 +1365,7 @@ CONSTRAINT organization_memberships.fk_organization_memberships_organization FOR
 CONSTRAINT organization_memberships.fk_organization_memberships_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_memberships.organization_memberships_pkey PRIMARY KEY (id)
 CONSTRAINT organization_memberships.organization_memberships_role_check CHECK (((role)::text = ANY ((ARRAY['owner'::character varying, 'admin'::character varying, 'member'::character varying])::text[])))
+CONSTRAINT organizations.chk_organizations_daily_send_limit CHECK (((daily_send_limit IS NULL) OR ((daily_send_limit >= 1) AND (daily_send_limit <= 1000000))))
 CONSTRAINT organizations.fk_organizations_creator FOREIGN KEY (created_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organizations.organizations_pkey PRIMARY KEY (id)
 CONSTRAINT password_reset_tokens.password_reset_tokens_pkey PRIMARY KEY (id)
@@ -1582,6 +1592,7 @@ INDEX CREATE INDEX idx_mail_deleted_sends_lane ON mail_deleted_sends USING btree
 INDEX CREATE INDEX idx_mail_deleted_sends_mailbox ON mail_deleted_sends USING btree (mailbox_id, send_attempted_at)
 INDEX CREATE INDEX idx_mail_deleted_sends_message_id ON mail_deleted_sends USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_deleted_sends_pkey ON mail_deleted_sends USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_domains_default ON mail_domains USING btree (organization_id) WHERE is_default
 INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)

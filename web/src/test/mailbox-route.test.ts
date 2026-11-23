@@ -1865,6 +1865,53 @@ describe('mailbox browser route boundary', () => {
     await expectError(await receiving(route, sendOnly.id), 403, 'PERMISSION.DENIED');
   });
 
+  it('marks one default domain and falls back to the oldest verified one in the mock', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const setDefault = (domainId: number) =>
+      route.setDefaultMailDomainRoute(
+        request(`/api/mail-domains/${domainId}/default`, { method: 'PUT' }),
+        String(domainId)
+      );
+    const defaults = async () => ({
+      connected: (
+        await (await route.listMailDomainsRoute(request('/api/mail-domains'))).json()
+      ).data
+        .filter((item: { default?: boolean }) => item.default)
+        .map((item: { name: string }) => item.name),
+      offered: (
+        await (await route.listMailboxDomainsRoute(request('/api/mailbox-domains'))).json()
+      ).data
+        .filter((item: { default?: boolean }) => item.default)
+        .map((item: { domain: string }) => item.domain),
+    });
+
+    // Without a verified domain of its own the organization defaults to the shared domain.
+    expect(await defaults()).toEqual({ connected: [], offered: ['mail.example.com'] });
+    const first = (await (await connectDomain(route, { name: 'a.example.com' })).json()).data;
+    const second = (await (await connectDomain(route, { name: 'b.example.com' })).json()).data;
+    await expectError(await setDefault(second.id), 422, 'MAILBOX.DOMAIN_NOT_VERIFIED');
+    await checkDomain(route, first.id);
+    await checkDomain(route, second.id);
+    expect(await defaults()).toEqual({ connected: ['a.example.com'], offered: ['a.example.com'] });
+
+    const chosen = await setDefault(second.id);
+    expect(chosen.status).toBe(200);
+    expect((await chosen.json()).data).toMatchObject({ name: 'b.example.com', default: true });
+    expect(await defaults()).toEqual({ connected: ['b.example.com'], offered: ['b.example.com'] });
+    await expectError(await setDefault(999), 404, 'MAILBOX.DOMAIN_NOT_FOUND');
+
+    await route.deleteMailDomainRoute(
+      request(`/api/mail-domains/${second.id}`, { method: 'DELETE' }),
+      String(second.id)
+    );
+    expect(await defaults()).toEqual({ connected: ['a.example.com'], offered: ['a.example.com'] });
+
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    await expectError(await setDefault(first.id), 403, 'PERMISSION.DENIED');
+  });
+
   it('forwards managed zone, preview, and receiving routes to the fixed API paths', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';

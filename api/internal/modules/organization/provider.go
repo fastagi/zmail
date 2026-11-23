@@ -40,6 +40,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_18_090000_add_member_feature_grants",
 			"2026_12_21_090000_add_invitation_feature_grants",
 			"2026_12_24_110000_add_mail_client_feature_grants",
+			"2026_12_27_090000_add_organization_controls",
 			"2026_12_28_090000_add_member_developer_grants",
 		),
 	)

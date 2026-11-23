@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { preselectedDomain } from '@/features/mailbox/components/create-mailbox-form';
 import { MailDnsRecordsPage } from '@/features/mailbox/components/mail-dns-records';
 import { MailDomainStatus } from '@/features/mailbox/components/mail-domain-status';
 import { ApiErrorCode } from '@/http/codes';
@@ -41,6 +42,7 @@ const state = vi.hoisted(() => {
     updateRecord: mutation(),
     deleteRecord: mutation(),
     createMailbox: mutation(),
+    setDefault: mutation(),
   };
 });
 
@@ -70,6 +72,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useRemoveMailDomain: () => state.remove,
   usePreviewMailDomain: () => state.preview,
   useEnableReceiving: () => state.receiving,
+  useSetDefaultMailDomain: () => state.setDefault,
   useListMailZones: () => state.zones,
   useMailZone: () => state.zone,
   useDeleteMailZone: () => state.deleteZone,
@@ -102,6 +105,7 @@ describe('organization mail domains', () => {
       state.createRecord,
       state.updateRecord,
       state.deleteRecord,
+      state.setDefault,
     ]) {
       mutation.mutateAsync.mockReset();
       mutation.isPending = false;
@@ -223,6 +227,7 @@ describe('organization mail domains', () => {
   });
 
   it('puts the token-free way first and folds the own-Cloudflare-account way (#130)', async () => {
+    state.mailDomains.data = [];
     renderPage();
 
     const connect = await screen.findByRole('heading', { name: 'Connect your domain' });
@@ -633,6 +638,7 @@ describe('organization mail domains', () => {
       { ...sharedDomain(true), domain: 'example.org', kind: 'organization' },
     ];
     renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Show DNS records' }));
     const steps = screen.getByRole('list', { name: 'Setup progress' });
     expect(within(steps).getByText('Create a mailbox').closest('li')).toHaveAttribute(
       'aria-current',
@@ -669,6 +675,7 @@ describe('organization mail domains', () => {
     });
     renderPage();
     const card = screen.getByRole('article', { name: 'example.org' });
+    fireEvent.click(within(card).getByRole('button', { name: 'Show DNS records' }));
     expect(within(card).getByRole('list', { name: 'Test your domain' })).toBeInTheDocument();
 
     fireEvent.click(within(card).getByRole('button', { name: 'Start receiving in Zmail' }));
@@ -863,6 +870,112 @@ describe('organization mail domains', () => {
     );
   });
 
+  it('folds a verified domain into one row and shows its DNS records on request', () => {
+    state.mailDomains.data = [
+      verifiedDomain(11, 'fast-ui.com', { mailbox_count: 3, default: true }),
+      verifiedDomain(12, 'shu.ie', { capability: 'send_only', mailbox_count: 1 }),
+    ];
+    renderPage();
+
+    const card = screen.getByRole('article', { name: 'fast-ui.com' });
+    expect(within(card).getByTestId('mail-domain-status')).toHaveTextContent('Verified');
+    expect(within(card).getByText('Send and receive')).toBeInTheDocument();
+    expect(within(card).getByText('3 mailboxes')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Check DNS' })).toBeInTheDocument();
+    expect(
+      within(card).getByRole('button', { name: 'Create a mailbox @fast-ui.com' })
+    ).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
+    // The record table and the test checklist stay folded away.
+    expect(within(card).queryByRole('table')).not.toBeInTheDocument();
+    expect(within(card).queryByText('Test your domain')).not.toBeInTheDocument();
+    const other = screen.getByRole('article', { name: 'shu.ie' });
+    expect(within(other).getByText('Send only')).toBeInTheDocument();
+    expect(within(other).getByText('1 mailbox')).toBeInTheDocument();
+
+    const toggle = within(card).getByRole('button', { name: 'Show DNS records' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(within(card).getByRole('button', { name: 'Hide DNS records' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(within(card).getAllByRole('row').length).toBeGreaterThan(1);
+    expect(within(card).getByText('Test your domain')).toBeInTheDocument();
+    // Each domain remembers its own state.
+    expect(within(other).queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('counts the connected domains and leads to the form for another one', () => {
+    state.mailDomains.data = [
+      verifiedDomain(11, 'fast-ui.com', { default: true }),
+      verifiedDomain(12, 'shu.ie'),
+    ];
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    renderPage();
+
+    expect(screen.getByText('2 of 10 domains connected')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Connect another domain' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add domain' }));
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Domain' })).toHaveFocus();
+  });
+
+  it('names the first domain plainly when none is connected yet', () => {
+    state.mailDomains.data = [];
+    renderPage();
+
+    expect(screen.getByText('0 of 10 domains connected')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Connect your domain' })).toBeInTheDocument();
+  });
+
+  it('stops adding domains at the limit and says why', () => {
+    state.mailDomains.data = Array.from({ length: 10 }, (_, index) =>
+      verifiedDomain(20 + index, `d${index}.example.org`)
+    );
+    renderPage();
+
+    expect(screen.getByText('10 of 10 domains connected')).toBeInTheDocument();
+    const add = screen.getByRole('button', { name: 'Add domain' });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription(
+      'An organization can connect up to 10 domains. Remove one to add another.'
+    );
+  });
+
+  it('marks the default domain and lets an owner choose another', async () => {
+    state.mailDomains.data = [
+      verifiedDomain(11, 'fast-ui.com', { default: true }),
+      verifiedDomain(12, 'shu.ie'),
+    ];
+    state.setDefault.mutateAsync.mockResolvedValue(verifiedDomain(12, 'shu.ie', { default: true }));
+    renderPage();
+
+    const current = screen.getByRole('article', { name: 'fast-ui.com' });
+    expect(within(current).getByText('Default')).toBeInTheDocument();
+    expect(within(current).queryByRole('button', { name: 'Make default' })).not.toBeInTheDocument();
+    const other = screen.getByRole('article', { name: 'shu.ie' });
+    fireEvent.click(within(other).getByRole('button', { name: 'Make default' }));
+
+    await waitFor(() => expect(state.setDefault.mutateAsync).toHaveBeenCalledWith(12));
+    expect(toast.success).toHaveBeenCalledWith('New mailboxes now use @shu.ie by default');
+  });
+
+  it('offers no default choice to members or for a pending domain', () => {
+    state.mailDomains.data = [verifiedDomain(12, 'shu.ie'), pendingDomain()];
+    const owner = renderPage();
+    const pending = screen.getByRole('article', { name: 'news.example.org' });
+    expect(within(pending).queryByRole('button', { name: 'Make default' })).not.toBeInTheDocument();
+    // A pending domain stays open with its records.
+    expect(within(pending).getAllByRole('row').length).toBeGreaterThan(1);
+    owner.unmount();
+
+    state.organizations.data = page([organization('member')]);
+    renderPage();
+    expect(screen.queryByRole('button', { name: 'Make default' })).not.toBeInTheDocument();
+  });
+
   it('explains how to turn the feature on and loads nothing while it is off', () => {
     state.domains.data = [sharedDomain(false)];
     renderPage();
@@ -872,6 +985,23 @@ describe('organization mail domains', () => {
     expect(screen.queryByText(/MAILBOX_/u)).toBeNull();
     expect(screen.queryByRole('article')).toBeNull();
     expect(state.mailDomainsEnabled.every(enabled => !enabled)).toBe(true);
+  });
+});
+
+describe('new mailbox domain', () => {
+  const shared = { ...sharedDomain(true), default: false };
+  const own = (domain: string, isDefault: boolean) =>
+    ({ ...shared, domain, kind: 'organization', default: isDefault }) as const;
+
+  it('preselects the default domain the API marks', () => {
+    const domains = [shared, own('fast-ui.com', false), own('shu.ie', true)] as never[];
+    expect(preselectedDomain(shared as never, domains)).toBe('shu.ie');
+  });
+
+  it('keeps a domain the caller names and falls back to the shared one', () => {
+    const domains = [shared, own('fast-ui.com', false), own('shu.ie', true)] as never[];
+    expect(preselectedDomain(shared as never, domains, 'fast-ui.com')).toBe('fast-ui.com');
+    expect(preselectedDomain(shared as never, [shared] as never[])).toBe('mail.example.com');
   });
 });
 
@@ -996,6 +1126,27 @@ function verifiedSendOnlyDomain() {
     records: [],
     last_error: undefined,
     verified_at: '2026-11-18T10:05:00Z',
+  };
+}
+
+function verifiedDomain(id: number, name: string, extra: Record<string, unknown> = {}) {
+  return {
+    ...pendingDomain(),
+    id,
+    name,
+    zone_name: name,
+    status: 'verified',
+    last_error: undefined,
+    verified_at: '2026-11-18T10:05:00Z',
+    records: pendingDomain().records.map(record => ({
+      ...record,
+      name: record.name.replace('news.example.org', name),
+      status: 'ok',
+      found: undefined,
+    })),
+    default: false,
+    mailbox_count: 0,
+    ...extra,
   };
 }
 

@@ -617,6 +617,20 @@ const messages = {
       "Own domains are not available on this service yet. Your team's addresses use the shared domain below.",
     connectedEmpty: 'No domains connected yet.',
     connectTitle: 'Connect your domain',
+    connectAnotherTitle: 'Connect another domain',
+    connectAnotherHint:
+      'An organization can connect up to {max} domains and create mailboxes on each of them.',
+    domainCount: '{count} of {max} domains connected',
+    addDomainAction: 'Add domain',
+    domainLimitReached:
+      'An organization can connect up to {max} domains. Remove one to add another.',
+    mailboxCount: '{count, plural, =0 {No mailboxes} one {# mailbox} other {# mailboxes}}',
+    showRecords: 'Show DNS records',
+    hideRecords: 'Hide DNS records',
+    defaultBadge: 'Default',
+    defaultHint: 'New mailboxes use this domain unless you pick another one.',
+    makeDefaultAction: 'Make default',
+    defaultSet: 'New mailboxes now use @{domain} by default',
     connectWhen:
       "Works for most domains and needs no token. If the domain's DNS is not on Cloudflare yet, Zmail gives you two name servers to set once at your registrar.",
     connectProviderFailed:
@@ -1770,6 +1784,10 @@ const messages = {
         unreadable: 'The file could not be read.',
       },
     },
+    memberMailboxes: {
+      label: 'Personal mailbox',
+      more: '+{count} more',
+    },
     memberWelcome: {
       title: 'Welcome email',
       description:
@@ -1799,6 +1817,43 @@ const messages = {
       retry: 'Retry',
       invalid: 'Fix the highlighted text. Only the details offered above can be inserted.',
       fieldInvalid: 'Use only the details offered above, and keep it within the length limit.',
+      mails: {
+        title: 'Who got a welcome email',
+        description:
+          'The latest welcome email of each member mailbox on your domain. Send one again if it failed, after you changed the text, or when someone lost it.',
+        empty: 'No member mailboxes on your domain yet.',
+        loadFailed: 'Could not load the welcome emails.',
+        invitationPending: 'Invited, not joined yet',
+        resend: 'Resend welcome email',
+        send: 'Send welcome email',
+        resendLabel: 'Resend the welcome email for {address}',
+        resent: 'Welcome email for {address} sent again.',
+        sentFirst: 'Welcome email for {address} sent.',
+        suppressedToast:
+          'Not sent: the address for {address} bounced or reported spam before. Remove it from the suppression list first.',
+        resendCount: 'Resent {count, plural, one {once} other {# times}}',
+        status: {
+          not_sent: 'Not sent',
+          queued: 'Sending',
+          sent: 'Sent',
+          failed: 'Failed',
+          suppressed: 'Not sent (blocked)',
+          expired: 'Sent',
+        },
+        detail: {
+          not_sent: 'No welcome email yet.',
+          queued: 'Queued {time}.',
+          sent: 'Sent {time}.',
+          expired: 'Sent {time}. The delivery details are no longer kept.',
+          suppressed: 'This address bounced or reported spam before, so nothing was sent.',
+        },
+        failure: {
+          senderUnverified: 'Your domain is not verified, so the no-reply sender cannot send.',
+          permanentBounce: 'The receiving server rejected it.',
+          notConfigured: 'Sending is not set up on this Zmail instance.',
+          other: 'It could not be delivered.',
+        },
+      },
     },
     rosterImport: {
       open: 'Import roster',
@@ -1825,10 +1880,6 @@ const messages = {
         '{total} rows: {ready} ready, {noop} need no change, {attention} need attention',
       doneSummary:
         '{total} rows: {invited} invited with {reserved, plural, one {# mailbox} other {# mailboxes}} reserved, {created} mailboxes created for existing members, {noop} need no change, {attention} need attention',
-      doneToast:
-        'Invited {invited, plural, one {# person} other {# people}} and reserved {reserved, plural, one {# mailbox} other {# mailboxes}} for them. {created} existing members got a mailbox; {attention, plural, one {# row needs} other {# rows need}} attention.',
-      retryToast:
-        'Retried: {invited} invited, {reserved, plural, one {# mailbox} other {# mailboxes}} reserved, {created} created, {attention} still need attention.',
       retryFailed:
         'Retry {count, plural, one {# row that needs} other {# rows that need}} attention',
       downloadFailed: 'Download rows that need attention',
@@ -1873,6 +1924,20 @@ const messages = {
         invitedNoEmail:
           'Invitation created, but no email went out. Resend it from the Invitations tab.',
         created: 'Existing member; their personal mailbox is ready.',
+      },
+      welcomePreview:
+        'After import, each of the {count, plural, one {# new member} other {# new members}} gets a welcome email on how to sign in and set up a mail app.',
+      welcomePreviewOff: 'Welcome emails are turned off, so importing sends none.',
+      welcomeSettingsLink: 'Edit or turn off in Invitations',
+      welcomeSettingsLinkOff: 'Turn on in Invitations',
+      toast: {
+        invited: 'Invited {count, plural, one {# person} other {# people}}.',
+        reserved: 'Reserved {count, plural, one {# mailbox} other {# mailboxes}} for them.',
+        created: '{count, plural, one {# existing member} other {# existing members}} got a mailbox.',
+        attention: '{count, plural, one {# row needs} other {# rows need}} attention.',
+        nothing: 'Nothing new to import.',
+        retried: 'Retried.',
+        separator: ' ',
       },
       welcomeSummary: 'Welcome emails: {queued} sent to new members, {failed} could not be sent.',
       welcomeNotes: {
@@ -1953,6 +2018,8 @@ const messages = {
     messageNotFound: 'This message does not exist or was deleted.',
     organizationNotFound:
       'This organization does not exist or you are no longer a member of it. Choose another organization.',
+    organizationSuspended:
+      'This organization is suspended and cannot send or receive here. Contact Zmail support to restore it, or choose another organization.',
     permissionDenied:
       "You don't have permission for this mailbox. Refresh to see your current access.",
     createDenied: 'Only owners and admins of the organization can create mailboxes.',
@@ -1972,6 +2039,11 @@ const messages = {
     folderLimitReached: 'This mailbox has 100 folders. Delete one to create another.',
     labelLimitReached: 'This mailbox has 100 labels. Delete one to create another.',
     searchTooBroad: 'This search is too broad. Enter a longer keyword.',
+    welcomeNotEligible:
+      'This mailbox does not get a welcome email: only members\u2019 and invitees\u2019 personal mailboxes on your domain do.',
+    welcomeDisabled: 'Welcome emails are turned off. Turn them on above to send one.',
+    welcomeResendLimited:
+      'This welcome email was sent moments ago or already 5 times today. Wait a little and try again.',
     roleNotFound: 'This role no longer exists. The list is refreshed.',
     roleNameTaken: 'Another role already has this name.',
     roleLimitReached: 'This organization has 50 roles. Delete one to create another.',

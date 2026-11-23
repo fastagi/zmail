@@ -79,7 +79,10 @@ import type {
   SendMailMessageInput,
 } from '@/features/mailbox/types';
 import { mockTransactionalStore } from '@/features/developer/server/mock-transactional-store';
-import { mockMemberWelcomeStore } from '@/features/mailbox/server/mock-member-welcome-store';
+import {
+  mockMemberWelcomeStore,
+  type MockWelcomeCandidate,
+} from '@/features/mailbox/server/mock-member-welcome-store';
 import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import {
@@ -409,7 +412,11 @@ export class MockMailboxStore {
   }
 
   /** The shared domain first, then the organization's verified domains. */
-  domains(verifiedDomains: readonly string[] = []): MailboxDomain[] {
+  /** `defaultDomain` is the organization's default; without one the shared domain is the default. */
+  domains(
+    verifiedDomains: readonly string[] = [],
+    defaultDomain: string | null = null
+  ): MailboxDomain[] {
     const settings = {
       max_mailboxes: MAILBOX_MAX_PER_ORGANIZATION,
       provider: 'log' as const,
@@ -426,9 +433,23 @@ export class MockMailboxStore {
       transactional_enabled: mockTransactionalStore.isEnabled(),
     };
     return [
-      { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', ...settings },
-      ...verifiedDomains.map(domain => ({ domain, kind: 'organization' as const, ...settings })),
+      { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', default: defaultDomain === null, ...settings },
+      ...verifiedDomains.map(domain => ({
+        domain,
+        kind: 'organization' as const,
+        default: domain === defaultDomain,
+        ...settings,
+      })),
     ];
+  }
+
+  /** The organization's live mailboxes with an address on the domain. */
+  countOnDomain(organizationId: number, name: string): number {
+    let count = 0;
+    for (const state of this.organizations.get(organizationId)?.values() ?? []) {
+      if (state.mailbox.address.endsWith(`@${name}`)) count += 1;
+    }
+    return count;
   }
 
   /** Whether a live mailbox of any organization has an address on the domain. */
@@ -972,6 +993,29 @@ export class MockMailboxStore {
       });
     });
     return { ok: true, value: result };
+  }
+
+  /**
+   * The mailboxes a welcome mail goes to, oldest first: Zmail personal mailboxes on an organization
+   * domain reserved for an invitee or owned by a current member other than the viewer.
+   */
+  welcomeCandidates(organizationId: number, viewerUserId: number): MockWelcomeCandidate[] {
+    return this.statesOf(organizationId)
+      .filter(({ mailbox, access }) => {
+        if (access.type !== 'personal' || access.origin !== 'zmail' || access.ownerLeft) return false;
+        if (mailbox.address.endsWith(`@${MOCK_MAILBOX_DOMAIN}`)) return false;
+        return access.ownerUserId === null
+          ? Boolean(access.pendingOwnerEmail)
+          : access.ownerUserId !== viewerUserId;
+      })
+      .sort((left, right) => left.mailbox.id - right.mailbox.id)
+      .map(({ mailbox, access }) => ({
+        mailbox_id: mailbox.id,
+        address: mailbox.address,
+        display_name: mailbox.display_name,
+        owner_user_id: access.ownerUserId,
+        invitation_pending: access.ownerUserId === null,
+      }));
   }
 
   /**

@@ -154,6 +154,9 @@ type Service interface {
 	SetUpMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	DeleteMailDomain(ctx context.Context, organizationID, id uint) error
+	// SetDefaultMailDomain makes a verified domain the one new mailboxes use unless another is
+	// picked. Only owners and admins may.
+	SetDefaultMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	// EnableMailDomainReceiving turns a send-only domain into one that also receives and sets it
 	// up again.
 	EnableMailDomainReceiving(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
@@ -312,6 +315,11 @@ type Service interface {
 	UpdateMemberWelcomeSetting(ctx context.Context, viewer domain.OrganizationContext, input MemberWelcomeInput) (MemberWelcomeSetting, error)
 	// PreviewMemberWelcome renders welcome copy with sample values; owners and admins only.
 	PreviewMemberWelcome(ctx context.Context, viewer domain.OrganizationContext, input MemberWelcomePreviewInput) (MemberWelcomePreview, error)
+	// ListMemberWelcomeMails lists the mailboxes that can be welcomed with their latest welcome
+	// mail; owners and admins only.
+	ListMemberWelcomeMails(ctx context.Context, viewer domain.OrganizationContext) ([]MemberWelcomeMail, error)
+	// ResendMemberWelcome sends a mailbox's welcome mail again; owners and admins only.
+	ResendMemberWelcome(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (MemberWelcomeMail, error)
 	// MailSignature reads the viewer's own signature for a mailbox they may send from.
 	MailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailSignature, error)
 	// SaveMailSignature replaces the viewer's own signature for a mailbox they may send from; an
@@ -361,6 +369,8 @@ type Service interface {
 	Now() time.Time
 	DailyBroadcastLimit() int
 	DailyTransactionalLimit() int
+	// OrganizationDailyLimits returns the lane limits in effect for one organization.
+	OrganizationDailyLimits(ctx context.Context, organizationID uint) (DailyLimits, error)
 	// TransactionalPolicy reports the instance's transactional switch, rate limits, and simulator domain.
 	TransactionalPolicy() TransactionalPolicy
 	// SendTransactional sends one transactional message for an API key; created is false for an
@@ -729,6 +739,29 @@ func (s *service) DailyTransactionalLimit() int {
 	return s.settings.laneLimit(domain.SendLaneTransactional)
 }
 
+// DailyLimits holds an organization's limit in each send lane.
+type DailyLimits struct {
+	Personal      int
+	Broadcast     int
+	Transactional int
+}
+
+func (s *service) OrganizationDailyLimits(ctx context.Context, organizationID uint) (DailyLimits, error) {
+	var limits DailyLimits
+	for lane, target := range map[domain.SendLane]*int{
+		domain.SendLanePersonal:      &limits.Personal,
+		domain.SendLaneBroadcast:     &limits.Broadcast,
+		domain.SendLaneTransactional: &limits.Transactional,
+	} {
+		limit, err := s.organizationLaneLimit(ctx, organizationID, lane)
+		if err != nil {
+			return DailyLimits{}, err
+		}
+		*target = limit
+	}
+	return limits, nil
+}
+
 // laneLimit is the rolling 24-hour limit of one lane. A lane without its own limit takes the
 // personal limit, so no lane has less room than the shared limit gave before lanes existed.
 func (settings Settings) laneLimit(lane domain.SendLane) int {
@@ -741,19 +774,26 @@ func (settings Settings) laneLimit(lane domain.SendLane) int {
 	return settings.DailySendLimit
 }
 
-// organizationLaneLimit is laneLimit for one organization: while the organization is younger than
-// the new-organization period, no lane allows more than the new-organization cap.
+// organizationLaneLimit is laneLimit for one organization: a suspended organization has no room,
+// an operator's limit replaces the instance limits, and while the organization is younger than the
+// new-organization period no lane allows more than the new-organization cap.
 func (s *service) organizationLaneLimit(ctx context.Context, organizationID uint, lane domain.SendLane) (int, error) {
+	policy, err := s.repo.OrganizationSendPolicy(ctx, organizationID)
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case policy.Suspended:
+		return 0, nil
+	case policy.DailySendLimit != nil:
+		return *policy.DailySendLimit, nil
+	}
 	limit := s.settings.laneLimit(lane)
 	capped := s.settings.NewOrganizationDailySendLimit
 	if capped <= 0 || limit <= capped {
 		return limit, nil
 	}
-	createdAt, err := s.repo.OrganizationCreatedAt(ctx, organizationID)
-	if err != nil {
-		return 0, err
-	}
-	if !createdAt.IsZero() && s.now().Sub(createdAt) < s.settings.NewOrganizationPeriod {
+	if !policy.CreatedAt.IsZero() && s.now().Sub(policy.CreatedAt) < s.settings.NewOrganizationPeriod {
 		return capped, nil
 	}
 	return limit, nil

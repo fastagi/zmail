@@ -39,6 +39,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_domains.checks.store").WhereNumber("domain_id")
 		auth.POST("/mail-domains/:domain_id/receiving", h.EnableMailDomainReceiving).
 			Name("mail_domains.receiving.store").WhereNumber("domain_id")
+		auth.PUT("/mail-domains/:domain_id/default", h.SetDefaultMailDomain).
+			Name("mail_domains.default.update").WhereNumber("domain_id")
 		auth.GET("/mail-cloudflare-connection", h.GetCloudflare).Name("mail_cloudflare_connection.show")
 		auth.POST("/mail-cloudflare-connection", h.BindCloudflare).Name("mail_cloudflare_connection.store").Middleware(middleware.BodyLimit(2048))
 		auth.DELETE("/mail-cloudflare-connection/:connection_id", h.UnbindCloudflare).Name("mail_cloudflare_connection.destroy")
@@ -184,6 +186,9 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.PUT("/member-welcome-mail-setting", h.UpdateMemberWelcomeSetting).Name("member_welcome_mail_setting.update").
 			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
 		auth.POST("/member-welcome-mail-previews", h.PreviewMemberWelcome).Name("member_welcome_mail_previews.store").
+			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
+		auth.GET("/member-welcome-mails", h.ListMemberWelcomeMails).Name("member_welcome_mails.index")
+		auth.POST("/member-welcome-mails", h.ResendMemberWelcomeMail).Name("member_welcome_mails.store").
 			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
 
 		auth.GET("/mailboxes/:mailbox_id/members", h.ListMailboxMembers).

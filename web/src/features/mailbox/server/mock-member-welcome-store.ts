@@ -2,6 +2,7 @@ import 'server-only';
 
 import type {
   MemberWelcomeLanguage,
+  MemberWelcomeMail,
   MemberWelcomeMailStatus,
   MemberWelcomePreview,
   MemberWelcomeSetting,
@@ -43,6 +44,28 @@ interface StoredSetting {
   updatedAt: string;
 }
 
+/** A mailbox the mock can welcome, as the mailbox store lists it. */
+export type MockWelcomeCandidate = Pick<
+  MemberWelcomeMail,
+  'mailbox_id' | 'address' | 'display_name' | 'owner_user_id' | 'invitation_pending'
+>;
+
+interface StoredWelcome {
+  queuedAt: number;
+  resendCount: number;
+  windowStartedAt: number | null;
+  windowCount: number;
+}
+
+const RESEND_INTERVAL_MS = 60_000;
+const RESEND_WINDOW_MS = 24 * 60 * 60_000;
+const MAX_RESENDS = 5;
+
+export type MockMemberWelcomeResendResult =
+  | { ok: true; value: MemberWelcomeMail }
+  | { ok: false; error: 'disabled' }
+  | { ok: false; error: 'limited'; retryAfterSeconds: number };
+
 export type MockMemberWelcomeResult =
   { ok: true; value: MemberWelcomeSetting } | { ok: false; fields: Record<string, string[]> };
 
@@ -52,7 +75,7 @@ export type MockMemberWelcomeResult =
  */
 class MockMemberWelcomeStore {
   private readonly settings = new Map<number, StoredSetting>();
-  private readonly welcomed = new Set<string>();
+  private readonly welcomed = new Map<string, StoredWelcome>();
 
   setting(organizationId: number): MemberWelcomeSetting {
     const stored = this.settings.get(organizationId);
@@ -116,14 +139,78 @@ class MockMemberWelcomeStore {
     if (!this.setting(organizationId).enabled) return 'disabled';
     const key = `${organizationId}:${mailboxId}`;
     if (this.welcomed.has(key)) return 'already_sent';
-    this.welcomed.add(key);
+    this.welcomed.set(key, {
+      queuedAt: Date.now(),
+      resendCount: 0,
+      windowStartedAt: null,
+      windowCount: 0,
+    });
     return 'queued';
+  }
+
+  /** The latest welcome of each candidate; the mock delivers every stored welcome at once. */
+  list(organizationId: number, candidates: MockWelcomeCandidate[]): MemberWelcomeMail[] {
+    return candidates.map(candidate => this.view(organizationId, candidate));
+  }
+
+  /** Sends the welcome again, at most once a minute and five times in 24 hours. */
+  resend(
+    organizationId: number,
+    candidate: MockWelcomeCandidate,
+    now = Date.now()
+  ): MockMemberWelcomeResendResult {
+    if (!this.setting(organizationId).enabled) return { ok: false, error: 'disabled' };
+    const key = `${organizationId}:${candidate.mailbox_id}`;
+    const stored = this.welcomed.get(key);
+    const record: StoredWelcome = stored
+      ? { ...stored }
+      : { queuedAt: now, resendCount: 0, windowStartedAt: null, windowCount: 0 };
+    if (stored && now - stored.queuedAt < RESEND_INTERVAL_MS) {
+      return {
+        ok: false,
+        error: 'limited',
+        retryAfterSeconds: seconds(stored.queuedAt + RESEND_INTERVAL_MS - now),
+      };
+    }
+    if (record.windowStartedAt === null || now - record.windowStartedAt >= RESEND_WINDOW_MS) {
+      record.windowStartedAt = now;
+      record.windowCount = 0;
+    }
+    if (record.windowCount >= MAX_RESENDS) {
+      return {
+        ok: false,
+        error: 'limited',
+        retryAfterSeconds: seconds(record.windowStartedAt + RESEND_WINDOW_MS - now),
+      };
+    }
+    record.windowCount += 1;
+    record.resendCount += 1;
+    record.queuedAt = now;
+    this.welcomed.set(key, record);
+    return { ok: true, value: this.view(organizationId, candidate) };
+  }
+
+  private view(organizationId: number, candidate: MockWelcomeCandidate): MemberWelcomeMail {
+    const stored = this.welcomed.get(`${organizationId}:${candidate.mailbox_id}`);
+    const at = stored ? new Date(stored.queuedAt).toISOString() : null;
+    return {
+      ...candidate,
+      status: stored ? 'sent' : 'not_sent',
+      failure_code: null,
+      queued_at: at,
+      sent_at: at,
+      resend_count: stored?.resendCount ?? 0,
+    };
   }
 
   reset(): void {
     this.settings.clear();
     this.welcomed.clear();
   }
+}
+
+function seconds(milliseconds: number): number {
+  return Math.max(1, Math.ceil(milliseconds / 1000));
 }
 
 function validate(subject: string, body: string): Record<string, string[]> | null {
