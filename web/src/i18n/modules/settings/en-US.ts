@@ -185,7 +185,7 @@ const messages = {
   mailClients: {
     title: 'Mail apps',
     description:
-      'Read your Zmail mail in Apple Mail, Outlook, Thunderbird, or your phone\'s mail app. Each device gets its own password, so you can remove one without touching the others.',
+      'Read and send your Zmail mail in Apple Mail, Outlook, Thunderbird, or your phone\'s mail app. Each device gets its own password, so you can remove one without touching the others.',
     server: {
       title: 'Server settings',
       description: 'Enter these in your mail app when you add the account by hand.',
@@ -196,6 +196,7 @@ const messages = {
       securityValue: 'SSL/TLS',
       username: 'Username',
       usernameValue: 'Your full Zmail address, such as you@acme.zmail.im',
+      copyAddress: 'Copy {address}',
       password: 'Password',
       passwordValue: 'A mail client password from below, never your account password',
       copyHost: 'Copy server',
@@ -203,7 +204,9 @@ const messages = {
       copied: 'Copied',
       copyError: 'Copying failed. Select the text and copy it yourself.',
       outgoing: 'Outgoing mail (SMTP)',
-      outgoingSoon: 'Coming soon: sending from mail apps is not available yet.',
+      starttlsPort: 'Or port (STARTTLS)',
+      copyStarttlsPort: 'Copy STARTTLS port',
+      sameSignIn: 'The same username and password as incoming mail. Turn on authentication for the outgoing server.',
     },
     access: {
       unavailable: 'Mail apps are not set up on this Zmail server yet. Ask whoever runs it.',
@@ -246,7 +249,6 @@ const messages = {
       access: 'Access',
       imap: 'Read mail (IMAP)',
       smtp: 'Send mail (SMTP)',
-      smtpHint: 'Coming soon: sending from mail apps is not available yet.',
       currentPassword: 'Your account password',
       currentPasswordHint:
         'A mail client password skips two-factor sign-in, so confirm it is you first.',
@@ -292,6 +294,8 @@ const messages = {
         ios: 'On iPhone and iPad, new mail arrives when the app fetches it; real-time push is not available.',
         outlook: 'The new Outlook syncs through Microsoft\'s cloud, which keeps a copy of your mail.',
         shared: 'Shared mailboxes appear under Shared/ and are read only for now.',
+        sending:
+          'To send, enter the outgoing server above with port 465 and SSL/TLS (or 587 with STARTTLS). Mail goes out from the address in From, which must be a mailbox you may send from.',
       },
       clients: {
         ios: {

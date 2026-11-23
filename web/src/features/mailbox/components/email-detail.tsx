@@ -135,6 +135,12 @@ export function EmailDetail({
               <dd className="break-words">{message.cc.join(', ')}</dd>
             </>
           ) : null}
+          {message.bcc && message.bcc.length > 0 ? (
+            <>
+              <dt className="text-muted-foreground">{t('message.bcc')}</dt>
+              <dd className="break-words">{message.bcc.join(', ')}</dd>
+            </>
+          ) : null}
           <dt className="text-muted-foreground">{t('emails.mailbox')}</dt>
           <dd className="break-words">{mailboxAddress}</dd>
           <dt className="text-muted-foreground">{t('message.date')}</dt>

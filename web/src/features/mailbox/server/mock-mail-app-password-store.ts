@@ -15,8 +15,16 @@ import type {
 export const MAIL_APP_PASSWORD_LIMIT = 20;
 const ATTEMPT_LIMIT = 5;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
-/** The development gateway listens on 127.0.0.1:1993 (`MAIL_GATEWAY_PUBLIC_IMAP_*` in `.env.example`). */
-const MOCK_SERVER = { imap_host: '127.0.0.1', imap_port: 1993, imap_security: 'ssl_tls' } as const;
+/** The development gateway listens on 127.0.0.1:1993, :1465, and :1587 (`MAIL_GATEWAY_PUBLIC_*` in `.env.example`). */
+const MOCK_SERVER = {
+  imap_host: '127.0.0.1',
+  imap_port: 1993,
+  imap_security: 'ssl_tls',
+  smtp_host: '127.0.0.1',
+  smtp_port: 1465,
+  smtp_security: 'ssl_tls',
+  smtp_starttls_port: 1587,
+} as const;
 
 interface MockPassword extends MailAppPassword {
   organizationId: number;
