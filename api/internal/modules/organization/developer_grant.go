@@ -17,7 +17,7 @@ type MemberDeveloperGrantPO struct {
 	MembershipID   uint   `gorm:"primaryKey;autoIncrement:false"`
 	OrganizationID uint   `gorm:"not null;index:idx_member_developer_grants_organization"`
 	AllDomains     bool   `gorm:"not null;default:false"`
-	SendingDomains string `gorm:"type:text;not null;default:'[]'"`
+	ScopeDomains   string `gorm:"type:text;not null;default:'[]'"`
 	GrantedBy      *uint
 	CreatedAt      time.Time `gorm:"not null"`
 	UpdatedAt      time.Time `gorm:"not null"`
@@ -32,7 +32,7 @@ func (po *MemberDeveloperGrantPO) toDomain() *domain.DeveloperGrant {
 	if po == nil {
 		return nil
 	}
-	return developerGrantFromColumns(po.AllDomains, po.SendingDomains)
+	return developerGrantFromColumns(po.AllDomains, po.ScopeDomains)
 }
 
 // developerGrantFromColumns decodes a stored scope. An all-domains grant lists no domain.
@@ -107,14 +107,14 @@ func saveDeveloperGrant(tx *gorm.DB, organizationID, membershipID, grantedBy uin
 		MembershipID:   membershipID,
 		OrganizationID: organizationID,
 		AllDomains:     grant.AllDomains,
-		SendingDomains: string(encoded),
+		ScopeDomains:   string(encoded),
 		GrantedBy:      &grantedBy,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 	err = tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "membership_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"all_domains", "sending_domains", "granted_by", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"all_domains", "scope_domains", "granted_by", "updated_at"}),
 	}).Create(po).Error
 	if err != nil {
 		return nil, err

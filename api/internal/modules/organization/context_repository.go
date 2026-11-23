@@ -24,7 +24,7 @@ type organizationContextRow struct {
 	// DeveloperGrantID is the membership id of the developer grant, or nil without one.
 	DeveloperGrantID      *uint   `gorm:"column:developer_grant_id"`
 	DeveloperAllDomains   *bool   `gorm:"column:developer_all_domains"`
-	DeveloperSendingNames *string `gorm:"column:developer_sending_domains"`
+	DeveloperSendingNames *string `gorm:"column:developer_scope_domains"`
 }
 
 func (r *repository) ResolveContext(
@@ -56,7 +56,7 @@ func (r *repository) ResolveContext(
 			memberships.can_use_mail_clients,
 			grants.membership_id AS developer_grant_id,
 			grants.all_domains AS developer_all_domains,
-			grants.sending_domains AS developer_sending_domains
+			grants.scope_domains AS developer_scope_domains
 		`).
 		Joins("JOIN organizations ON organizations.id = memberships.organization_id").
 		Joins("LEFT JOIN member_developer_grants AS grants ON grants.membership_id = memberships.id").

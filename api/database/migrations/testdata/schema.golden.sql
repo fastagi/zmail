@@ -655,7 +655,7 @@ TABLE member_developer_grants
   COLUMN membership_id bigint NOT NULL
   COLUMN organization_id bigint NOT NULL
   COLUMN all_domains boolean NOT NULL DEFAULT false
-  COLUMN sending_domains text NOT NULL DEFAULT '[]'::text
+  COLUMN scope_domains text NOT NULL DEFAULT '[]'::text
   COLUMN granted_by bigint
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
@@ -1316,7 +1316,7 @@ CONSTRAINT mailboxes.mailboxes_external_mail_tenant_id_fkey FOREIGN KEY (externa
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
-CONSTRAINT member_developer_grants.chk_member_developer_grants_scope CHECK ((all_domains OR (sending_domains <> '[]'::text)))
+CONSTRAINT member_developer_grants.chk_member_developer_grants_scope CHECK ((all_domains OR (scope_domains <> '[]'::text)))
 CONSTRAINT member_developer_grants.fk_member_developer_grants_granted_by FOREIGN KEY (granted_by) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT member_developer_grants.fk_member_developer_grants_membership FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
 CONSTRAINT member_developer_grants.fk_member_developer_grants_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE

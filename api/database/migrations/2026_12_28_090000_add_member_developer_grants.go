@@ -26,7 +26,7 @@ func (m *addMemberDeveloperGrants) Up(db *gorm.DB) error {
 		    membership_id bigint PRIMARY KEY,
 		    organization_id bigint NOT NULL,
 		    all_domains boolean NOT NULL DEFAULT false,
-		    sending_domains text NOT NULL DEFAULT '[]',
+		    scope_domains text NOT NULL DEFAULT '[]',
 		    granted_by bigint,
 		    created_at timestamptz NOT NULL,
 		    updated_at timestamptz NOT NULL,
@@ -36,7 +36,7 @@ func (m *addMemberDeveloperGrants) Up(db *gorm.DB) error {
 		        REFERENCES organizations(id) ON DELETE CASCADE,
 		    CONSTRAINT fk_member_developer_grants_granted_by FOREIGN KEY (granted_by)
 		        REFERENCES users(id) ON DELETE SET NULL,
-		    CONSTRAINT chk_member_developer_grants_scope CHECK (all_domains OR sending_domains <> '[]')
+		    CONSTRAINT chk_member_developer_grants_scope CHECK (all_domains OR scope_domains <> '[]')
 		)`,
 		`CREATE INDEX idx_member_developer_grants_organization ON member_developer_grants (organization_id)`,
 	)

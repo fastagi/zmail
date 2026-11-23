@@ -23,7 +23,7 @@ first: the new Web reads an older API's views as having no developer grant.
 
 Migration `2026_12_28_090000_add_member_developer_grants` (organization starter) creates
 `member_developer_grants`: one row per membership (primary key `membership_id`, `ON DELETE
-CASCADE`), its `organization_id`, `all_domains`, `sending_domains` (`text`, a JSON array), and
+CASCADE`), its `organization_id`, `all_domains`, `scope_domains` (`text`, a JSON array), and
 `granted_by`, with the check `chk_member_developer_grants_scope` (all domains or at least one
 domain). It only creates a table; its foreign keys take a brief `SHARE ROW EXCLUSIVE` lock on
 `organization_memberships`, `organizations`, and `users` while the table is created, which blocks

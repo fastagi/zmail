@@ -25,12 +25,12 @@ func TestAddMemberDeveloperGrantsUpDown(t *testing.T) {
 		VALUES (71, 81, 91, 'owner', now(), now()), (72, 81, 92, 'member', now(), now())`).Error)
 
 	require.NoError(t, db.Exec(`INSERT INTO member_developer_grants
-		(membership_id, organization_id, all_domains, sending_domains, granted_by, created_at, updated_at)
+		(membership_id, organization_id, all_domains, scope_domains, granted_by, created_at, updated_at)
 		VALUES (72, 81, false, '["fast-ui.com"]', 91, now(), now())`).Error)
 	assert.Error(t, db.Exec(`INSERT INTO member_developer_grants
-		(membership_id, organization_id, all_domains, sending_domains, granted_by, created_at, updated_at)
+		(membership_id, organization_id, all_domains, scope_domains, granted_by, created_at, updated_at)
 		VALUES (72, 81, true, '[]', 91, now(), now())`).Error, "one grant per membership")
-	assert.Error(t, db.Exec(`UPDATE member_developer_grants SET all_domains = false, sending_domains = '[]'
+	assert.Error(t, db.Exec(`UPDATE member_developer_grants SET all_domains = false, scope_domains = '[]'
 		WHERE membership_id = 72`).Error, "a grant needs a scope")
 
 	require.NoError(t, db.Exec(`DELETE FROM organization_memberships WHERE id = 72`).Error)
