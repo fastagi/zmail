@@ -50,6 +50,7 @@ const (
 
 	CodeAPIKeyOrganizationMismatch = "API_KEY.ORGANIZATION_MISMATCH"
 	CodeAPIKeyDomainNotAllowed     = "API_KEY.DOMAIN_NOT_ALLOWED"
+	CodeDeveloperDomainNotAllowed  = "DEVELOPER.DOMAIN_NOT_ALLOWED"
 
 	CodeOrganizationNotFound                       = "ORGANIZATION.NOT_FOUND"
 	CodeOrganizationContextRequired                = "ORGANIZATION.CONTEXT_REQUIRED"

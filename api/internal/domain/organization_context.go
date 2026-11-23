@@ -13,11 +13,25 @@ type OrganizationContext struct {
 	// Features are the grants stored on the membership; owners and admins have every feature
 	// regardless, so read them through CanUse.
 	Features MemberFeatures
+	// DeveloperGrant is the member's developer grant and its sending scope; nil without one.
+	DeveloperGrant *DeveloperGrant
 }
 
 // CanUse reports whether this membership may use the feature.
 func (c OrganizationContext) CanUse(feature MemberFeature) bool {
 	return c.Role.EffectiveFeatures(c.Features).Has(feature)
+}
+
+// DeveloperScope reports whether this membership may use developer capabilities and with what
+// sending scope. Owners and admins are unrestricted; a member needs the grant and its stored scope.
+func (c OrganizationContext) DeveloperScope() (grant DeveloperGrant, unrestricted bool, ok bool) {
+	if c.Role.CanManageOrganization() {
+		return DeveloperGrant{}, true, true
+	}
+	if !c.Features.Developer || c.DeveloperGrant == nil {
+		return DeveloperGrant{}, false, false
+	}
+	return *c.DeveloperGrant, false, true
 }
 
 // IsValid reports whether the resolved context contains a complete membership identity.
