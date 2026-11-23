@@ -64,4 +64,7 @@ type Application struct {
 	// MailClients serves mailboxes to mail apps for the mail gateway; nil when the mailbox
 	// starter is not selected.
 	MailClients domain.MailClientStore
+	// MailSubmissions sends what mail apps submit over SMTP for the mail gateway; nil when the
+	// mailbox starter is not selected.
+	MailSubmissions domain.MailSubmissionStore
 }

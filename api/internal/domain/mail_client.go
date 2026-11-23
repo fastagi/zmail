@@ -194,3 +194,87 @@ type MailClientStore interface {
 	SetClientFlag(ctx context.Context, p *MailClientPrincipal, mailboxID uint, key string, uids []uint32, flag MailClientFlag, value bool) error
 	SearchClient(ctx context.Context, p *MailClientPrincipal, mailboxID uint, key string, criteria MailClientSearch) ([]uint32, error)
 }
+
+// MailClientSubmission is one message a mail app submits over SMTP: the envelope it gave and the
+// message as it sent it.
+type MailClientSubmission struct {
+	// EnvelopeFrom is the MAIL FROM address, lowercase.
+	EnvelopeFrom string
+	// Recipients are the RCPT TO addresses, lowercase, without repeats, at most MaxMailRecipients.
+	Recipients []string
+	// Raw is the RFC 5322 message, at most MailClientMaxSubmissionBytes.
+	Raw []byte
+}
+
+// MailClientMaxSubmissionBytes is the SMTP SIZE a mail app may submit.
+const MailClientMaxSubmissionBytes = 8 << 20
+
+// MailClientSubmissionStatus is what became of an accepted submission.
+type MailClientSubmissionStatus string
+
+const (
+	// MailClientSubmissionSent was handed to the provider.
+	MailClientSubmissionSent MailClientSubmissionStatus = "sent"
+	// MailClientSubmissionQueued waits for room in the organization's send limit; the mail worker
+	// sends it.
+	MailClientSubmissionQueued MailClientSubmissionStatus = "queued"
+)
+
+// MailClientSubmissionResult is an accepted submission and the message it stored.
+type MailClientSubmissionResult struct {
+	Status    MailClientSubmissionStatus
+	MessageID uint
+}
+
+// MailClientSubmitErrorKind classifies a refused submission; the gateway turns each into one SMTP
+// reply.
+type MailClientSubmitErrorKind string
+
+const (
+	// MailClientSubmitSenderNotAllowed: the From or MAIL FROM is no mailbox the member may send from.
+	MailClientSubmitSenderNotAllowed MailClientSubmitErrorKind = "sender_not_allowed"
+	// MailClientSubmitTooLarge: the message, a body, the subject, or the attachments exceed a limit.
+	MailClientSubmitTooLarge MailClientSubmitErrorKind = "too_large"
+	// MailClientSubmitInvalid: the message cannot be sent as it is.
+	MailClientSubmitInvalid MailClientSubmitErrorKind = "invalid"
+	// MailClientSubmitConflict: another message was already sent with the same Message-ID.
+	MailClientSubmitConflict MailClientSubmitErrorKind = "conflict"
+	// MailClientSubmitLimitReached: the send limit and its waiting queue are both full.
+	MailClientSubmitLimitReached MailClientSubmitErrorKind = "limit_reached"
+	// MailClientSubmitPaused: the organization's sending is paused by its bounce or complaint rate.
+	MailClientSubmitPaused MailClientSubmitErrorKind = "paused"
+	// MailClientSubmitDeliveryFailed: the provider refused or could not be reached; a retry of the
+	// same message sends it again.
+	MailClientSubmitDeliveryFailed MailClientSubmitErrorKind = "delivery_failed"
+	// MailClientSubmitInProgress: an earlier attempt of the same message is still being sent.
+	MailClientSubmitInProgress MailClientSubmitErrorKind = "in_progress"
+	// MailClientSubmitNotConfigured: this instance has no outbound provider.
+	MailClientSubmitNotConfigured MailClientSubmitErrorKind = "not_configured"
+)
+
+// MailClientSubmitError is a refused submission. Reason is a short English sentence for the mail
+// app; it never names an address, a subject, or anything else of the message.
+type MailClientSubmitError struct {
+	Kind   MailClientSubmitErrorKind
+	Reason string
+}
+
+func (e *MailClientSubmitError) Error() string {
+	if e.Reason == "" {
+		return "mail submission refused: " + string(e.Kind)
+	}
+	return "mail submission refused: " + string(e.Kind) + ": " + e.Reason
+}
+
+// MailSubmissionStore serves mail apps that send: it signs them in, checks them again before each
+// message, and sends what they submit through the same path as the console.
+type MailSubmissionStore interface {
+	// AuthenticateClient signs a mail app in; every refusal is ErrMailClientAuthFailed.
+	AuthenticateClient(ctx context.Context, username, password string, protocol MailClientProtocol, ip string) (*MailClientPrincipal, error)
+	// RevalidateClients reports, by password id, whether each principal may still sign in.
+	RevalidateClients(ctx context.Context, principals []*MailClientPrincipal) (map[uint]bool, error)
+	// ClientSenderAllowed reports whether the principal may send from the address.
+	ClientSenderAllowed(ctx context.Context, p *MailClientPrincipal, address string) (bool, error)
+	// SubmitClientMessage sends a submitted message; a refusal is a *MailClientSubmitError.
+	SubmitClientMessage(ctx context.Context, p *MailClientPrincipal, submission MailClientSubmission) (*MailClientSubmissionResult, error)
+}

@@ -28,7 +28,7 @@
 | # | 问题 | 裁定 |
 |---|---|---|
 | R1 | MAIL FROM 与 `From:` 不同时以谁为准 | 两者都必须是该成员可发信的邮箱（个人邮箱，或权限 ≥ send 的共享邮箱）；**`From:` 头决定**用哪个邮箱发出。`From:` 缺失、多个地址、或 `MAIL FROM:<>` 都按 `550 5.7.1` 拒绝。`origin = connected` 的接入邮箱不允许经网关发信（与 IMAP 不暴露它们一致），返回 `550 5.7.1` |
-| R2 | 收件人与 `To`/`Cc` 头的关系 | 投递集合 = 信封（RCPT）。`To`/`Cc` 取头中**同时出现在信封里**的地址（只在头里、不在信封里的地址丢弃，SMTP 语义下它们本来也不会收到）；信封里有、头里没有的就是 bcc。去重后上限 50（含 bcc），第 51 个不同地址 `452 4.5.3`；同一地址重复 RCPT 只算一次。`To` 和 `Cc` 都为空（纯 bcc、"undisclosed-recipients"）时 `554 5.6.0`，因为 Cloudflare 的发送接口要求 `to`；在 PR 中列为已知限制 |
+| R2 | 收件人与 `To`/`Cc` 头的关系 | 投递集合 = 信封（RCPT）。`To`/`Cc` 取头中**同时出现在信封里**的地址（只在头里、不在信封里的地址丢弃，SMTP 语义下它们本来也不会收到）；信封里有、头里没有的就是 bcc。去重后上限 50（含 bcc），第 51 个不同地址 `452 4.5.3`；同一地址重复 RCPT 只算一次。`To` 为空（只有 Cc 或纯 bcc、"undisclosed-recipients"）时 `554 5.6.0` "Add at least one recipient in To"，因为发送路径要求 `to`；在 PR 中列为已知限制 |
 | R3 | bcc 的存储与可见性 | `mail_messages` 新增 `bcc_addresses text NOT NULL DEFAULT '[]'` 和 `sent_by_membership_id bigint NULL`（不加外键：membership id 不复用，避免给 `mail_messages` 加外键校验锁）。消息详情只在 `viewer.MembershipID == sent_by_membership_id` 时返回 `bcc`，其他人（包括共享邮箱的其他成员、API key、IMAP）都看不到。网页 `SendMessage`/`SendFromAddress` 也记录 `sent_by_membership_id`。bcc 不进入 `cc_addresses`、不参与搜索、不进任何信头 |
 | R4 | bcc 在发送通道中的形态 | `mailtransport.Message.Bcc`：Cloudflare 走请求体的 `bcc` 字段（官方文档：BCC 不写入信头）；接入邮箱的外部 SMTP 只加到 RCPT。`buildMIMEMessage` 永远不写 `Bcc:` 头（有测试） |
 | R5 | 内联图片 | `mail_attachments` 新增 `content_id varchar(250) NOT NULL DEFAULT ''` 和 `inline boolean NOT NULL DEFAULT false`。解析时保留每个部分的 Content-ID；`inline` = `Content-Disposition: inline`，或没有 disposition 且位于 `multipart/related` 内（Apple Mail 会给普通附件也加 Content-ID，所以不能只看 Content-ID）。Cloudflare 走 `disposition: "inline"` + `contentId`；排队后由 worker 补发时从库里读回；IMAP 合成原文时写回 `Content-ID` 和 inline disposition |
@@ -43,6 +43,7 @@
 | R14 | `last_used_protocol` | `AuthenticateClient(…, MailClientProtocolSMTP, …)` 已经会写 `smtp`；列表里同一密码最近一次的协议就是它 |
 | R15 | 设置页的“服务器设置”用户名一栏 | 显示该成员在当前组织可登录的个人邮箱地址（取自现有的邮箱列表 hook），每个地址一键复制；拿不到时退回通用提示。IMAP 和 SMTP 两段都显示 |
 | R16 | `submitted_via` 列（spec §4.4） | 本 PR 不加；排查依靠 `sent_by_membership_id` + 网关日志里的 message id。留到 P1c 与 `mail_client_sessions` 一起做 |
+| R17 | 失败后的重试 | 同一封信（同一幂等键、同一指纹）上一次以 `failed` 结束时，发送前把那条失败记录的 `idempotency_key` 置空（失败副本仍留在已发送），这次重新发送。邮件应用把 `451` 当作稍后重试，若一直重放失败就永远发不出去。代价：提供方应答丢失的模糊失败在重试时可能投递两次，与人在控制台点“重发”一致（至少一次） |
 
 ## Global Constraints
 

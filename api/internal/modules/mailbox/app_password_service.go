@@ -224,9 +224,7 @@ func validateAppPasswordInput(input CreateAppPasswordInput) (name string, imap, 
 		case scope == domain.MailClientProtocolIMAP:
 			imap = true
 		default:
-			// Mail submission (P1b) is not offered yet; a stored smtp scope would sign in the
-			// day it ships without the member choosing it again.
-			validation.add("scopes", "smtp is not offered yet")
+			smtp = true
 		}
 	}
 	if input.CurrentPassword == "" {

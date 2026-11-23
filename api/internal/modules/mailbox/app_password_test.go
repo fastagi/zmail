@@ -205,26 +205,28 @@ func TestCreateAppPasswordRequiresCurrentPasswordAndTOTP(t *testing.T) {
 	}
 }
 
-// TestCreateAppPasswordRefusesSMTP refuses the smtp scope until mail submission ships, before the
-// credentials are checked, so nothing is stored that a later release would have to honor.
-func TestCreateAppPasswordRefusesSMTP(t *testing.T) {
+// TestCreateAppPasswordAcceptsSMTP stores the smtp scope alone or with imap.
+func TestCreateAppPasswordAcceptsSMTP(t *testing.T) {
 	f := newAppPasswordFixture(t)
 	for _, scopes := range [][]domain.MailClientProtocol{
 		{domain.MailClientProtocolIMAP, domain.MailClientProtocolSMTP},
 		{domain.MailClientProtocolSMTP},
 	} {
-		_, _, err := f.service.CreateAppPassword(context.Background(), f.member, CreateAppPasswordInput{
+		created, _, err := f.service.CreateAppPassword(context.Background(), f.member, CreateAppPasswordInput{
 			Name: "Phone", Scopes: scopes, CurrentPassword: "right",
 		})
-		if !fieldErrorOf(err, "scopes") {
-			t.Fatalf("scopes %v = %v; want a scopes field error", scopes, err)
+		if err != nil {
+			t.Fatalf("scopes %v = %v", scopes, err)
+		}
+		if !created.ScopeSMTP || created.ScopeIMAP != (len(scopes) == 2) {
+			t.Fatalf("scopes %v stored imap=%t smtp=%t", scopes, created.ScopeIMAP, created.ScopeSMTP)
 		}
 	}
-	if f.reverifier.calls != 0 {
-		t.Fatalf("credentials were checked %d times for a refused scope", f.reverifier.calls)
-	}
-	if list, err := f.service.ListAppPasswords(context.Background(), f.member); err != nil || len(list.Items) != 0 {
-		t.Fatalf("a refused scope stored %+v, %v", list, err)
+	_, _, err := f.service.CreateAppPassword(context.Background(), f.member, CreateAppPasswordInput{
+		Name: "Phone", Scopes: []domain.MailClientProtocol{domain.MailClientProtocolSMTP, domain.MailClientProtocolSMTP}, CurrentPassword: "right",
+	})
+	if !fieldErrorOf(err, "scopes") {
+		t.Fatalf("a repeated smtp scope = %v", err)
 	}
 }
 
@@ -446,9 +448,8 @@ func TestAppPasswordRoutesAnswerTheContract(t *testing.T) {
 		t.Fatalf("unknown scope = %d %v", recorder.Code, body)
 	}
 	recorder, body = do(http.MethodPost, "/mail-app-passwords", `{"name":"Phone","scopes":["imap","smtp"],"current_password":"right"}`)
-	errorsByField, _ = body["errors"].(map[string]any)
-	if recorder.Code != http.StatusUnprocessableEntity || errorsByField["scopes"] == nil {
-		t.Fatalf("smtp before mail submission ships = %d %v", recorder.Code, body)
+	if both, _ := body["data"].(map[string]any); recorder.Code != http.StatusCreated || len(both["scopes"].([]any)) != 2 {
+		t.Fatalf("imap and smtp = %d %v", recorder.Code, body)
 	}
 	recorder, body = do(http.MethodPost, "/mail-app-passwords", `{"name":"Phone","scopes":["imap"],"current_password":"right"}`)
 	data, _ := body["data"].(map[string]any)
@@ -459,7 +460,7 @@ func TestAppPasswordRoutesAnswerTheContract(t *testing.T) {
 	id := int(data["id"].(float64))
 	recorder, body = do(http.MethodGet, "/mail-app-passwords", "")
 	data, _ = body["data"].(map[string]any)
-	if recorder.Code != http.StatusOK || len(data["items"].([]any)) != 1 || strings.Contains(recorder.Body.String(), "secret") {
+	if recorder.Code != http.StatusOK || len(data["items"].([]any)) != 2 || strings.Contains(recorder.Body.String(), "secret") {
 		t.Fatalf("list = %d %s", recorder.Code, recorder.Body.String())
 	}
 	for range 5 {
