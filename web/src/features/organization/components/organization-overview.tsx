@@ -61,6 +61,11 @@ const RosterImportButton = lazy(async () => {
   return { default: feature.RosterImportButton };
 });
 
+const MemberMailboxAddresses = lazy(async () => {
+  const feature = await import('@/features/mailbox/components/admin/member-mailbox-addresses');
+  return { default: feature.MemberMailboxAddresses };
+});
+
 const MemberWelcomePanel = lazy(async () => {
   const feature = await import('@/features/mailbox/components/admin/member-welcome-panel');
   return { default: feature.MemberWelcomePanel };
@@ -116,9 +121,16 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
   const webhookEnabled = isWebFeatureEnabled('webhook');
   const mailboxEnabled = isWebFeatureEnabled('mailbox');
   // `?tab=invitations`, from the getting-started checklist, opens straight on inviting.
-  const requestedTab = useSearchParams()?.get('tab');
-  const initialTab =
-    requestedTab === 'invitations' && canManageOrganization ? 'invitations' : 'profile';
+  // A later link to it on this page, such as from the roster import, switches the tab too.
+  const requestedTab = useSearchParams()?.get('tab') ?? null;
+  const tabFor = (requested: string | null) =>
+    requested === 'invitations' && canManageOrganization ? 'invitations' : 'profile';
+  const [tab, setTab] = useState(() => tabFor(requestedTab));
+  const [seenRequest, setSeenRequest] = useState(requestedTab);
+  if (requestedTab !== seenRequest) {
+    setSeenRequest(requestedTab);
+    if (requestedTab !== null) setTab(tabFor(requestedTab));
+  }
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -168,7 +180,7 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
         </div>
       </div>
 
-      <Tabs defaultValue={initialTab} className="pt-5">
+      <Tabs value={tab} onValueChange={setTab} className="pt-5">
         <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="profile">
             <Settings2 aria-hidden="true" />
@@ -276,6 +288,18 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
         <TabsContent value="members">
           <OrganizationMembers
             context={context}
+            memberDetail={
+              mailboxEnabled
+                ? member => (
+                    <Suspense fallback={null}>
+                      <MemberMailboxAddresses
+                        organizationId={context.organization_id}
+                        userId={member.user_id}
+                      />
+                    </Suspense>
+                  )
+                : undefined
+            }
             headerAction={
               mailboxEnabled && canManageOrganization ? (
                 <Suspense fallback={null}>

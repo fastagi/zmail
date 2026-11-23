@@ -1,6 +1,9 @@
 import {
+  memberWelcomeMailListSchema,
+  memberWelcomeMailSchema,
   memberWelcomePreviewSchema,
   memberWelcomeSettingSchema,
+  type MemberWelcomeMail,
   type MemberWelcomePreview,
   type MemberWelcomePreviewInput,
   type MemberWelcomeSetting,
@@ -11,7 +14,8 @@ import request, { ApiError } from '@/http/request';
 
 /**
  * Browser service for the member welcome mail in `contracts/MAILBOXES.md` (section Member Welcome
- * Mail): the organization's switch and copy, and previews. Owners and admins only.
+ * Mail): the organization's switch and copy, previews, and each mailbox's latest welcome with
+ * resending it. Owners and admins only.
  */
 export const memberWelcomeService = {
   async setting(organizationId: number): Promise<MemberWelcomeSetting> {
@@ -47,6 +51,28 @@ export const memberWelcomeService = {
       await request.post<unknown, MemberWelcomePreviewInput>(
         '/member-welcome-mail-previews',
         input,
+        { headers: organizationHeaders(organizationId) }
+      )
+    );
+  },
+
+  /** Every mailbox that can be welcomed, with its latest welcome mail. */
+  async list(organizationId: number): Promise<MemberWelcomeMail[]> {
+    return parse(
+      memberWelcomeMailListSchema,
+      await request.get<unknown>('/member-welcome-mails', {
+        headers: organizationHeaders(organizationId),
+      })
+    );
+  },
+
+  /** Sends the mailbox's welcome mail again; answers its new latest welcome. */
+  async resend(organizationId: number, mailboxId: number): Promise<MemberWelcomeMail> {
+    return parse(
+      memberWelcomeMailSchema,
+      await request.post<unknown, { mailbox_id: number }>(
+        '/member-welcome-mails',
+        { mailbox_id: mailboxId },
         { headers: organizationHeaders(organizationId) }
       )
     );

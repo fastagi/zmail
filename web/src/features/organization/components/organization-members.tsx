@@ -77,10 +77,13 @@ type PendingMemberAction =
 export function OrganizationMembers({
   context,
   headerAction,
+  memberDetail,
 }: {
   context: OrganizationContext;
   /** An optional action beside the heading, such as the mailbox roster import. */
   headerAction?: ReactNode;
+  /** An optional line under a member's name, such as their personal mailbox addresses. */
+  memberDetail?: (member: OrganizationMember) => ReactNode;
 }) {
   const t = useT('organization');
   const common = useT('common');
@@ -255,6 +258,7 @@ export function OrganizationMembers({
                             @{member.username}
                           </p>
                         )}
+                        {memberDetail?.(member)}
                       </div>
                     </div>
                     {isMobile ? <div className="mt-2">{roleControl(member)}</div> : null}

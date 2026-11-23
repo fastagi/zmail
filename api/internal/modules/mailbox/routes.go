@@ -184,6 +184,9 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
 		auth.POST("/member-welcome-mail-previews", h.PreviewMemberWelcome).Name("member_welcome_mail_previews.store").
 			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
+		auth.GET("/member-welcome-mails", h.ListMemberWelcomeMails).Name("member_welcome_mails.index")
+		auth.POST("/member-welcome-mails", h.ResendMemberWelcomeMail).Name("member_welcome_mails.store").
+			Middleware(middleware.BodyLimit(maxMemberWelcomeBodyBytes))
 
 		auth.GET("/mailboxes/:mailbox_id/members", h.ListMailboxMembers).
 			Name("mailboxes.members.index").WhereNumber("mailbox_id")

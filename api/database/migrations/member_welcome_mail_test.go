@@ -55,10 +55,13 @@ func TestMemberWelcomeMailConstraints(t *testing.T) {
 func TestMemberWelcomeMailUpDown(t *testing.T) {
 	db, _ := mailClientFixture(t)
 	migrated := dumpSchema(t, db)
+	// The later resend columns live on member_welcome_mails: roll them back first.
+	require.NoError(t, (&addMemberWelcomeResends{}).Down(db))
 	require.NoError(t, (&addMemberWelcomeMail{}).Down(db))
 	rolledBack := dumpSchema(t, db)
 	assert.NotContains(t, rolledBack, "member_welcome_settings")
 	assert.NotContains(t, rolledBack, "member_welcome_mails")
 	require.NoError(t, (&addMemberWelcomeMail{}).Up(db))
+	require.NoError(t, (&addMemberWelcomeResends{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db))
 }

@@ -79,7 +79,10 @@ import type {
   SendMailMessageInput,
 } from '@/features/mailbox/types';
 import { mockTransactionalStore } from '@/features/developer/server/mock-transactional-store';
-import { mockMemberWelcomeStore } from '@/features/mailbox/server/mock-member-welcome-store';
+import {
+  mockMemberWelcomeStore,
+  type MockWelcomeCandidate,
+} from '@/features/mailbox/server/mock-member-welcome-store';
 import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import {
@@ -990,6 +993,29 @@ export class MockMailboxStore {
       });
     });
     return { ok: true, value: result };
+  }
+
+  /**
+   * The mailboxes a welcome mail goes to, oldest first: Zmail personal mailboxes on an organization
+   * domain reserved for an invitee or owned by a current member other than the viewer.
+   */
+  welcomeCandidates(organizationId: number, viewerUserId: number): MockWelcomeCandidate[] {
+    return this.statesOf(organizationId)
+      .filter(({ mailbox, access }) => {
+        if (access.type !== 'personal' || access.origin !== 'zmail' || access.ownerLeft) return false;
+        if (mailbox.address.endsWith(`@${MOCK_MAILBOX_DOMAIN}`)) return false;
+        return access.ownerUserId === null
+          ? Boolean(access.pendingOwnerEmail)
+          : access.ownerUserId !== viewerUserId;
+      })
+      .sort((left, right) => left.mailbox.id - right.mailbox.id)
+      .map(({ mailbox, access }) => ({
+        mailbox_id: mailbox.id,
+        address: mailbox.address,
+        display_name: mailbox.display_name,
+        owner_user_id: access.ownerUserId,
+        invitation_pending: access.ownerUserId === null,
+      }));
   }
 
   /**

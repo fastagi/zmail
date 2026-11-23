@@ -66,6 +66,8 @@ recorded but has no special rights to it. A removed member loses access on their
 | Read the welcome mail setting | `GET /api/member-welcome-mail-setting` | `GET /v1/member-welcome-mail-setting` | `200` envelope |
 | Replace the welcome mail setting | `PUT /api/member-welcome-mail-setting` | `PUT /v1/member-welcome-mail-setting` | `200` envelope |
 | Preview a welcome mail | `POST /api/member-welcome-mail-previews` | `POST /v1/member-welcome-mail-previews` | `200` envelope |
+| List welcome mail status | `GET /api/member-welcome-mails` | `GET /v1/member-welcome-mails` | `200` envelope, at most the mailbox ceiling |
+| Resend a welcome mail | `POST /api/member-welcome-mails` | `POST /v1/member-welcome-mails` | `201` envelope |
 | List members | `GET /api/mailboxes/:id/members` | `GET /v1/mailboxes/:mailbox_id/members` | `200` envelope, at most 100 items |
 | Set a member | `PUT /api/mailboxes/:id/members/:userId` | `PUT /v1/mailboxes/:mailbox_id/members/:user_id` | `200` envelope |
 | Remove a member | `DELETE /api/mailboxes/:id/members/:userId` | `DELETE /v1/mailboxes/:mailbox_id/members/:user_id` | `204` |
@@ -473,9 +475,10 @@ The new mailbox itself is never the recipient: the person cannot read it before 
 manager creating a mailbox for themselves, a mailbox on the shared domain, and a connected mailbox
 send no welcome mail.
 
-Each mailbox is welcomed at most once, ever: the welcome is recorded with the mailbox in the same
-transaction that stores the message, so uploading a roster again or retrying a row answers
-`already_sent` and sends nothing. Welcome mails are [transactional messages](#transactional-mail)
+Each mailbox is welcomed automatically at most once, ever: the welcome is recorded with the mailbox
+in the same transaction that stores the message, so uploading a roster again or retrying a row
+answers `already_sent` and sends nothing. Only an owner or admin sends one again, explicitly (see
+[Resending A Welcome Mail](#resending-a-welcome-mail)). Welcome mails are [transactional messages](#transactional-mail)
 created by Zmail itself (no API key, `mode` `live`), sent from `no-reply@<mailbox domain>` under the
 organization's name: they are stored first and sent off the request path with the usual retries,
 count in the transactional lane, honor the suppression list and the simulator domain, and appear in
@@ -537,6 +540,77 @@ with `sign_in_url` and the settings link made clickable. Saving is audited as
 `POST /v1/member-welcome-mail-previews` takes `{ "language", "subject", "body" }` with the same rules
 and answers `{ "subject", "text", "html" }`: the whole mail, fixed section included, rendered with
 sample values and the organization's name. It stores and sends nothing.
+
+#### Welcome Mail Status
+
+`GET /v1/member-welcome-mails` lists, for owners and admins only (`403 PERMISSION.DENIED`
+otherwise), every mailbox that can be welcomed today, oldest first, with its latest welcome. A
+mailbox can be welcomed when it is a Zmail `personal` mailbox on an organization domain (not the
+shared domain) that is either reserved for an invitee or owned by a current member other than the
+caller; a mailbox awaiting handover, a connected mailbox, and the caller's own mailbox are absent.
+The list holds at most the organization's mailbox ceiling and is not paginated.
+
+```json
+[
+  {
+    "mailbox_id": 51,
+    "address": "alice@acme.example",
+    "display_name": "Alice",
+    "owner_user_id": 902,
+    "invitation_pending": false,
+    "status": "failed",
+    "failure_code": "transport.permanent_bounce",
+    "queued_at": "2026-11-23T08:00:00Z",
+    "sent_at": null,
+    "resend_count": 1
+  }
+]
+```
+
+| `status` | Meaning |
+|---|---|
+| `not_sent` | No welcome mail was ever stored for the mailbox: it predates welcome mails, they were off or not configured, or every try failed before storing |
+| `queued` | The latest welcome mail waits to be sent |
+| `sent` | The provider accepted the latest welcome mail at `sent_at` |
+| `failed` | Sending the latest welcome mail failed for good; `failure_code` is its send log failure code, such as `transport.permanent_bounce` or `send.sender_unverified` |
+| `suppressed` | The latest welcome mail was not sent: its recipient is on the suppression list |
+| `expired` | The latest welcome mail went out, but its send log entry is past retention |
+
+`invitation_pending` is true for a mailbox reserved for an invitee who has not joined yet
+(`owner_user_id` is then null). `queued_at` is when the latest welcome mail was stored, null for
+`not_sent`; `sent_at` is set only for `sent`; `failure_code` only for `failed`. `resend_count`
+counts the explicit resends. The list never carries a recipient address.
+
+#### Resending A Welcome Mail
+
+`POST /v1/member-welcome-mails` with `{ "mailbox_id": 51 }` sends that mailbox's welcome mail
+again, with the current setting's copy and language. It answers `201` with the mailbox's entry as
+in the list above, whose `status` is `queued` (or `suppressed` when the recipient is on the
+suppression list; nothing is then sent). The recipient follows the rule of the first welcome: the
+invitation address while the mailbox is reserved for an invitee, otherwise the owner's account
+email. A mailbox never welcomed before may be resent too: that is how an admin completes a welcome
+that failed.
+
+Each resend is a new [transactional message](#transactional-mail), like the first welcome, with
+`idempotency_key` `member-welcome:<mailbox id>:<n>`, where `n` is the new `resend_count`. The record
+of the mailbox stays one row and now points at the latest welcome, so a later roster upload still
+answers `already_sent`. Resending is audited as `member_welcome_mails.resend` with `mailbox_id`,
+`resend_count`, and `status`.
+
+| Error | When |
+|---|---|
+| `403 PERMISSION.DENIED` | The caller is not an owner or admin |
+| `404 MAILBOX.NOT_FOUND` | No mailbox with that id in the organization |
+| `409 MAILBOX.WELCOME_NOT_ELIGIBLE` | The mailbox cannot be welcomed (see the list above) |
+| `409 MAILBOX.WELCOME_DISABLED` | The organization turned welcome mails off |
+| `422 COMMON.VALIDATION_FAILED` | `mailbox_id` is missing or not a positive integer |
+| `422 MAILBOX.DOMAIN_NOT_VERIFIED` | The mailbox's domain is not verified, so `no-reply@` cannot send |
+| `429 MAILBOX.WELCOME_RESEND_LIMITED` | A welcome mail of this mailbox was stored less than a minute ago, or it was resent 5 times in the current 24-hour window; `Retry-After` gives the seconds to wait |
+| `429 MAILBOX.SEND_LIMIT_REACHED` | The transactional lane is full; nothing is stored |
+| `503 COMMON.SERVICE_UNAVAILABLE` | This instance cannot send welcome mails (`not_configured`) |
+
+The 24-hour window starts at the first resend after the previous window ended. A refused resend
+stores nothing and counts toward no limit.
 
 ## Access
 
@@ -4000,6 +4074,9 @@ inbound response. Without the notification starter nothing is published.
 | `MAILBOX.FOLDER_LIMIT_REACHED` | 422 |
 | `MAILBOX.LABEL_LIMIT_REACHED` | 422 |
 | `MAILBOX.SEARCH_TOO_BROAD` | 422 |
+| `MAILBOX.WELCOME_NOT_ELIGIBLE` | 409 |
+| `MAILBOX.WELCOME_DISABLED` | 409 |
+| `MAILBOX.WELCOME_RESEND_LIMITED` | 429 |
 | `MAILBOX.ROLE_NOT_FOUND` | 404 |
 | `MAILBOX.ROLE_NAME_TAKEN` | 409 |
 | `MAILBOX.ROLE_LIMIT_REACHED` | 422 |

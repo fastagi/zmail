@@ -6426,6 +6426,86 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /v1/member-welcome-mails:
+    get:
+      operationId: listMemberWelcomeMails
+      summary: List the latest welcome mail of every mailbox that can be welcomed
+      description: Needs the `owner` or `admin` organization role. Lists Zmail personal mailboxes on an
+        organization domain that are reserved for an invitee or owned by a current member other than the
+        caller, oldest first, bounded by the organization's mailbox ceiling. No recipient address is listed.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The mailboxes with their latest welcome mail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberWelcomeMailListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: resendMemberWelcomeMail
+      summary: Send a mailbox's welcome mail again
+      description: Needs the `owner` or `admin` organization role. Stores a new transactional message with
+        the current welcome copy, to the invitation address while the mailbox is reserved for an invitee and
+        to the owner's account email otherwise, with the idempotency key `member-welcome:<mailbox id>:<n>`.
+        Audited as `member_welcome_mails.resend`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendMemberWelcomeMailRequest'
+      responses:
+        '201':
+          description: The mailbox with its new latest welcome mail, `queued` or `suppressed`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberWelcomeMailResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: '`MAILBOX.NOT_FOUND`: no mailbox with that id in the organization.'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: '`MAILBOX.WELCOME_NOT_ELIGIBLE` when the mailbox cannot be welcomed, or
+            `MAILBOX.WELCOME_DISABLED` when the organization turned welcome mails off.'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          description: '`COMMON.VALIDATION_FAILED` for a missing `mailbox_id`, or `MAILBOX.DOMAIN_NOT_VERIFIED`
+            when the mailbox domain cannot send.'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+          description: '`MAILBOX.WELCOME_RESEND_LIMITED`: a welcome mail of the mailbox was stored less than a
+            minute ago, or it was resent 5 times in the current 24-hour window; or `MAILBOX.SEND_LIMIT_REACHED`
+            when the transactional lane is full. `Retry-After` gives the seconds to wait.'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailbox-exports:
     get:
       operationId: exportMailboxes
@@ -12333,6 +12413,9 @@ components:
         - MAILBOX.SEARCH_TOO_BROAD
         - MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND
         - MAILBOX.PLATFORM_ACCOUNT_TAKEN
+        - MAILBOX.WELCOME_NOT_ELIGIBLE
+        - MAILBOX.WELCOME_DISABLED
+        - MAILBOX.WELCOME_RESEND_LIMITED
         - MAILBOX.ROLE_NOT_FOUND
         - MAILBOX.ROLE_NAME_TAKEN
         - MAILBOX.ROLE_LIMIT_REACHED
@@ -17156,6 +17239,112 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MemberWelcomeMailPreview'
+    MemberWelcomeMailDeliveryStatus:
+      type: string
+      description: '`not_sent` means no welcome mail was ever stored for the mailbox; `queued`, `sent`, `failed`,
+        and `suppressed` are the send log status of the latest one; `expired` means it went out but its send
+        log entry is past retention.'
+      enum:
+        - not_sent
+        - queued
+        - sent
+        - failed
+        - suppressed
+        - expired
+    MemberWelcomeMail:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+        - address
+        - display_name
+        - owner_user_id
+        - invitation_pending
+        - status
+        - failure_code
+        - queued_at
+        - sent_at
+        - resend_count
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
+        address:
+          type: string
+        display_name:
+          type: string
+        owner_user_id:
+          description: Null while the mailbox is reserved for an invitee.
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+        invitation_pending:
+          description: True while the mailbox is reserved for an invitee who has not joined.
+          type: boolean
+        status:
+          $ref: '#/components/schemas/MemberWelcomeMailDeliveryStatus'
+        failure_code:
+          description: The send log failure code; set only when `status` is `failed`.
+          type:
+            - string
+            - 'null'
+        queued_at:
+          description: When the latest welcome mail was stored; null for `not_sent`.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        sent_at:
+          description: When the provider accepted the latest welcome mail; set only when `status` is `sent`.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        resend_count:
+          description: How many times an owner or admin sent the welcome mail again.
+          type: integer
+          minimum: 0
+    MemberWelcomeMailListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/MemberWelcomeMail'
+    MemberWelcomeMailResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MemberWelcomeMail'
+    ResendMemberWelcomeMailRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
     MemberImportResultResponse:
       type: object
       additionalProperties: false
