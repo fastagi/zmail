@@ -1167,6 +1167,7 @@ const messages = {
   },
   messages: {
     mailboxCreated: 'Mailbox created',
+    mailboxReceivingSoon: 'It starts receiving mail in a minute or two.',
     mailboxDeleted: 'Mailbox deleted',
     sent: 'Message sent',
     queued: 'Send limit reached. Your message is queued and will be sent automatically.',

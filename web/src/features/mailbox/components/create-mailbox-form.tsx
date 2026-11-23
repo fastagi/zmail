@@ -168,7 +168,7 @@ export function CreateMailboxForm({
       setOwner(soleMember);
       setMembers([{ key: nextKey, userId: soleMember, permission: 'send' }]);
       setNextKey(key => key + 1);
-      toast.success(t('messages.mailboxCreated'));
+      toast.success(t('messages.mailboxCreated'), { description: t('messages.mailboxReceivingSoon') });
       onCreated(mailbox);
     } catch (failure) {
       // Creating is an organization role, not a mailbox permission, so a refusal says so.

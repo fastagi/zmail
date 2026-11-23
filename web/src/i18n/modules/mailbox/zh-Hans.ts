@@ -1108,6 +1108,7 @@ const messages = {
   },
   messages: {
     mailboxCreated: '邮箱已创建',
+    mailboxReceivingSoon: '约 1–2 分钟后开始收信。',
     mailboxDeleted: '邮箱已删除',
     sent: '邮件已发送',
     queued: '额度已满，排队中，系统会自动发送',
