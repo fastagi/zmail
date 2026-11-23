@@ -124,3 +124,30 @@ func TestRemovingAMemberDropsTheDeveloperGrant(t *testing.T) {
 	require.NoError(t, db.Model(&MemberDeveloperGrantPO{}).Count(&count).Error)
 	assert.Zero(t, count)
 }
+
+// TestRoleChangeWithdrawsTheDeveloperGrant: a promoted member needs no grant, and demoting them
+// later must not quietly bring back the old one.
+func TestRoleChangeWithdrawsTheDeveloperGrant(t *testing.T) {
+	db, repo, organizationID, memberships := createOrganizationMembershipFixture(t)
+	createMailDomainsForGrantTest(t, db, organizationID, map[string]bool{"fast-ui.com": true})
+	now := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
+	ctx := context.Background()
+	owner, member := memberships["owner"].UserID, memberships["member"]
+
+	_, err := repo.UpdateMemberFeatures(ctx, organizationID, owner, member.ID,
+		developerPatch(domain.DeveloperGrant{Domains: []string{"fast-ui.com"}}), now)
+	require.NoError(t, err)
+
+	_, err = repo.ChangeMemberRole(ctx, organizationID, owner, member.ID, domain.OrganizationRoleAdmin, now)
+	require.NoError(t, err)
+	change, err := repo.ChangeMemberRole(ctx, organizationID, owner, member.ID, domain.OrganizationRoleMember, now)
+	require.NoError(t, err)
+	assert.Nil(t, change.Membership.DeveloperGrant)
+	assert.False(t, change.Membership.Features.Developer)
+
+	resolved, err := repo.ResolveContext(ctx, organizationID, member.UserID)
+	require.NoError(t, err)
+	assert.Nil(t, resolved.DeveloperGrant)
+	_, _, developer := resolved.DeveloperScope()
+	assert.False(t, developer, "the old grant must not come back")
+}

@@ -38,10 +38,13 @@ type EndpointPO struct {
 	PreviousSecretCiphertext string     `gorm:"type:text;not null;default:''"`
 	PreviousSecretValidUntil *time.Time `gorm:"index:idx_webhook_endpoints_previous_secret_expiry"`
 	CreatedBy                uint       `gorm:"not null"`
-	UpdatedBy                uint       `gorm:"not null"`
-	CreatedAt                time.Time  `gorm:"index:idx_webhook_endpoints_organization_created,priority:2"`
-	UpdatedAt                time.Time
-	DeletedAt                gorm.DeletedAt `gorm:"index"`
+	// DeveloperOwned marks an endpoint a developer created: it follows its creator's current
+	// developer grant. Endpoints owners and admins create belong to the organization.
+	DeveloperOwned bool      `gorm:"not null;default:false"`
+	UpdatedBy      uint      `gorm:"not null"`
+	CreatedAt      time.Time `gorm:"index:idx_webhook_endpoints_organization_created,priority:2"`
+	UpdatedAt      time.Time
+	DeletedAt      gorm.DeletedAt `gorm:"index"`
 
 	Organization  *organization.OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Subscriptions []SubscriptionPO             `gorm:"foreignKey:EndpointID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

@@ -147,6 +147,7 @@ const messages = {
     allDomainsHint: '以后新验证的域名也会自动包含在内。',
     allDomainsShort: '全部域名',
     domainsLabel: '允许发信的域名',
+    domainUnverified: '已不再验证，保存后移出范围',
     noVerifiedDomains: '组织还没有验证通过的自有域名。请先在域名设置中接入并验证一个域名。',
     loadingDomains: '正在读取组织域名…',
     domainsUnavailable: '暂时读取不到组织域名，请稍后重试。',

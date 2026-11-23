@@ -158,6 +158,28 @@ describe('developer access grant', () => {
     );
   });
 
+  it('unticks a listed domain that lost verification so the grant can still be saved', () => {
+    const save = mutation();
+    renderToggles({
+      context: owner,
+      member: member({
+        features: { ...grants, developer: true, api_keys: true },
+        developer_scope: { all_domains: false, domains: ['fast-ui.com', 'gone.example'] },
+      }),
+      mutation: save,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Alex 的开发者' }));
+
+    const gone = screen.getByRole('checkbox', { name: 'gone.example' });
+    expect(gone).not.toBeChecked();
+    expect(gone).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(save.mutate).toHaveBeenCalledWith(
+      { memberId: 92, input: { developer: true, developer_domains: ['fast-ui.com'] } },
+      expect.any(Object)
+    );
+  });
+
   it('shows a member the scope read-only', () => {
     renderToggles({
       context: { ...owner, role: 'member' },

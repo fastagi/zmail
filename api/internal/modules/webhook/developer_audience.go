@@ -37,17 +37,20 @@ type endpointCreator struct {
 	ScopeDomains *string `gorm:"column:scope_domains"`
 }
 
-// endpointsInAudience keeps the endpoints whose creator may receive the event now. Endpoints of
-// current owners and admins receive everything; an endpoint created by anyone else receives only
-// programmatic mail whose sender domain its creator's developer grant covers, and nothing once
-// the creator has no grant or has left the organization.
+// endpointsInAudience keeps the endpoints that may receive the event now. An endpoint an owner or
+// admin created belongs to the organization and receives everything, whoever created it. An
+// endpoint a developer created follows its creator: everything while they are an owner or admin,
+// only programmatic mail whose sender domain their developer grant covers while they are a member,
+// and nothing once they have no grant or have left the organization.
 func endpointsInAudience(tx *gorm.DB, mutation publicationMutation, endpoints []EndpointPO) ([]EndpointPO, error) {
-	if len(endpoints) == 0 {
-		return endpoints, nil
-	}
 	creatorIDs := make([]uint, 0, len(endpoints))
 	for index := range endpoints {
-		creatorIDs = append(creatorIDs, endpoints[index].CreatedBy)
+		if endpoints[index].DeveloperOwned {
+			creatorIDs = append(creatorIDs, endpoints[index].CreatedBy)
+		}
+	}
+	if len(creatorIDs) == 0 {
+		return endpoints, nil
 	}
 	var creators []endpointCreator
 	if err := tx.Table("organization_memberships AS memberships").
@@ -64,6 +67,10 @@ func endpointsInAudience(tx *gorm.DB, mutation publicationMutation, endpoints []
 	}
 	kept := make([]EndpointPO, 0, len(endpoints))
 	for index := range endpoints {
+		if !endpoints[index].DeveloperOwned {
+			kept = append(kept, endpoints[index])
+			continue
+		}
 		creator, member := byUser[endpoints[index].CreatedBy]
 		if member && creatorReceives(creator, mutation.Origin) {
 			kept = append(kept, endpoints[index])

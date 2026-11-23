@@ -246,7 +246,8 @@ fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clie
   (`403 DEVELOPER.DOMAIN_NOT_ALLOWED` otherwise); the shared sending domain never is. Organization,
   context, and member views carry `developer_scope: { all_domains, domains } | null`, null for owners,
   admins, and members without the grant. Invitations never carry `developer`. The audit change
-  records a changed scope as `developer_scope`.
+  records a changed scope as `developer_scope`. Any role change withdraws the grant, so a member
+  promoted and later demoted starts without developer access.
 - A route that needs a feature the active membership lacks returns
   `403 ORGANIZATION.FEATURE_NOT_GRANTED`. The routes each feature opens are listed in
   [`MAILBOXES.md`](MAILBOXES.md#member-feature-grants).

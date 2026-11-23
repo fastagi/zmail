@@ -39,7 +39,18 @@ func addWebhookDeveloper(t *testing.T, db *gorm.DB, organizationID uint) (uint, 
 
 func createSubscribedEndpoint(t *testing.T, repository *repository, organizationID, actorID uint, url string, now time.Time) *domain.WebhookEndpoint {
 	t.Helper()
-	endpoint, err := repository.CreateEndpoint(context.Background(), endpointMutation{
+	return createEndpointIn(t, context.Background(), repository, organizationID, actorID, url, now)
+}
+
+// createDeveloperEndpoint creates an endpoint as a developer does: limited to their own.
+func createDeveloperEndpoint(t *testing.T, repository *repository, organizationID, actorID uint, url string, now time.Time) *domain.WebhookEndpoint {
+	t.Helper()
+	return createEndpointIn(t, withEndpointOwner(context.Background(), actorID), repository, organizationID, actorID, url, now)
+}
+
+func createEndpointIn(t *testing.T, ctx context.Context, repository *repository, organizationID, actorID uint, url string, now time.Time) *domain.WebhookEndpoint {
+	t.Helper()
+	endpoint, err := repository.CreateEndpoint(ctx, endpointMutation{
 		OrganizationID: organizationID, ActorID: actorID, Name: url, URL: url,
 		URLHash: fmt.Sprintf("%064d", actorID), EventTypes: []string{"email.sent", "mail.message.sent"},
 		SecretCiphertext: "encrypted-secret", SecretHint: "abcd1234", Now: now,
@@ -71,7 +82,7 @@ func TestDeveloperEndpointsReceiveOnlyProgrammaticMailInsideTheGrant(t *testing.
 	now := time.Now().UTC()
 	developerID, membershipID := addWebhookDeveloper(t, db, organizationID)
 	managed := createSubscribedEndpoint(t, repository, organizationID, ownerID, "https://8.8.8.8/owner", now)
-	personal := createSubscribedEndpoint(t, repository, organizationID, developerID, "https://8.8.4.4/dev", now)
+	personal := createDeveloperEndpoint(t, repository, organizationID, developerID, "https://8.8.4.4/dev", now)
 
 	inside := &domain.WebhookEventOrigin{Programmatic: true, SenderDomain: "fast-ui.com", SenderDomainVerified: true}
 	result, err := repository.Publish(ctx, broadcastMutation(organizationID, "t1:sent", "email.sent", inside, now))
@@ -93,12 +104,42 @@ func TestDeveloperEndpointsReceiveOnlyProgrammaticMailInsideTheGrant(t *testing.
 	assert.Equal(t, []uint{managed.ID}, deliveredEndpoints(t, result), "a withdrawn grant stops delivery")
 }
 
+// TestManagerEndpointsKeepReceivingAfterTheirCreatorLeaves: only endpoints a developer created
+// follow their creator; an endpoint an owner or admin created stays the organization's.
+func TestManagerEndpointsKeepReceivingAfterTheirCreatorLeaves(t *testing.T) {
+	repository, db, organizationID, ownerID := newWebhookRepositoryTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	managed := createSubscribedEndpoint(t, repository, organizationID, ownerID, "https://8.8.8.8/owner", now)
+
+	require.NoError(t, db.Where("organization_id = ? AND user_id = ?", organizationID, ownerID).
+		Delete(&organization.OrganizationMembershipPO{}).Error)
+	result, err := repository.Publish(ctx, broadcastMutation(organizationID, "m1:sent", "mail.message.sent", nil, now))
+	require.NoError(t, err)
+	assert.Equal(t, []uint{managed.ID}, deliveredEndpoints(t, result))
+}
+
+// TestDeveloperEndpointsStopWhenTheirCreatorLeaves: a departed developer's endpoint receives nothing.
+func TestDeveloperEndpointsStopWhenTheirCreatorLeaves(t *testing.T) {
+	repository, db, organizationID, _ := newWebhookRepositoryTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	developerID, membershipID := addWebhookDeveloper(t, db, organizationID)
+	createDeveloperEndpoint(t, repository, organizationID, developerID, "https://8.8.4.4/dev", now)
+
+	require.NoError(t, db.Delete(&organization.OrganizationMembershipPO{}, membershipID).Error)
+	inside := &domain.WebhookEventOrigin{Programmatic: true, SenderDomain: "fast-ui.com", SenderDomainVerified: true}
+	result, err := repository.Publish(ctx, broadcastMutation(organizationID, "t1:sent", "email.sent", inside, now))
+	require.NoError(t, err)
+	assert.Empty(t, deliveredEndpoints(t, result))
+}
+
 func TestDeveloperManagesOnlyTheirOwnEndpoints(t *testing.T) {
 	repository, db, organizationID, ownerID := newWebhookRepositoryTest(t)
 	now := time.Now().UTC()
 	developerID, _ := addWebhookDeveloper(t, db, organizationID)
 	managed := createSubscribedEndpoint(t, repository, organizationID, ownerID, "https://8.8.8.8/owner", now)
-	personal := createSubscribedEndpoint(t, repository, organizationID, developerID, "https://8.8.4.4/dev", now)
+	personal := createDeveloperEndpoint(t, repository, organizationID, developerID, "https://8.8.4.4/dev", now)
 	_, err := repository.Publish(context.Background(), broadcastMutation(organizationID, "t1:sent", "email.sent",
 		&domain.WebhookEventOrigin{Programmatic: true, SenderDomain: "fast-ui.com"}, now))
 	require.NoError(t, err)

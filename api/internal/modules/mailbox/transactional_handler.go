@@ -352,9 +352,10 @@ func respondFields(c *gin.Context, code, message string, fields map[string][]str
 	})
 }
 
-// ListSendLanes shows owners and admins how full each send lane of the organization is.
+// ListSendLanes shows owners, admins, and developers how full each send lane of the organization
+// is; the service decides who may read it.
 func (h *Handler) ListSendLanes(c *gin.Context) {
-	viewer, ok := managerScope(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
@@ -367,9 +368,10 @@ func (h *Handler) ListSendLanes(c *gin.Context) {
 	response.Success(c, toMailSendLaneUsageList(lanes, computedAt))
 }
 
-// ListSuppressions lists the organization's suppression list for owners and admins.
+// ListSuppressions lists the organization's suppression list for owners, admins, and developers;
+// the service decides who may read it.
 func (h *Handler) ListSuppressions(c *gin.Context) {
-	viewer, ok := managerScope(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
@@ -396,7 +398,7 @@ func (h *Handler) ListSuppressions(c *gin.Context) {
 // RemoveSuppression takes an address off the suppression list; it answers 204 whether or not the
 // organization had the entry.
 func (h *Handler) RemoveSuppression(c *gin.Context) {
-	viewer, ok := managerScope(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}

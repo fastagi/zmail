@@ -152,6 +152,7 @@ const messages = {
     allDomainsHint: 'Domains verified later are included automatically.',
     allDomainsShort: 'all domains',
     domainsLabel: 'Sending domains',
+    domainUnverified: 'no longer verified; leaves the scope on save',
     noVerifiedDomains:
       'The organization has no verified domain of its own yet. Connect and verify one in the domain settings first.',
     loadingDomains: 'Loading the organization’s domains…',

@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -135,6 +136,29 @@ func TestDeveloperReadsSuppressionsAndLanes(t *testing.T) {
 	}
 	if err := f.service.RemoveSuppression(context.Background(), developer, id); err != nil {
 		t.Fatalf("RemoveSuppression(developer) = %v", err)
+	}
+	if f.suppressionCount(t) != 0 {
+		t.Fatal("the developer's removal did not remove the entry")
+	}
+}
+
+// TestDeveloperReachesSuppressionAndLaneRoutes covers the HTTP gate: the handler fixture's key
+// owner is a developer member.
+func TestDeveloperReachesSuppressionAndLaneRoutes(t *testing.T) {
+	f := newTxHandlerFixture(t, nil)
+	id := f.suppress(t, 10, "gone@example.com", domain.MailSuppressionReasonBounced, f.clock)
+	for _, route := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/v1/mail-send-lanes", http.StatusOK},
+		{http.MethodGet, "/v1/mail-suppressions", http.StatusOK},
+		{http.MethodDelete, fmt.Sprintf("/v1/mail-suppressions/%d", id), http.StatusNoContent},
+	} {
+		recorder, _ := f.request(route.method, route.path, "", "", "")
+		if recorder.Code != route.want {
+			t.Fatalf("%s %s = %d %s; want %d", route.method, route.path, recorder.Code, recorder.Body.String(), route.want)
+		}
 	}
 	if f.suppressionCount(t) != 0 {
 		t.Fatal("the developer's removal did not remove the entry")

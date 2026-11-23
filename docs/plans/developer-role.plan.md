@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go (Gin, GORM, Wire, PostgreSQL), Next.js 16 / React 19 / zod-mini schemas / next-intl, Vitest.
 
-**Spec:** `docs/plans/developer-role.zh-CN.md` (§11 items 1–4 approved as written; "我自己定的" decided).
+**Spec:** `docs/plans/developer-role.zh-CN.md` (§11 items 1–4 approved as written; the "decided by me" items are settled).
 
 ## Global Constraints
 
@@ -146,7 +146,7 @@ Table: `member_developer_grants(id bigserial PK, membership_id bigint NOT NULL U
 
 **Files:** `web/src/features/organization/{schemas.ts,types.ts,utils/member-features.ts,components/member-feature-toggles.tsx,services/organization-service.ts}`, new `components/developer-grant-dialog.tsx`, BFF `src/app/api/organizations/[organizationId]/members/[memberId]/features/route.ts` + its server route/mock, messages `src/i18n/messages/{zh,en}/organization.json` (or equivalent), tests beside utils/components.
 
-Behavior: `developer` appears last in `MEMBER_FEATURES`; turning it on opens the dialog (checkbox "全部已验证域名" + multi-select of verified non-shared domains from `useMailboxDomains`, first preselected); saving sends `{developer:true, developer_all_domains, developer_domains}`. The read-only chip reads `开发者 · fast-ui.com` (or `开发者 · 全部域名`). The API toggle shows on and disabled with hint "已包含在开发者授权中" while developer is on.
+Behavior: `developer` appears last in `MEMBER_FEATURES`; turning it on opens the dialog (an "every verified domain" checkbox + multi-select of verified non-shared domains from `useMailboxDomains`, first preselected); saving sends `{developer:true, developer_all_domains, developer_domains}`. The read-only chip reads "Developer · fast-ui.com" (or "Developer · all domains"), localized. The API toggle shows on and disabled with an "included in developer access" hint while developer is on.
 
 - [ ] Steps: Vitest for schema parsing and `developerScopeLabel()` util and toggle dialog submit → FAIL → implement → PASS; `corepack pnpm type-check && corepack pnpm lint` → commit.
 
@@ -154,7 +154,7 @@ Behavior: `developer` appears last in `MEMBER_FEATURES`; turning it on opens the
 
 **Files:** `web/src/app/(protected)/(console)/console/developers/page.tsx`, `web/src/features/developer/components/{developer-console.tsx,quick-start-tab.tsx,transactional-templates-tab.tsx}`, webhook endpoint schema (`created_by`), new `developer-access-required.tsx`, messages.
 
-Behavior: page gate uses `developer`; fallback explains "需要管理员开通开发者授权" with "联系管理员" hint (no raw 403). Quick start limits example domains to the scope for a developer member. Templates tab badges `outside_sending_scope` ("发件域名已不在你的范围内") and disables edit/delete there.
+Behavior: page gate uses `developer`; fallback explains that an admin must grant developer access, with a contact-your-admin hint (no raw 403). Quick start limits example domains to the scope for a developer member. Templates tab badges `outside_sending_scope` (sender domain no longer in your scope) and disables edit/delete there.
 
 - [ ] Steps: Vitest for gate fallback and scope filtering → FAIL → implement → PASS → type-check/lint → commit.
 

@@ -27,7 +27,11 @@ CASCADE`), its `organization_id`, `all_domains`, `scope_domains` (`text`, a JSON
 `granted_by`, with the check `chk_member_developer_grants_scope` (all domains or at least one
 domain). It only creates a table; its foreign keys take a brief `SHARE ROW EXCLUSIVE` lock on
 `organization_memberships`, `organizations`, and `users` while the table is created, which blocks
-writes to those tables for that moment but not reads. Rolling back drops every developer grant.
+writes to those tables for that moment but not reads. It also adds
+`webhook_endpoints.developer_owned boolean NOT NULL DEFAULT false`; the constant default makes this
+a catalog-only change, but `ADD COLUMN` still takes an `ACCESS EXCLUSIVE` lock on
+`webhook_endpoints` for that moment, so run it outside a long transaction that reads endpoints.
+Existing endpoints stay organization-owned. Rolling back drops the column and every developer grant.
 
 ### Medium — Developer grant widens owner/admin-only routes
 

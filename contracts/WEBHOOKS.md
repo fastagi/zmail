@@ -40,14 +40,16 @@ only the endpoints they created; any other endpoint, delivery, or attempt answer
 one that does not exist. Endpoints a developer created stay when the grant is withdrawn, and owners
 and admins keep managing them.
 
-Which endpoints receive a published event is decided when it is published, by each creator's
-current membership:
+Which endpoints receive a published event is decided when it is published:
 
-- an endpoint created by a current owner or admin receives every event it subscribes to;
-- an endpoint created by anyone else receives only events about programmatic mail (transactional
+- an endpoint an owner or admin created belongs to the organization and receives every event it
+  subscribes to, even after its creator leaves or changes role;
+- an endpoint a developer created follows its creator's current membership: every event while the
+  creator is an owner or admin; otherwise only events about programmatic mail (transactional
   `email.*` events) whose sender domain the creator's developer grant covers at that moment, and
   nothing while the creator holds no grant or has left the organization. Mailbox `mail.message.*`
-  events never reach such an endpoint, so a developer never learns about colleagues' mail;
+  events never reach it while its creator is a member, so a developer never learns about
+  colleagues' mail. Deliveries already queued finish under the rules at publish time;
 - `webhook.test` sent to one endpoint always reaches that endpoint.
 
 The browser cannot publish arbitrary events, override delivery state, read event payloads, or invoke

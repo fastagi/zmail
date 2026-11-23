@@ -1036,6 +1036,7 @@ TABLE webhook_endpoints
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
   COLUMN deleted_at timestamp with time zone
+  COLUMN developer_owned boolean NOT NULL DEFAULT false
 
 TABLE webhook_events
   COLUMN id bigint NOT NULL DEFAULT nextval('webhook_events_id_seq'::regclass)

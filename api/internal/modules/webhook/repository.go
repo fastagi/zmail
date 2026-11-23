@@ -163,16 +163,18 @@ func (r *repository) CreateEndpoint(ctx context.Context, mutation endpointMutati
 			return fmt.Errorf("find webhook endpoint organization: %w", err)
 		}
 		po := &EndpointPO{
-			OrganizationID:      mutation.OrganizationID,
-			Name:                mutation.Name,
-			URL:                 mutation.URL,
-			URLHash:             mutation.URLHash,
-			Status:              endpointStatusActive,
-			Version:             1,
-			SecretCiphertext:    mutation.SecretCiphertext,
-			SecretHint:          mutation.SecretHint,
-			SecretVersion:       1,
-			CreatedBy:           mutation.ActorID,
+			OrganizationID:   mutation.OrganizationID,
+			Name:             mutation.Name,
+			URL:              mutation.URL,
+			URLHash:          mutation.URLHash,
+			Status:           endpointStatusActive,
+			Version:          1,
+			SecretCiphertext: mutation.SecretCiphertext,
+			SecretHint:       mutation.SecretHint,
+			SecretVersion:    1,
+			CreatedBy:        mutation.ActorID,
+			// A request limited to its own endpoints is a developer's.
+			DeveloperOwned:      endpointOwnerFromContext(ctx) != 0,
 			UpdatedBy:           mutation.ActorID,
 			CreatedAt:           mutation.Now,
 			UpdatedAt:           mutation.Now,
@@ -990,7 +992,8 @@ func findEndpointForUpdate(tx *gorm.DB, organizationID uint, endpointID uint) (*
 
 func subscribedEndpoints(tx *gorm.DB, mutation publicationMutation) ([]EndpointPO, error) {
 	query := tx.Model(&EndpointPO{}).
-		Select("webhook_endpoints.id", "webhook_endpoints.url_hash", "webhook_endpoints.created_by").
+		Select("webhook_endpoints.id", "webhook_endpoints.url_hash", "webhook_endpoints.created_by",
+			"webhook_endpoints.developer_owned").
 		Joins("JOIN webhook_subscriptions ON webhook_subscriptions.endpoint_id = webhook_endpoints.id").
 		Where(
 			"webhook_endpoints.organization_id = ? AND webhook_endpoints.status = ? AND webhook_endpoints.deleted_at IS NULL AND webhook_subscriptions.event_type = ?",

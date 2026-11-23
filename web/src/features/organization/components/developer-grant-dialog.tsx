@@ -106,10 +106,11 @@ function DeveloperScopeForm({
   const granted = Boolean(scope);
   const [allDomains, setAllDomains] = useState(scope?.all_domains ?? false);
   // No organization default domain exists, so a new grant starts with the first verified one.
+  // A listed domain that lost verification starts unticked: the API refuses to save it.
   const [chosen, setChosen] = useState<string[]>(() =>
-    scope ? scope.domains : verified.slice(0, 1)
+    scope ? scope.domains.filter(name => verified.includes(name)) : verified.slice(0, 1)
   );
-  // A listed domain that is no longer verified stays visible so the manager can drop it.
+  // It stays visible, disabled, so the manager sees it leaves the scope on save.
   const offered = [...new Set([...verified, ...(scope?.domains ?? [])])];
   const ready = allDomains || chosen.length > 0;
   const tooMany = !allDomains && chosen.length > MAX_DEVELOPER_GRANT_DOMAINS;
@@ -167,17 +168,23 @@ function DeveloperScopeForm({
                 </legend>
                 {offered.map(domain => {
                   const id = `developer-domain-${domain}`;
+                  const stale = !verified.includes(domain);
                   return (
                     <div key={domain} className="flex items-center gap-2">
                       <Checkbox
                         id={id}
-                        checked={allDomains || chosen.includes(domain)}
-                        disabled={allDomains}
+                        checked={!stale && (allDomains || chosen.includes(domain))}
+                        disabled={allDomains || stale}
                         onCheckedChange={checked => toggleDomain(domain, checked === true)}
                       />
                       <Label htmlFor={id} className="font-normal">
                         {domain}
                       </Label>
+                      {stale && (
+                        <span className="text-xs text-muted-foreground">
+                          {t('developerGrant.domainUnverified')}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
