@@ -11,6 +11,21 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail client access, part 2 (SMTP submission)
+
+### Medium — Blind copies, the sending member, and inline attachments are stored
+
+Migration `2026_12_25_090000_add_mail_submission_fields` adds `mail_messages.bcc_addresses`
+(`text NOT NULL DEFAULT '[]'`), `mail_messages.sent_by_membership_id` (`bigint`, no foreign key),
+`mail_attachments.content_id` (`varchar(250) NOT NULL DEFAULT ''`, a bare token without angle
+brackets or spaces), and `mail_attachments.inline` (`boolean NOT NULL DEFAULT false`). Every column
+has a constant default, so PostgreSQL only changes the catalog and rewrites no row, but each `ALTER
+TABLE` takes a short `ACCESS EXCLUSIVE` lock on `mail_messages` and `mail_attachments` that waits
+behind running queries and blocks new ones while it waits. Run it off-peak and with a
+`lock_timeout` (for example `SET lock_timeout = '5s'`) so a long query makes it retry instead of
+queueing traffic behind it. Down drops the four columns and forgets blind copies and inline
+placement.
+
 ## Unreleased — Mail client access, part 1
 
 ### High — Deploy the Web before the API

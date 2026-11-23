@@ -150,6 +150,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_24_090000_add_mail_message_sources",
 			"2026_12_24_100000_add_mail_imap_uids",
 			"2026_12_24_120000_add_mail_app_passwords",
+			"2026_12_25_090000_add_mail_submission_fields",
 		),
 	)
 }
