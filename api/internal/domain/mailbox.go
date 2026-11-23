@@ -737,8 +737,10 @@ type MailBroadcastRepository interface {
 	// to paused with the reason. organizationID 0 is the worker.
 	PauseBroadcast(ctx context.Context, organizationID, id uint, reason string) error
 	// ResumeBroadcast moves a paused broadcast back to sending: it opens wave 2 when the test wave
-	// was waiting, and sets the safety override when the health check had paused it.
-	ResumeBroadcast(ctx context.Context, organizationID, id uint, override bool) error
+	// was waiting, and sets the safety override when the health check had paused it. A test wave
+	// the owner paused after it was done goes back to waiting for its window instead; now starts a
+	// window it did not have yet.
+	ResumeBroadcast(ctx context.Context, organizationID, id uint, override bool, now time.Time) error
 	// CompleteTestWaves pauses sending broadcasts whose test wave is done until its wait is over.
 	CompleteTestWaves(ctx context.Context, now time.Time) error
 	// ListActiveBroadcasts lists sending broadcasts and paused ones waiting after their test wave,

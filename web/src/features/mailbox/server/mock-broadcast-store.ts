@@ -234,17 +234,45 @@ export class MockBroadcastStore {
       ...stored.broadcast,
       status: 'paused',
       stop_reason: 'paused_by_owner',
-      resume_at: null,
+      // Holding a waiting test wave keeps its window for the resume.
+      resume_at:
+        stored.broadcast.stop_reason === 'test_wave_complete' ? stored.broadcast.resume_at : null,
       updated_at: this.timestamp(),
     };
     return { ok: true, broadcast: withCounts(stored) };
   }
 
-  /** Continues a paused broadcast; after a test wave, the rest is sent at once. */
+  /**
+   * Continues a paused broadcast; after a test wave, the rest is sent at once. A done test wave
+   * paused by hand goes back to waiting for its window.
+   */
   resume(organizationId: number, id: number): MockBroadcastResult {
     const stored = this.of(organizationId).get(id);
     if (!stored) return { ok: false, error: 'not_found' };
     if (stored.broadcast.status !== 'paused') return { ok: false, error: 'not_editable' };
+    const pending = (wave: number) =>
+      stored.recipients.some(
+        recipient => recipient.status === 'pending' && recipient.wave === wave
+      );
+    if (
+      stored.broadcast.stop_reason === 'paused_by_owner' &&
+      stored.broadcast.current_wave === 1 &&
+      stored.broadcast.test_percent > 0 &&
+      !pending(1) &&
+      pending(2)
+    ) {
+      // A done test wave paused by hand waits out its window again, as the API does.
+      const resumeAt =
+        stored.broadcast.resume_at ??
+        new Date(this.now().getTime() + stored.broadcast.test_wait_minutes * 60_000).toISOString();
+      stored.broadcast = {
+        ...stored.broadcast,
+        stop_reason: 'test_wave_complete',
+        resume_at: resumeAt,
+        updated_at: this.timestamp(),
+      };
+      return { ok: true, broadcast: withCounts(stored) };
+    }
     const wave =
       stored.broadcast.stop_reason === 'test_wave_complete' ? 2 : stored.broadcast.current_wave;
     stored.broadcast = {

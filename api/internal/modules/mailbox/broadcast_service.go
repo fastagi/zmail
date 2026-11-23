@@ -348,7 +348,7 @@ func (s *service) stoppedBroadcast(ctx context.Context, viewer domain.Organizati
 
 // ResumeBroadcast continues a paused broadcast; it needs Send on the sender mailbox at this call.
 // Resuming one that the health check paused is an explicit decision: it is not paused
-// automatically again.
+// automatically again. Resuming a test wave paused by hand during its wait returns it to that wait.
 func (s *service) ResumeBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, error) {
 	organizationID := viewer.OrganizationID
 	broadcast, err := s.authorizeBroadcast(ctx, viewer, id, canSend)
@@ -359,7 +359,7 @@ func (s *service) ResumeBroadcast(ctx context.Context, viewer domain.Organizatio
 		return nil, ErrMailBroadcastNotEditable
 	}
 	override := broadcast.StopReason == stopReasonBounceRate || broadcast.StopReason == stopReasonComplaintRate
-	if err := s.broadcasts.ResumeBroadcast(ctx, organizationID, id, override); err != nil {
+	if err := s.broadcasts.ResumeBroadcast(ctx, organizationID, id, override, s.now().UTC()); err != nil {
 		return nil, err
 	}
 	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
@@ -402,7 +402,7 @@ func (s *service) checkBroadcastHealth(ctx context.Context, now time.Time) error
 		}
 		if broadcast.Status == domain.MailBroadcastPaused && broadcast.StopReason == stopReasonTestWave &&
 			broadcast.ResumeAt != nil && !broadcast.ResumeAt.After(now) {
-			if err := s.broadcasts.ResumeBroadcast(ctx, 0, broadcast.ID, false); err != nil {
+			if err := s.broadcasts.ResumeBroadcast(ctx, 0, broadcast.ID, false, now); err != nil {
 				return err
 			}
 		}

@@ -1493,6 +1493,7 @@ const messages = {
       'This broadcast was paused because too many messages bounced or were reported as spam. Sending more can hurt delivery for all mail from this domain. If you resume, it will not be paused automatically again.',
     pausedToast: 'Broadcast paused',
     resumedToast: 'Broadcast resumed',
+    resumedWaitingToast: 'Resumed. Watching the test group; the rest is sent at {time}.',
     noProblems: 'No failures, bounces, or spam reports.',
     queueProgress: 'Queue progress',
     sendSuccessRate: 'Send success rate',

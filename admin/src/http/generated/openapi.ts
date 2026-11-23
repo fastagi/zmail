@@ -1055,7 +1055,7 @@ export interface paths {
         put?: never;
         /**
          * Resume a paused broadcast
-         * @description Continues a paused broadcast. A waiting test wave continues with everyone. Resuming one that the health check paused sets `safety_override`, so it is not paused automatically again. Only owners and admins may.
+         * @description Continues a paused broadcast. A waiting test wave continues with everyone. A test wave paused by hand after it was done goes back to waiting (`paused` with `test_wave_complete`) until the `resume_at` it had, or a full `test_wait_minutes` from now when it finished while paused. Resuming one that the health check paused sets `safety_override`, so it is not paused automatically again. Only owners and admins may.
          */
         post: operations["resumeMailBroadcast"];
         delete?: never;
@@ -5676,7 +5676,7 @@ export interface components {
             progress: components["schemas"]["MailBroadcastProgress"] | null;
             /**
              * Format: date-time
-             * @description When a waiting test wave is checked and the rest continues.
+             * @description When a waiting test wave is checked and the rest continues. Kept while an owner holds a waiting test wave with `paused_by_owner`, so resuming it waits for the same time.
              */
             resume_at: string | null;
             /** @description An owner resumed the broadcast after the health check paused it; it is not paused automatically again. */

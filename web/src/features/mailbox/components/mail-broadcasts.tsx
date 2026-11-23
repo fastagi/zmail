@@ -1255,8 +1255,22 @@ function BroadcastDetail({
 
   const doResume = async () => {
     try {
-      await resume.mutateAsync(broadcast.id);
-      toast.success(t('broadcasts.resumedToast'));
+      const resumed = await resume.mutateAsync(broadcast.id);
+      // A test wave paused by hand during its wait goes back to that wait rather than sending.
+      if (
+        'stop_reason' in resumed &&
+        resumed.status === 'paused' &&
+        resumed.stop_reason === 'test_wave_complete' &&
+        resumed.resume_at
+      ) {
+        toast.success(
+          t('broadcasts.resumedWaitingToast', {
+            time: formatter.format(new Date(resumed.resume_at)),
+          })
+        );
+      } else {
+        toast.success(t('broadcasts.resumedToast'));
+      }
     } catch (failure) {
       toast.error(t(resolveMailboxErrorKey(failure)));
     }

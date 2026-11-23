@@ -472,7 +472,6 @@ describe('mail broadcasts console', () => {
     expect(screen.getByRole('button', { name: 'Open Launch' })).toBeInTheDocument();
   });
 
-  // Issue #143: a resumed test wave waiting on its window is not shown as paused.
   it('labels when a canceled broadcast ended as canceled, not finished (#192)', () => {
     state.broadcast.data = broadcast({
       id: 9,
@@ -488,6 +487,7 @@ describe('mail broadcasts console', () => {
     expect(screen.queryByText(/^Finished /u)).toBeNull();
   });
 
+  // Issue #143: a resumed test wave waiting on its window is not shown as paused.
   it('labels a test wave waiting on its window apart from a manual pause', () => {
     state.broadcast.data = broadcast({
       id: 9,
@@ -501,6 +501,46 @@ describe('mail broadcasts console', () => {
 
     expect(screen.getAllByText('Watching test group').length).toBeGreaterThan(0);
     expect(screen.queryByText('Paused')).toBeNull();
+  });
+
+  it('shows a test wave resumed by hand as watching again, with when the rest is sent (#143)', async () => {
+    const resumeAt = '2026-11-24T08:30:00Z';
+    const staged = {
+      id: 9,
+      name: 'Launch',
+      status: 'paused',
+      test_percent: 50,
+      resume_at: resumeAt,
+      counts: counts({ total: 2, sent: 1, pending: 1 }),
+    };
+    state.broadcast.data = broadcast({ ...staged, stop_reason: 'paused_by_owner' });
+    state.resume.mutateAsync.mockImplementation(async () => {
+      const waiting = broadcast({ ...staged, stop_reason: 'test_wave_complete' });
+      state.broadcast.data = waiting;
+      return waiting;
+    });
+    const view = renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Launch' }));
+    expect(screen.getAllByText('Paused').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        expect.stringMatching(/^Resumed\. Watching the test group; the rest is sent at .+\.$/u)
+      )
+    );
+    // The app refetches after the mutation; here the mocked query is re-read on a render.
+    view.rerender(
+      <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
+        <MailBroadcasts />
+      </NextIntlClientProvider>
+    );
+    expect(screen.getAllByText('Watching test group').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Paused')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send to everyone now' })).toBeInTheDocument();
+    expect(screen.getByTestId('broadcast-paused')).toHaveTextContent(/everyone else gets it at/u);
   });
 
   it('saves and sends a brand-new broadcast in one step', async () => {

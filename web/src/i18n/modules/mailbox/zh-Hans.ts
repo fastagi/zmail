@@ -1428,6 +1428,7 @@ const messages = {
       '此群发因退信或垃圾邮件举报过多而被暂停。继续发送可能损害该域名所有邮件的送达率。恢复后不会再自动暂停。',
     pausedToast: '群发已暂停',
     resumedToast: '群发已恢复',
+    resumedWaitingToast: '已恢复。测试组观察中，{time} 发送剩余收件人。',
     noProblems: '没有失败、退信或垃圾邮件举报。',
     queueProgress: '队列进度',
     sendSuccessRate: '发送成功率',

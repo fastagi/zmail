@@ -161,6 +161,71 @@ func TestOwnersPauseResumeAndCancelABroadcast(t *testing.T) {
 	}
 }
 
+// Issue #143: pausing during a test wave's wait and resuming goes back to waiting for the same
+// window, not to sending.
+func TestResumingAWaitingTestWavePausedByHandKeepsItsWindow(t *testing.T) {
+	fixture := newBroadcastFixture(t, 1000)
+	ctx := context.Background()
+	fixture.contacts(t, 2, "window")
+	broadcast := fixture.start(t, 50)
+	if processed, _ := fixture.service.DispatchBroadcasts(ctx, 50); processed != 1 {
+		t.Fatalf("test wave = %d", processed)
+	}
+	waiting := fixture.load(t, broadcast.ID)
+	if waiting.StopReason != stopReasonTestWave || waiting.ResumeAt == nil {
+		t.Fatalf("waiting = %+v", waiting)
+	}
+	window := *waiting.ResumeAt
+
+	fixture.now = fixture.now.Add(10 * time.Minute)
+	paused, _, err := fixture.service.PauseBroadcast(ctx, as(1), broadcast.ID)
+	if err != nil || paused.Status != domain.MailBroadcastPaused || paused.StopReason != stopReasonOwner {
+		t.Fatalf("paused = %+v, %v", paused, err)
+	}
+	fixture.now = fixture.now.Add(5 * time.Minute)
+	resumed, err := fixture.service.ResumeBroadcast(ctx, as(1), broadcast.ID)
+	if err != nil || resumed.Status != domain.MailBroadcastPaused || resumed.StopReason != stopReasonTestWave ||
+		resumed.CurrentWave != 1 || resumed.ResumeAt == nil || !resumed.ResumeAt.Equal(window) {
+		t.Fatalf("resumed = %+v, %v; want waiting until %s", resumed, err, window)
+	}
+	if processed, _ := fixture.service.DispatchBroadcasts(ctx, 50); processed != 0 {
+		t.Fatalf("sent %d before the window ended", processed)
+	}
+	if still := fixture.load(t, broadcast.ID); still.ResumeAt == nil || !still.ResumeAt.Equal(window) {
+		t.Fatalf("the worker moved the window: %+v", still)
+	}
+	fixture.now = window
+	if processed, err := fixture.service.DispatchBroadcasts(ctx, 50); err != nil || processed != 1 {
+		t.Fatalf("rest = %d, %v; want 1", processed, err)
+	}
+	if done := fixture.load(t, broadcast.ID); done.Status != domain.MailBroadcastSent || done.Counts.Sent != 2 {
+		t.Fatalf("done = %+v", done)
+	}
+}
+
+// A test wave paused by hand before it finished, whose last messages finish meanwhile, waits a
+// full window after the resume.
+func TestResumingAFinishedTestWaveWithoutAWindowStartsOne(t *testing.T) {
+	fixture := newBroadcastFixture(t, 1000)
+	ctx := context.Background()
+	fixture.contacts(t, 2, "late")
+	broadcast := fixture.start(t, 50)
+	if _, _, err := fixture.service.PauseBroadcast(ctx, as(1), broadcast.ID); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	// The test recipient finishes while the broadcast is paused, as an in-flight lease would.
+	if err := fixture.repo.db.Exec(`UPDATE mail_broadcast_recipients SET status = 'sent'
+		WHERE broadcast_id = ? AND wave = 1`, broadcast.ID).Error; err != nil {
+		t.Fatalf("finish the test wave: %v", err)
+	}
+	resumed, err := fixture.service.ResumeBroadcast(ctx, as(1), broadcast.ID)
+	want := fixture.now.Add(30 * time.Minute)
+	if err != nil || resumed.Status != domain.MailBroadcastPaused || resumed.StopReason != stopReasonTestWave ||
+		resumed.ResumeAt == nil || !resumed.ResumeAt.Equal(want) {
+		t.Fatalf("resumed = %+v, %v; want waiting until %s", resumed, err, want)
+	}
+}
+
 func TestBroadcastTestSettingsAreValidated(t *testing.T) {
 	fixture := newBroadcastFixture(t, 1000)
 	for _, input := range []BroadcastInput{{TestPercent: 51}, {TestPercent: -1}, {TestPercent: 10, TestWaitMinutes: 4}, {TestWaitMinutes: 1441}} {

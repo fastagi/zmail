@@ -2249,6 +2249,28 @@ describe('mailbox browser route boundary', () => {
       counts: { total: 10, sent: 2, pending: 8 },
     });
     expect(started.resume_at).not.toBeNull();
+    // Issue #143: pausing during the wait and resuming goes back to the same wait.
+    const control = async (action: 'pauses' | 'resumptions') =>
+      (
+        await (
+          await route.controlMailBroadcastRoute(
+            json(`/api/mail-broadcasts/${draft.id}/${action}`, {}),
+            String(draft.id),
+            action
+          )
+        ).json()
+      ).data;
+    expect(await control('pauses')).toMatchObject({
+      status: 'paused',
+      stop_reason: 'paused_by_owner',
+    });
+    expect(await control('resumptions')).toMatchObject({
+      status: 'paused',
+      stop_reason: 'test_wave_complete',
+      current_wave: 1,
+      resume_at: started.resume_at,
+      counts: { sent: 2, pending: 8 },
+    });
     const resumed = (
       await (
         await route.controlMailBroadcastRoute(
