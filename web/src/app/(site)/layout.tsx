@@ -27,14 +27,14 @@ export default async function SiteLayout({ children }: PropsWithChildren) {
 
             {/* Navigation links - only valid ones */}
             <nav className="hidden md:flex items-center gap-1">
-              <Link 
-                href="/" 
+              <Link
+                href="/"
                 className="px-3 py-2 text-sm font-medium text-text-subtle rounded-lg transition-colors hover:text-primary hover:bg-muted/50"
               >
                 {t('nav.home')}
               </Link>
-              <Link 
-                href="/console" 
+              <Link
+                href="/console"
                 className="px-3 py-2 text-sm font-medium text-text-subtle rounded-lg transition-colors hover:text-primary hover:bg-muted/50"
               >
                 {t('nav.console')}
@@ -52,9 +52,7 @@ export default async function SiteLayout({ children }: PropsWithChildren) {
       </header>
 
       {/* Main content area */}
-      <main className="flex-1">
-        {children}
-      </main>
+      <main className="flex-1">{children}</main>
 
       {/* Simplified Footer */}
       <footer className="border-t border-border/50 bg-bg-surface/50">
@@ -64,14 +62,12 @@ export default async function SiteLayout({ children }: PropsWithChildren) {
             <div className="flex items-center gap-2">
               <Logo className="h-6 w-6 text-primary" />
               <span className="text-sm font-medium">Zmail</span>
-              <span className="text-sm text-text-muted">
-                {t('footer.tagline')}
-              </span>
+              <span className="text-sm text-text-muted">{t('footer.tagline')}</span>
             </div>
 
             {/* Links & Copyright */}
             <div className="flex items-center gap-6 text-sm text-text-muted">
-              <a 
+              <a
                 href="https://github.com/fastagi/zmail"
                 target="_blank"
                 rel="noopener noreferrer"
