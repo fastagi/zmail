@@ -48,16 +48,36 @@ var headerDecoder = &mime.WordDecoder{CharsetReader: charsetReader}
 // parseMail reads the headers, the first text and HTML bodies, and the attached files of a raw
 // message. Every returned string is valid UTF-8 without NUL bytes.
 func parseMail(raw []byte) (*parsedMail, error) {
+	return readMail(raw, false)
+}
+
+// parseSubmission reads a message a mail app submits. Unlike parseMail it cuts nothing short: a
+// subject, body, or set of attachments over its limit is a *domain.MailClientSubmitError of kind
+// too_large naming the limit, and a message that cannot be read one of kind invalid.
+func parseSubmission(raw []byte) (*parsedMail, error) {
+	if len(raw) > domain.MailClientMaxSubmissionBytes {
+		return nil, &domain.MailClientSubmitError{Kind: domain.MailClientSubmitTooLarge, Reason: "The message exceeds 8 MiB"}
+	}
+	return readMail(raw, true)
+}
+
+func readMail(raw []byte, strict bool) (*parsedMail, error) {
 	message, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
+		if strict {
+			return nil, &domain.MailClientSubmitError{Kind: domain.MailClientSubmitInvalid, Reason: "The message could not be read"}
+		}
 		return nil, ErrMailInboundUnparseable
 	}
+	subject := strings.Join(strings.Fields(decodeHeader(message.Header.Get("Subject"))), " ")
+	if strict && utf8.RuneCountInString(subject) > domain.MaxMailSubjectLength {
+		return nil, &domain.MailClientSubmitError{Kind: domain.MailClientSubmitTooLarge, Reason: "The subject exceeds 998 characters"}
+	}
 	parsed := &parsedMail{
-		Subject: truncateRunes(decodeHeader(message.Header.Get("Subject")), domain.MaxMailSubjectLength),
+		Subject: strings.TrimSpace(truncateRunes(subject, domain.MaxMailSubjectLength)),
 		To:      headerAddresses(message.Header, "To"),
 		Cc:      headerAddresses(message.Header, "Cc"),
 	}
-	parsed.Subject = strings.Join(strings.Fields(parsed.Subject), " ")
 	if id, ok := normalizeMessageID(message.Header.Get("Message-Id")); ok {
 		parsed.MessageID = id
 	}
@@ -72,8 +92,11 @@ func parseMail(raw []byte) (*parsedMail, error) {
 		parsed.FromName = truncateText(cleanText(from.Name), 255)
 	}
 
-	walker := &mimeWalker{}
-	walker.walk(textproto(message.Header), message.Body, 0)
+	walker := &mimeWalker{strict: strict}
+	walker.walk(textproto(message.Header), message.Body, 0, false)
+	if walker.violation != nil {
+		return nil, walker.violation
+	}
 	parsed.TextBody = truncateText(walker.text, domain.MaxMailBodyBytes)
 	parsed.HTMLBody = truncateText(walker.html, domain.MaxMailBodyBytes)
 	parsed.Attachments = walker.attachments
@@ -96,10 +119,29 @@ type mimeWalker struct {
 	parts           int
 	attachments     []domain.MailAttachment
 	attachmentBytes int
+	// strict refuses what the lenient walk drops or cuts short: a mail app's submission must be
+	// sent whole or not at all. The first limit met is kept in violation.
+	strict    bool
+	violation *domain.MailClientSubmitError
 }
 
-func (w *mimeWalker) walk(header partHeader, body io.Reader, depth int) {
+// refuse records the first limit a strict walk meets.
+func (w *mimeWalker) refuse(reason string) {
+	if w.violation == nil {
+		w.violation = &domain.MailClientSubmitError{Kind: domain.MailClientSubmitTooLarge, Reason: reason}
+	}
+}
+
+// walk reads one part; related tells that it sits in a multipart/related, where a part without a
+// disposition is shown inline by the HTML body.
+func (w *mimeWalker) walk(header partHeader, body io.Reader, depth int, related bool) {
 	if depth > maxMIMEDepth || w.parts >= maxMIMEParts {
+		if w.strict && w.violation == nil {
+			w.violation = &domain.MailClientSubmitError{Kind: domain.MailClientSubmitInvalid, Reason: "The message nests or splits into too many parts"}
+		}
+		return
+	}
+	if w.violation != nil {
 		return
 	}
 	w.parts++
@@ -121,7 +163,7 @@ func (w *mimeWalker) walk(header partHeader, body io.Reader, depth int) {
 			if partErr != nil {
 				return
 			}
-			w.walk(part.Header, part, depth+1)
+			w.walk(part.Header, part, depth+1, mediaType == "multipart/related")
 		}
 		return
 	}
@@ -140,25 +182,39 @@ func (w *mimeWalker) walk(header partHeader, body io.Reader, depth int) {
 		case "text/plain":
 			if w.text == "" {
 				w.text = decodeBody(header, params, body)
+				if w.strict && len(w.text) > domain.MaxMailBodyBytes {
+					w.refuse("The text body exceeds 256 KiB")
+				}
 				return
 			}
 		case "text/html":
 			if w.html == "" {
 				w.html = decodeBody(header, params, body)
+				if w.strict && len(w.html) > domain.MaxMailBodyBytes {
+					w.refuse("The HTML body exceeds 256 KiB")
+				}
 				return
 			}
 		}
 	}
-	w.attach(header, mediaType, filename, body)
+	inline := disposition == "inline" || (disposition == "" && related)
+	w.attach(header, mediaType, filename, inline, body)
 }
 
 // attach stores one leaf part as a file. Parts beyond the count or size limits are dropped.
-func (w *mimeWalker) attach(header partHeader, mediaType, filename string, body io.Reader) {
+func (w *mimeWalker) attach(header partHeader, mediaType, filename string, inline bool, body io.Reader) {
 	if len(w.attachments) >= domain.MaxMailAttachments {
+		if w.strict {
+			w.refuse("More than 10 attachments")
+		}
 		return
 	}
 	remaining := domain.MaxMailAttachmentBytes - w.attachmentBytes
 	content, err := io.ReadAll(io.LimitReader(transferDecoder(header, body), int64(remaining)+1))
+	if w.strict && len(content) > remaining {
+		w.refuse("Attachments exceed 4 MiB in total")
+		return
+	}
 	if (err != nil && len(content) == 0) || len(content) == 0 || len(content) > remaining {
 		return
 	}
@@ -167,11 +223,18 @@ func (w *mimeWalker) attach(header partHeader, mediaType, filename string, body 
 		name = "attachment-" + strconv.Itoa(len(w.attachments)+1)
 	}
 	w.attachmentBytes += len(content)
+	// A Content-ID that cannot be stored is dropped, never the file.
+	contentID, ok := cleanContentID(header.Get("Content-Id"))
+	if !ok {
+		contentID = ""
+	}
 	w.attachments = append(w.attachments, domain.MailAttachment{
 		Filename:    name,
 		ContentType: cleanAttachmentType(mediaType),
 		Size:        len(content),
 		Content:     content,
+		ContentID:   contentID,
+		Inline:      inline && contentID != "",
 	})
 }
 

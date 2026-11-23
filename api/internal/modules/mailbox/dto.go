@@ -149,7 +149,10 @@ type SendOutboundMailRequest struct {
 func (r SendMailMessageRequest) input(idempotencyKey string) SendInput {
 	attachments := make([]AttachmentInput, 0, len(r.Attachments))
 	for _, attachment := range r.Attachments {
-		attachments = append(attachments, AttachmentInput(attachment))
+		// An HTTP request never places a file inline.
+		attachments = append(attachments, AttachmentInput{
+			Filename: attachment.Filename, ContentType: attachment.ContentType, Content: attachment.Content,
+		})
 	}
 	var template *TemplateSendInput
 	if r.Template != nil {
@@ -575,6 +578,8 @@ type MailMessageResponse struct {
 	Events []MailEventResponse `json:"events"`
 	// Attachments lists the files of the message without their content.
 	Attachments []MailAttachmentResponse `json:"attachments"`
+	// Bcc are the blind copies of an outbound message, present only for the member who sent it.
+	Bcc []string `json:"bcc,omitempty"`
 }
 
 // MailAttachmentResponse describes one attached file. The content is downloaded separately.
@@ -787,6 +792,8 @@ func toRevealedMailMessageResponse(message *domain.MailMessage) *MailMessageResp
 		InReplyTo:                  message.InReplyTo,
 		Events:                     toMailEventResponses(message.Events),
 		Attachments:                toMailAttachmentResponses(message.Attachments),
+		// The service leaves blind copies only on what the viewer sent.
+		Bcc: message.Bcc,
 	}
 }
 

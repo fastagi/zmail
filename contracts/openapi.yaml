@@ -16708,6 +16708,14 @@ components:
           items:
             type: string
             maxLength: 320
+        bcc:
+          type: array
+          description: Blind copies of an outbound message. Present only on the detail the sending
+            member reads in the console; absent for everyone else, in listings, and on API-key routes.
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
         subject:
           type: string
           maxLength: 998
@@ -18891,6 +18899,10 @@ components:
         - imap_host
         - imap_port
         - imap_security
+        - smtp_host
+        - smtp_port
+        - smtp_security
+        - smtp_starttls_port
       properties:
         imap_host:
           type: string
@@ -18903,6 +18915,23 @@ components:
           type: string
           enum:
             - ssl_tls
+        smtp_host:
+          type: string
+          minLength: 1
+        smtp_port:
+          type: integer
+          description: The SMTP submission port with TLS from the start.
+          minimum: 1
+          maximum: 65535
+        smtp_security:
+          type: string
+          enum:
+            - ssl_tls
+        smtp_starttls_port:
+          type: integer
+          description: The SMTP submission port that upgrades with STARTTLS.
+          minimum: 1
+          maximum: 65535
     MailAppPasswordList:
       type: object
       additionalProperties: false
@@ -18967,8 +18996,7 @@ components:
           maxLength: 64
         scopes:
           type: array
-          description: Only `imap` is accepted until mail submission ships; `smtp` is a validation
-            error on `scopes`.
+          description: '`imap` lets a mail app read; `smtp` lets it send over SMTP submission.'
           minItems: 1
           maxItems: 2
           uniqueItems: true

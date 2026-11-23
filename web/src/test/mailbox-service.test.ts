@@ -315,6 +315,9 @@ describe('mailbox service boundary', () => {
     expect(mailLogEntrySchema.safeParse(entryWithoutSummary).success).toBe(false);
     // Only the detail carries the events.
     expect(mailMessageSummarySchema.safeParse({ ...summary(), events: [] }).success).toBe(false);
+    // Blind copies reach only the sender's detail, never a summary.
+    expect(mailMessageSchema.safeParse({ ...sent, bcc: ['erin@example.com'] }).success).toBe(true);
+    expect(mailMessageSummarySchema.safeParse({ ...summary(), bcc: [] }).success).toBe(false);
     expect(mailLogEntrySchema.safeParse({ ...entry, events: [] }).success).toBe(false);
 
     for (const drift of [

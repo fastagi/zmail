@@ -1,7 +1,16 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { AlertCircle, Copy, KeyRound, Lock, Plus, RotateCw, Smartphone, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Copy,
+  KeyRound,
+  Lock,
+  Plus,
+  RotateCw,
+  Smartphone,
+  Trash2,
+} from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocale } from 'next-intl';
 import { toast } from 'sonner';
@@ -31,6 +40,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { totpService } from '@/features/auth/services/totp-service';
+import { useCurrentUser } from '@/features/auth/store/auth-store';
 import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
 import { MailClientGuides } from '@/features/mailbox/components/mail-client-guides';
 import { relativeTime, useRelativeTimeFormat } from '@/features/mailbox/components/mail-shared';
@@ -42,16 +52,17 @@ import {
   useUpdateMailClientSettings,
 } from '@/features/mailbox/hooks/use-mail-app-passwords';
 import { useChosenMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
+import { useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import {
   MAIL_APP_PASSWORD_NAME_MAX_LENGTH,
   type MailAppPassword,
   type MailAppPasswordList,
   type MailClientProtocol,
 } from '@/features/mailbox/mail-client-schemas';
+import type { Mailbox } from '@/features/mailbox/types';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
 
 type CreateError =
   | 'nameRequired'
@@ -71,8 +82,31 @@ interface CreatedSecret {
   secret: string;
 }
 
+/** Every mail client scope, in the order the dialog offers them; a new device gets both. */
+const MAIL_CLIENT_SCOPES = ['imap', 'smtp'] as const satisfies readonly MailClientProtocol[];
+
 /**
- * Settings tab for reading mail in desktop and phone mail apps: the server to enter, the member's
+ * The addresses of the member's own personal mailboxes, which a mail app signs in with. Connected
+ * copies of outside accounts never sign in.
+ */
+function ownMailboxAddresses(
+  mailboxes: readonly Pick<Mailbox, 'address' | 'type' | 'origin' | 'owner_user_id'>[],
+  userId: string | number | undefined
+): string[] {
+  if (userId === undefined) return [];
+  return mailboxes
+    .filter(
+      mailbox =>
+        mailbox.type === 'personal' &&
+        mailbox.origin !== 'connected' &&
+        mailbox.owner_user_id !== null &&
+        String(mailbox.owner_user_id) === String(userId)
+    )
+    .map(mailbox => mailbox.address);
+}
+
+/**
+ * Settings tab for reading and sending mail in desktop and phone mail apps: the servers to enter, the member's
  * own mail client passwords (one per device, the secret shown once), setup steps per app, and, for
  * owners and admins, the organization switch. The API stays the authority on every rule.
  */
@@ -114,7 +148,7 @@ export function MailClientsTab() {
         </Alert>
       ) : null}
 
-      {list ? <ServerCard server={list.server} /> : null}
+      {list ? <ServerCard server={list.server} organizationId={organizationId} /> : null}
 
       <Card>
         <CardHeader>
@@ -163,7 +197,9 @@ export function MailClientsTab() {
               <Smartphone className="size-7 text-muted-foreground" aria-hidden="true" />
               <div>
                 <p className="text-sm font-medium">{t('devices.emptyTitle')}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{t('devices.emptyDescription')}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t('devices.emptyDescription')}
+                </p>
               </div>
               {canAdd ? (
                 <Button
@@ -205,8 +241,17 @@ export function MailClientsTab() {
   );
 }
 
-function ServerCard({ server }: { server: MailAppPasswordList['server'] }) {
+function ServerCard({
+  server,
+  organizationId,
+}: {
+  server: MailAppPasswordList['server'];
+  organizationId: number | undefined;
+}) {
   const t = useT('settings.mailClients.server');
+  const user = useCurrentUser();
+  const mailboxes = useMailboxes(organizationId ?? 0);
+  const addresses = ownMailboxAddresses(mailboxes.data ?? [], user?.id);
 
   const copy = async (value: string) => {
     try {
@@ -216,6 +261,28 @@ function ServerCard({ server }: { server: MailAppPasswordList['server'] }) {
       toast.error(t('copyError'));
     }
   };
+
+  const signInRows = (
+    <>
+      <dt className="text-muted-foreground">{t('username')}</dt>
+      <dd className="min-w-0 space-y-1">
+        {addresses.length > 0 ? (
+          addresses.map(address => (
+            <div key={address} className="flex min-w-0 items-center gap-2">
+              <code className="break-all font-mono">{address}</code>
+              <CopyButton
+                label={t('copyAddress', { address })}
+                onClick={() => void copy(address)}
+              />
+            </div>
+          ))
+        ) : (
+          <span>{t('usernameValue')}</span>
+        )}
+      </dd>
+      <ServerRow label={t('password')} value={t('passwordValue')} />
+    </>
+  );
 
   return (
     <Card>
@@ -240,16 +307,53 @@ function ServerCard({ server }: { server: MailAppPasswordList['server'] }) {
               onCopy={copy}
             />
             <ServerRow label={t('security')} value={t('securityValue')} />
-            <ServerRow label={t('username')} value={t('usernameValue')} />
-            <ServerRow label={t('password')} value={t('passwordValue')} />
+            {signInRows}
           </dl>
         </section>
-        <section className="space-y-1 border-t pt-4">
+        <section className="space-y-2 border-t pt-4">
           <h3 className="text-sm font-medium">{t('outgoing')}</h3>
-          <p className="text-sm text-muted-foreground">{t('outgoingSoon')}</p>
+          <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[8rem_1fr]">
+            <ServerRow
+              label={t('host')}
+              value={server.smtp_host}
+              copyLabel={t('copyHost')}
+              onCopy={copy}
+            />
+            <ServerRow
+              label={t('port')}
+              value={String(server.smtp_port)}
+              copyLabel={t('copyPort')}
+              onCopy={copy}
+            />
+            <ServerRow label={t('security')} value={t('securityValue')} />
+            <ServerRow
+              label={t('starttlsPort')}
+              value={String(server.smtp_starttls_port)}
+              copyLabel={t('copyStarttlsPort')}
+              onCopy={copy}
+            />
+            {signInRows}
+          </dl>
+          <p className="text-xs text-muted-foreground">{t('sameSignIn')}</p>
         </section>
       </CardContent>
     </Card>
+  );
+}
+
+function CopyButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button
+      type="button"
+      isIcon
+      size="xs"
+      variant="ghost"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <Copy className="size-3" />
+    </Button>
   );
 }
 
@@ -270,17 +374,7 @@ function ServerRow({
       <dd className="flex min-w-0 items-center gap-2">
         {onCopy ? <code className="break-all font-mono">{value}</code> : <span>{value}</span>}
         {onCopy && copyLabel ? (
-          <Button
-            type="button"
-            isIcon
-            size="xs"
-            variant="ghost"
-            aria-label={copyLabel}
-            title={copyLabel}
-            onClick={() => void onCopy(value)}
-          >
-            <Copy className="size-3" />
-          </Button>
+          <CopyButton label={copyLabel} onClick={() => void onCopy(value)} />
         ) : null}
       </dd>
     </>
@@ -395,7 +489,7 @@ function CreateDeviceDialog({
   const create = useCreateMailAppPassword(organizationId);
   const totp = useQuery({ queryKey: ['auth', 'totp'], queryFn: totpService.status });
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState<readonly MailClientProtocol[]>(['imap']);
+  const [scopes, setScopes] = useState<readonly MailClientProtocol[]>(MAIL_CLIENT_SCOPES);
   const [currentPassword, setCurrentPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [askCode, setAskCode] = useState(false);
@@ -431,7 +525,7 @@ function CreateDeviceDialog({
       const result = await create.mutateAsync({
         name: trimmed,
         // In the order the dialog offers them.
-        scopes: (['imap'] as const).filter(scope => scopes.includes(scope)),
+        scopes: MAIL_CLIENT_SCOPES.filter(scope => scopes.includes(scope)),
         current_password: currentPassword,
         ...(showCode && totpCode.trim() ? { totp_code: totpCode.trim() } : {}),
       });
@@ -517,18 +611,10 @@ function CreateDeviceDialog({
               </div>
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium">{t('create.access')}</legend>
-                {(['imap', 'smtp'] as const).map(scope => (
-                  <label
-                    key={scope}
-                    className={cn(
-                      'flex items-start gap-3 text-sm',
-                      // Sending from mail apps is not offered yet; the API refuses the scope.
-                      scope === 'smtp' ? 'cursor-not-allowed' : 'cursor-pointer'
-                    )}
-                  >
+                {MAIL_CLIENT_SCOPES.map(scope => (
+                  <label key={scope} className="flex cursor-pointer items-start gap-3 text-sm">
                     <Checkbox
                       checked={scopes.includes(scope)}
-                      disabled={scope === 'smtp'}
                       className="mt-0.5"
                       onCheckedChange={value =>
                         setScopes(current =>
@@ -538,12 +624,7 @@ function CreateDeviceDialog({
                         )
                       }
                     />
-                    <span>
-                      {t(`create.${scope}`)}
-                      {scope === 'smtp' ? (
-                        <span className="block text-muted-foreground">{t('create.smtpHint')}</span>
-                      ) : null}
-                    </span>
+                    <span>{t(`create.${scope}`)}</span>
                   </label>
                 ))}
               </fieldset>

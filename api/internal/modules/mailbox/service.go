@@ -88,6 +88,11 @@ type Settings struct {
 	// ClientIMAPHost and ClientIMAPPort are the public IMAP server the console shows members.
 	ClientIMAPHost string
 	ClientIMAPPort int
+	// ClientSMTPHost, ClientSMTPPort (implicit TLS), and ClientSubmissionPort (STARTTLS) are the
+	// public SMTP server the console shows members.
+	ClientSMTPHost       string
+	ClientSMTPPort       int
+	ClientSubmissionPort int
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -106,12 +111,21 @@ type DeliveryEvent struct {
 
 // SendInput is a validated request to send one message.
 type SendInput struct {
-	To        []string
-	Cc        []string
+	To []string
+	Cc []string
+	// Bcc are blind copies: delivered, counted in the recipient limit with To and Cc, stored apart
+	// from them, and never written into a header.
+	Bcc       []string
 	Subject   string
 	Text      string
 	HTML      string
 	InReplyTo string
+	// SentByMembershipID records the member who sends; SendMessage and SendFromAddress set it from
+	// the viewer.
+	SentByMembershipID uint
+	// allowBlankBody lets a message without text or HTML through: a mail app may send only files.
+	// Only the SMTP submission path sets it.
+	allowBlankBody bool
 	// Attachments are optional files, bounded in number and total size.
 	Attachments []AttachmentInput
 	// Template, when set, supplies the subject and bodies; Subject, Text, and HTML must be empty.
@@ -663,6 +677,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.AppPasswordPepper = resolved.AppPasswordPepper
 	settings.ClientIMAPHost = resolved.ClientIMAPHost
 	settings.ClientIMAPPort = resolved.ClientIMAPPort
+	settings.ClientSMTPHost = resolved.ClientSMTPHost
+	settings.ClientSMTPPort = resolved.ClientSMTPPort
+	settings.ClientSubmissionPort = resolved.ClientSubmissionPort
 	return settings
 }
 
@@ -973,6 +990,7 @@ func (s *service) SendMessage(ctx context.Context, viewer domain.OrganizationCon
 	if err != nil {
 		return nil, false, err
 	}
+	input.SentByMembershipID = viewer.MembershipID
 	return s.send(ctx, mailbox, input, true)
 }
 
@@ -993,6 +1011,7 @@ func (s *service) SendFromAddress(ctx context.Context, viewer domain.Organizatio
 	if err := s.checkAccess(ctx, viewer, mailbox, canSend, ErrMailboxNotFound); err != nil {
 		return nil, false, err
 	}
+	input.SentByMembershipID = viewer.MembershipID
 	return s.send(ctx, mailbox, input, true)
 }
 
@@ -1013,7 +1032,9 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 	if err := s.checkAccess(ctx, viewer, mailbox, canView, ErrMailMessageNotFound); err != nil {
 		return nil, err
 	}
-	// An API key acts for no viewing person: it sees the shared labels but never a star.
+	// An API key acts for no viewing person: it sees the shared labels but never a star or a
+	// blind copy.
+	hideBlindCopies(0, message)
 	if err := s.fillLabels(ctx, message); err != nil {
 		return nil, err
 	}
@@ -1115,6 +1136,8 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 			Filename:    message.Attachments[i].Filename,
 			ContentType: message.Attachments[i].ContentType,
 			Content:     message.Attachments[i].Content,
+			ContentID:   message.Attachments[i].ContentID,
+			Inline:      message.Attachments[i].Inline,
 		})
 		// The stored copy is the record; the response carries metadata only.
 		message.Attachments[i].Content = nil
@@ -1144,6 +1167,7 @@ func (s *service) deliver(
 		FromName:    message.FromName,
 		To:          message.To,
 		Cc:          message.Cc,
+		Bcc:         message.Bcc,
 		Subject:     message.Subject,
 		TextBody:    message.TextBody,
 		HTMLBody:    message.HTMLBody,
@@ -1332,7 +1356,12 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		return nil, fmt.Errorf("%w: recipients", ErrMailMessageInvalid)
 	}
 	cc, ok := normalizeRecipients(input.Cc, seen)
-	if !ok || len(to)+len(cc) > domain.MaxMailRecipients {
+	if !ok {
+		return nil, fmt.Errorf("%w: recipients", ErrMailMessageInvalid)
+	}
+	// A blind copy that is also in to or cc is already delivered there.
+	bcc, ok := normalizeRecipients(input.Bcc, seen)
+	if !ok || len(to)+len(cc)+len(bcc) > domain.MaxMailRecipients {
 		return nil, fmt.Errorf("%w: recipients", ErrMailMessageInvalid)
 	}
 
@@ -1341,7 +1370,7 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		return nil, fmt.Errorf("%w: subject", ErrMailMessageInvalid)
 	}
 	text, html := cleanText(input.Text), cleanText(input.HTML)
-	if strings.TrimSpace(text) == "" && strings.TrimSpace(html) == "" {
+	if strings.TrimSpace(text) == "" && strings.TrimSpace(html) == "" && !input.allowBlankBody {
 		return nil, fmt.Errorf("%w: body", ErrMailMessageInvalid)
 	}
 	if len(text) > domain.MaxMailBodyBytes || len(html) > domain.MaxMailBodyBytes {
@@ -1363,7 +1392,7 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 	}
 	fingerprint := ""
 	if idempotencyKey != "" {
-		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
+		fingerprint = sendFingerprintWith(to, cc, bcc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
 	}
 
 	// The id is chosen before the message is stored, so a replay or a queued send reuses it.
@@ -1384,6 +1413,8 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		FromName:               mailbox.DisplayName,
 		To:                     to,
 		Cc:                     cc,
+		Bcc:                    bcc,
+		SentByMembershipID:     input.SentByMembershipID,
 		Subject:                cleanText(subject),
 		TextBody:               text,
 		HTMLBody:               html,
@@ -1557,6 +1588,12 @@ func validIdempotencyKey(key string) bool {
 // sendFingerprint hashes the normalized request with length prefixes, so different field
 // boundaries can never produce the same digest.
 func sendFingerprint(to, cc []string, subject, text, html, inReplyTo, attachments string) string {
+	return sendFingerprintWith(to, cc, nil, subject, text, html, inReplyTo, attachments)
+}
+
+// sendFingerprintWith is sendFingerprint with blind copies. Without them the digest is exactly the
+// one sendFingerprint gave before blind copies existed, so stored idempotency keys still replay.
+func sendFingerprintWith(to, cc, bcc []string, subject, text, html, inReplyTo, attachments string) string {
 	hash := sha256.New()
 	write := func(value string) {
 		fmt.Fprintf(hash, "%d:", len(value))
@@ -1571,6 +1608,9 @@ func sendFingerprint(to, cc []string, subject, text, html, inReplyTo, attachment
 	// A request without attachments keeps the digest it had before attachments existed.
 	if attachments != "" {
 		write(attachments)
+	}
+	if len(bcc) > 0 {
+		write("bcc:" + strings.Join(bcc, ","))
 	}
 	return hex.EncodeToString(hash.Sum(nil))
 }

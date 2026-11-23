@@ -4497,7 +4497,7 @@ export interface components {
         CreateMailAppPasswordRequest: {
             current_password: string;
             name: string;
-            /** @description Only `imap` is accepted until mail submission ships; `smtp` is a validation error on `scopes`. */
+            /** @description `imap` lets a mail app read; `smtp` lets it send over SMTP submission. */
             scopes: components["schemas"]["MailClientProtocol"][];
             /** @description Required when the account has two-factor sign-in on. */
             totp_code?: string;
@@ -5542,6 +5542,13 @@ export interface components {
             imap_port: number;
             /** @enum {string} */
             imap_security: "ssl_tls";
+            smtp_host: string;
+            /** @description The SMTP submission port with TLS from the start. */
+            smtp_port: number;
+            /** @enum {string} */
+            smtp_security: "ssl_tls";
+            /** @description The SMTP submission port that upgrades with STARTTLS. */
+            smtp_starttls_port: number;
         };
         MailClientSettings: {
             access_enabled: boolean;
@@ -6113,6 +6120,8 @@ export interface components {
         MailMessageSummary: {
             /** @description How many files the message has; the detail lists them. */
             attachment_count: number;
+            /** @description Blind copies of an outbound message. Present only on the detail the sending member reads in the console; absent for everyone else, in listings, and on API-key routes. */
+            bcc?: string[];
             cc: string[];
             /** Format: date-time */
             created_at: string;
