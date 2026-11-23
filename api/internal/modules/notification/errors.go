@@ -1,9 +1,13 @@
 package notification
 
-import "errors"
+import (
+	"errors"
 
-// Web push errors owned by the notification starter. Their codes stay inside the module, so the
-// browser shells need no catalog change to receive them.
+	"github.com/fastagi/zmail/api/internal/domain"
+)
+
+// Web push errors of the notification starter; their codes live in the shared domain catalog
+// because the browser shells handle them.
 var (
 	// ErrWebPushDisabled means the instance has no valid VAPID configuration.
 	ErrWebPushDisabled = errors.New("web push is not configured on this instance")
@@ -18,8 +22,8 @@ var (
 
 // Public error codes of the web push boundary.
 const (
-	CodeWebPushDisabled             = "NOTIFICATION.WEB_PUSH_DISABLED"
-	CodeWebPushEndpointInvalid      = "NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID"
-	CodeWebPushKeysInvalid          = "NOTIFICATION.WEB_PUSH_KEYS_INVALID"
-	CodeWebPushSubscriptionNotFound = "NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND"
+	CodeWebPushDisabled             = domain.CodeNotificationWebPushDisabled
+	CodeWebPushEndpointInvalid      = domain.CodeNotificationWebPushEndpointInvalid
+	CodeWebPushKeysInvalid          = domain.CodeNotificationWebPushKeysInvalid
+	CodeWebPushSubscriptionNotFound = domain.CodeNotificationWebPushSubscriptionNotFound
 )
