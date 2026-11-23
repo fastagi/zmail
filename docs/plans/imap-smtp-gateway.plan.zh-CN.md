@@ -223,7 +223,7 @@ type session struct { conn *imapserver.Conn; principal *domain.MailClientPrincip
 - 认证顺序（`AuthenticateClient`）：normalize → hash → `secret_hash` 唯一查找 → 未撤销 → 范围包含 imap → 组织开关打开 → `ResolveContext` 后 `CanUse(mail_clients)` → 把用户名解析成邮箱：先按地址匹配，有 `view` 就成为根目录；如果是账号邮箱，根目录取这个人的 personal/zmail 邮箱 → 节流更新 `last_used_*`（同一密码 5 分钟内最多写一次，IP 只保留 /24 或 /48）。任何一步失败都返回同一个 `domain.ErrMailClientAuthFailed`。
 - 文件夹：根目录为 `INBOX`、`Sent (\Sent)`、`Archive (\Archive)`、`Trash (\Trash)` 和用户文件夹（R8）；共享邮箱为 `Shared/<address>/INBOX` 等。不出现 `origin = connected` 的邮箱，也不出现只有 `administer` 没有 `view` 的邮箱。NAMESPACE 为 `(("" "/")) NIL (("Shared/" "/"))`。
 - 查询统一 join `mail_imap_uids` 和 `mail_messages`，套用现有的 `unsealedMessage` 条件，按 uid 排序；Unseen 只统计入站且当前 membership 没有 read 行的邮件。
-- P1a 拒绝的命令：CREATE/DELETE/RENAME → `NO [NOPERM]`；APPEND/COPY/MOVE → `NO [CANNOT]`；EXPUNGE 返回 OK 但什么都不删；STORE `\Deleted` 和自定义 keyword 会被忽略。PERMANENTFLAGS 为 `(\Seen \Flagged)`。
+- P1a 拒绝的命令：CREATE/DELETE/RENAME → `NO [NOPERM]`；APPEND/COPY/MOVE → `NO [CANNOT]`；EXPUNGE、UID EXPUNGE 和 STORE `+FLAGS`/`FLAGS` 带 `\Deleted` → `NO [CANNOT]`；`\Draft`、`\Answered` 和自定义 keyword 会被忽略。PERMANENTFLAGS 为 `(\Seen \Flagged)`。
 - CAPABILITY：`IMAP4rev1 IMAP4rev2 NAMESPACE UIDPLUS SPECIAL-USE LIST-STATUS ID ENABLE UTF8=ACCEPT AUTH=PLAIN`。不声明 IDLE、MOVE，这两项留到 P1c/P1b。
 - 序号管理：每个会话 SELECT 时建一个 `imapserver.MailboxTracker`；NOOP/Poll 时重新取 UID 列表并做差，新增的调用 `QueueNumMessages`，消失的调用 `QueueExpunge`。跨会话共享 tracker 留到 P1c。
 - FETCH：`UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE BODY[...]/BODY.PEEK[...]/BINARY[...]`，用 imapserver 的 `Extract*` 辅助函数从原文生成（以 beta.9 实际导出的为准）。原文先查 `mail_message_sources`，没有就用 `composeMessageSource` 合成，放进 64 MiB LRU。非 PEEK 的 BODY 在 SELECT（非 EXAMINE）下调用 `SetClientFlag(seen)`。

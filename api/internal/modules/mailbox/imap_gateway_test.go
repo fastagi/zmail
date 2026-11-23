@@ -363,11 +363,14 @@ func TestIMAPReadOnlyCommandsRefused(t *testing.T) {
 	_, appendErr := appendCmd.Wait()
 	want("APPEND", appendErr, imap.ResponseCodeCannot)
 
-	if err := client.Store(imap.SeqSetNum(1), &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(); err != nil {
-		t.Fatalf("STORE \\Deleted: %v", err)
-	}
-	if err := client.Expunge().Close(); err != nil {
-		t.Fatalf("EXPUNGE: %v", err)
+	// P1a keeps no \Deleted and removes nothing: marking for deletion and expunging are refused
+	// like MOVE, so the app does not show the message as gone.
+	want("STORE +FLAGS \\Deleted", client.Store(imap.SeqSetNum(1), &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(), imap.ResponseCodeCannot)
+	want("STORE FLAGS (\\Seen \\Deleted)", client.Store(imap.SeqSetNum(1), &imap.StoreFlags{Op: imap.StoreFlagsSet, Silent: true, Flags: []imap.Flag{imap.FlagSeen, imap.FlagDeleted}}, nil).Close(), imap.ResponseCodeCannot)
+	want("EXPUNGE", client.Expunge().Close(), imap.ResponseCodeCannot)
+	want("UID EXPUNGE", client.UIDExpunge(imap.UIDSetNum(1)).Close(), imap.ResponseCodeCannot)
+	if err := client.Store(imap.SeqSetNum(1), &imap.StoreFlags{Op: imap.StoreFlagsDel, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(); err != nil {
+		t.Fatalf("STORE -FLAGS \\Deleted, which changes nothing: %v", err)
 	}
 	status, err := client.Status("INBOX", &imap.StatusOptions{NumMessages: true}).Wait()
 	if err != nil || status.NumMessages == nil || *status.NumMessages != 1 {

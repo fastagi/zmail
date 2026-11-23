@@ -21,6 +21,8 @@ var (
 		Text: "Adding messages from a mail app is not supported yet"}
 	errNoCopy = &imap.Error{Type: imap.StatusResponseTypeNo, Code: imap.ResponseCodeCannot,
 		Text: "Moving and copying messages from a mail app is not supported yet; organize mail in Zmail on the web"}
+	errNoDelete = &imap.Error{Type: imap.StatusResponseTypeNo, Code: imap.ResponseCodeCannot,
+		Text: "Deleting messages from a mail app is not supported yet; delete mail in Zmail on the web"}
 	errReadOnly     = &imap.Error{Type: imap.StatusResponseTypeNo, Text: "The mailbox is open read-only"}
 	errNoSuchFolder = &imap.Error{Type: imap.StatusResponseTypeNo, Code: imap.ResponseCodeNonExistent,
 		Text: "No such mailbox"}
@@ -485,6 +487,10 @@ func (s *session) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags *im
 	has := func(flag imap.Flag) bool {
 		return slices.ContainsFunc(flags.Flags, func(f imap.Flag) bool { return canonicalFlag(f) == flag })
 	}
+	// Marking a message \Deleted is refused like EXPUNGE, so the app never hides mail that stays.
+	if flags.Op != imap.StoreFlagsDel && has(imap.FlagDeleted) {
+		return errNoDelete
+	}
 	changes := map[domain.MailClientFlag]bool{}
 	for flag, imapFlag := range map[domain.MailClientFlag]imap.Flag{domain.MailClientFlagSeen: imap.FlagSeen, domain.MailClientFlagFlagged: imap.FlagFlagged} {
 		switch {
@@ -494,7 +500,7 @@ func (s *session) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags *im
 			changes[flag] = flags.Op == imap.StoreFlagsAdd
 		}
 	}
-	// \Deleted, \Draft, \Answered, and keywords are not kept in P1a and are ignored.
+	// \Draft, \Answered, and keywords are not kept in P1a and are ignored.
 	ctx, cancel := s.server.commandContext()
 	defer cancel()
 	uids := make([]uint32, 0, len(targets))
@@ -586,5 +592,5 @@ func (s *session) Append(string, imap.LiteralReader, *imap.AppendOptions) (*imap
 	return nil, errNoAppend
 }
 
-// Expunge succeeds and removes nothing: \Deleted is not kept in P1a.
-func (s *session) Expunge(*imapserver.ExpungeWriter, *imap.UIDSet) error { return nil }
+// Expunge (and UID EXPUNGE) is refused: P1a removes nothing from a mail app.
+func (s *session) Expunge(*imapserver.ExpungeWriter, *imap.UIDSet) error { return errNoDelete }
