@@ -1012,7 +1012,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         label={title}
         pages={pages}
         roles={roleTags}
-        showMailbox={urlState.box === null}
+        // A single mailbox needs no label on every row.
+        showMailbox={urlState.box === null && (mailboxList?.length ?? 0) > 1}
         sendable={sendableIds}
         timeZone={timeZone}
         onFilterMailbox={onBox}
