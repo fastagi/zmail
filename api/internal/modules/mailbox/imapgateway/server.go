@@ -59,7 +59,7 @@ type Config struct {
 	Limits *ratelimit.Stores
 	// Limiter, when set, is the sign-in limiter shared with the SMTP gateway; Limits is then unused.
 	Limiter *mailclientauth.Limiter
-	Now    func() time.Time
+	Now     func() time.Time
 }
 
 func (c Config) withDefaults() Config {
