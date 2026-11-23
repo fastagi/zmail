@@ -129,6 +129,11 @@ var mailboxErrorCodes = []struct {
 	{ErrMemberImportEmailInvalid, http.StatusUnprocessableEntity, domain.CodeMemberImportEmailInvalid},
 	{ErrMemberImportRoleInvalid, http.StatusUnprocessableEntity, domain.CodeMemberImportRoleInvalid},
 	{ErrMemberImportDomainRequired, http.StatusUnprocessableEntity, domain.CodeMemberImportDomainRequired},
+	{ErrMailAppPasswordNotFound, http.StatusNotFound, domain.CodeMailAppPasswordNotFound},
+	{ErrMailAppPasswordLimitReached, http.StatusConflict, domain.CodeMailAppPasswordLimitReached},
+	{ErrMailClientAccessDisabled, http.StatusForbidden, domain.CodeMailClientAccessDisabled},
+	{ErrMailAppPasswordPepperMissing, http.StatusServiceUnavailable, domain.CodeServiceUnavailable},
+	{ErrMailAppPasswordAttemptsLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
 }
 
 // RegisterErrorMappings maps this starter's own domain errors to public status and error codes.

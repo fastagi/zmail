@@ -2952,7 +2952,7 @@ It answers `201` with the password and, only in this response, its `secret`:
 - `secret` is 16 random lowercase letters in four groups. Mail apps may send it with or without the
   spaces and in any case. The API keeps only a keyed hash of it (HMAC-SHA256 with the instance's
   `MAIL_APP_PASSWORD_PEPPER`); nobody can read it again, and no other response carries it.
-  Without a configured pepper every route of this section answers `503 COMMON.SERVICE_UNAVAILABLE`.
+  Without a configured pepper creating answers `503 COMMON.SERVICE_UNAVAILABLE`.
 - `hint` is the secret's last four letters, to tell devices apart.
 - A member holds at most 20 passwords that are not revoked per organization; the next is
   `409 MAILBOX.APP_PASSWORD_LIMIT_REACHED`.
@@ -2973,9 +2973,9 @@ without secrets, and tells the console whether mail apps can sign in and where:
 }
 ```
 
-`access.reason` is `organization_disabled` when the organization switch is off,
-`feature_not_granted` when the membership lacks `mail_clients`, and `null` while `enabled` is
-`true`. Listing and revoking work without the feature, so a member can always remove a device.
+`access.reason` is `unavailable` when the instance has no pepper configured,
+`organization_disabled` when the organization switch is off, `feature_not_granted` when the
+membership lacks `mail_clients`, and `null` while `enabled` is `true`, checked in that order. Listing and revoking work without the feature, so a member can always remove a device.
 `server` comes from `MAIL_GATEWAY_PUBLIC_IMAP_HOST` and `MAIL_GATEWAY_PUBLIC_IMAP_PORT`.
 
 `DELETE /v1/mail-app-passwords/:password_id` revokes one of the caller's own passwords at once and

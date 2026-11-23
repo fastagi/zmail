@@ -844,6 +844,11 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 		{name: "timeout missing", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.RequestTimeout = 0 }, wantErr: "MAILBOX_REQUEST_TIMEOUT"},
 		{name: "short inbound secret", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "short" }, wantErr: "MAILBOX_INBOUND_SECRET"},
 		{name: "inbound may stay disabled", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "" }},
+		{name: "short mail app password pepper", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.AppPasswordPepper = "short" }, wantErr: "MAIL_APP_PASSWORD_PEPPER"},
+		{name: "mail app passwords may stay off", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.AppPasswordPepper = "" }},
+		{name: "mail app password pepper", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.AppPasswordPepper = strings.Repeat("p", 32) }},
+		{name: "IMAP port out of range", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.ClientIMAPPort = 70000 }, wantErr: "MAIL_GATEWAY_PUBLIC_IMAP_PORT"},
+		{name: "IMAP host with a space", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.ClientIMAPHost = "imap host" }, wantErr: "MAIL_GATEWAY_PUBLIC_IMAP_HOST"},
 		{name: "send limit must be positive", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailySendLimit = 0 }, wantErr: "MAILBOX_DAILY_SEND_LIMIT"},
 		{name: "lane limits inherit the send limit", environment: "development", edit: func(cfg *Config) {
 			cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit = 0, 0

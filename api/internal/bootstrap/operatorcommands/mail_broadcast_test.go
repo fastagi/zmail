@@ -135,3 +135,29 @@ func TestMailWorkerPurgesRevokedExternalCopiesLast(t *testing.T) {
 		t.Fatalf("calls = %v, external purge limit %d; want purge-external last with 10", dispatcher.calls, dispatcher.externalPurgeLimit)
 	}
 }
+
+// appPasswordDispatcher is a dispatcher that also prunes revoked mail client passwords.
+type appPasswordDispatcher struct {
+	recordingMailDispatcher
+	prunedLimit int
+}
+
+func (d *appPasswordDispatcher) PurgeRevokedAppPasswords(_ context.Context, _ time.Time, limit int) (int, error) {
+	d.calls = append(d.calls, "purge-app-passwords")
+	d.prunedLimit = limit
+	return 1, nil
+}
+
+// TestMailWorkerPurgesRevokedAppPasswords purges revoked mail client passwords after the other
+// steps, with what they left of the batch, when the dispatcher can.
+func TestMailWorkerPurgesRevokedAppPasswords(t *testing.T) {
+	dispatcher := &appPasswordDispatcher{recordingMailDispatcher: recordingMailDispatcher{queued: 3}}
+	processed, err := mailBroadcastWorker{dispatcher: dispatcher}.DispatchWebhooks(context.Background(), 25)
+	if err != nil {
+		t.Fatalf("DispatchWebhooks: %v", err)
+	}
+	last := dispatcher.calls[len(dispatcher.calls)-1]
+	if last != "purge-app-passwords" || dispatcher.prunedLimit != 22 || processed != 4 {
+		t.Fatalf("calls = %v, limit %d, processed %d", dispatcher.calls, dispatcher.prunedLimit, processed)
+	}
+}

@@ -20,8 +20,8 @@ func TestRepositoryInvitationGrantsBecomeTheMembershipGrants(t *testing.T) {
 	inviteeID := createOrganizationTestUser(t, db, "roster-member")
 	organization := createInvitationTestOrganization(t, db, ownerID)
 
-	// Contacts off is a false value the column default would otherwise turn on.
-	grants := domain.MemberFeatures{Broadcasts: true, Contacts: false, Templates: true, APIKeys: true}
+	// Contacts and mail apps off are false values the column defaults would otherwise turn on.
+	grants := domain.MemberFeatures{Broadcasts: true, Contacts: false, Templates: true, APIKeys: true, MailClients: false}
 	invitation := newPendingInvitation(organization.ID, ownerID, "roster-member@example.com", "oinv_roster.secret", now)
 	invitation.Features = grants
 	require.NoError(t, repo.CreateInvitation(context.Background(), invitation, now))

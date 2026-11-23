@@ -5512,7 +5512,7 @@ export interface components {
             /** @description Whether the caller's mail apps can sign in in this organization. */
             enabled: boolean;
             /** @description Why they cannot; null while `enabled` is true. */
-            reason: ("organization_disabled" | "feature_not_granted") | null;
+            reason: ("unavailable" | "organization_disabled" | "feature_not_granted") | null;
         };
         /** @enum {string} */
         MailClientProtocol: "imap" | "smtp";
@@ -6544,6 +6544,7 @@ export interface components {
             api_keys?: boolean;
             broadcasts?: boolean;
             contacts?: boolean;
+            /** @description Granted when absent. */
             mail_clients?: boolean;
             templates?: boolean;
         };

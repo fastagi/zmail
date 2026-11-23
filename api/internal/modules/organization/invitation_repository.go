@@ -376,6 +376,7 @@ func (r *repository) AcceptInvitation(ctx context.Context, tokenHash string, use
 		membershipPO.CanUseContacts = granted.Contacts
 		membershipPO.CanUseTemplates = granted.Templates
 		membershipPO.CanUseAPIKeys = granted.APIKeys
+		membershipPO.CanUseMailClients = granted.MailClients
 
 		result := tx.Model(&OrganizationInvitationPO{}).
 			Where("id = ? AND token_hash = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitationPO.ID, tokenHash).

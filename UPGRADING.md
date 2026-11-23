@@ -13,6 +13,32 @@ entries in order.
 
 ## Unreleased — Mail client access, part 1
 
+### High — Deploy the Web before the API
+
+Member features gain `mail_clients`: the organization context, the member list, member feature
+updates, and invitations report it beside `broadcasts`, `contacts`, `templates`, and `api_keys`. A Web
+console from before this change validates member features strictly and fails against the new API,
+so roll the Web forward first. Existing memberships and pending invitations are granted
+`mail_clients`; owners and admins always have it.
+
+### Medium — Mail client passwords
+
+- New routes `GET/POST /v1/mail-app-passwords`, `DELETE /v1/mail-app-passwords/:password_id`,
+  `GET /v1/mail-app-password-directory`, `DELETE /v1/mail-app-password-directory/:password_id`, and
+  `GET/PUT /v1/mail-client-settings`; see "Mail Client Access" in `contracts/MAILBOXES.md`.
+- `MAIL_APP_PASSWORD_PEPPER` (at least 32 characters) keys the stored hash of every mail client
+  password. It has no default in any environment: without it creating a password answers
+  `503 COMMON.SERVICE_UNAVAILABLE` and the list reports `access.reason` `unavailable`. Generate it
+  once with a secret manager and never rotate it casually: a new pepper invalidates every existing
+  mail client password.
+- `MAIL_GATEWAY_PUBLIC_IMAP_HOST` and `MAIL_GATEWAY_PUBLIC_IMAP_PORT` name the IMAP server the
+  console shows (default `imap.zmail.im:993`).
+- `mailbox.ProvideService` takes a trailing `domain.CredentialReverifier`, bound to the user
+  service in the user starter's provider set; a fork that calls it by hand passes the user service
+  or nil (which refuses creating mail client passwords). Run `make wire`.
+- `mail:broadcast:work` now also deletes mail client passwords revoked more than 90 days ago, as its
+  last step.
+
 ### Medium — Migrations `2026_12_24_090000` to `2026_12_24_120000`
 
 - `2026_12_24_090000_add_mail_message_sources` (mailbox starter) creates `mail_message_sources`; no

@@ -19,7 +19,7 @@ func TestMemberFeaturesGrantOnlyWhatIsStored(t *testing.T) {
 func TestNewMemberDefaultsLeaveBroadcastsAndAPIKeysToAnAdmin(t *testing.T) {
 	defaults := DefaultMemberFeatures()
 
-	assert.Equal(t, MemberFeatures{Contacts: true, Templates: true}, defaults)
+	assert.Equal(t, MemberFeatures{Contacts: true, Templates: true, MailClients: true}, defaults)
 }
 
 func TestManagersAlwaysHaveEveryFeature(t *testing.T) {
@@ -44,9 +44,23 @@ func TestOrganizationContextCanUseFollowsRoleAndGrants(t *testing.T) {
 func TestMemberFeatureCatalogIsStable(t *testing.T) {
 	assert.Equal(t, []MemberFeature{
 		MemberFeatureBroadcasts, MemberFeatureContacts, MemberFeatureTemplates, MemberFeatureAPIKeys,
+		MemberFeatureMailClients,
 	}, MemberFeatureCatalog())
 	for _, feature := range MemberFeatureCatalog() {
 		assert.True(t, feature.IsValid())
 	}
 	assert.False(t, MemberFeature("permissions").IsValid())
+}
+
+func TestMemberFeatureCatalogIncludesMailClients(t *testing.T) {
+	assert.True(t, MemberFeatureMailClients.IsValid())
+	assert.Equal(t, MemberFeature("mail_clients"), MemberFeatureMailClients)
+	assert.True(t, AllMemberFeatures().Has(MemberFeatureMailClients))
+	assert.True(t, DefaultMemberFeatures().Has(MemberFeatureMailClients), "reading one's own mail sends nothing at scale")
+	assert.False(t, MemberFeatures{Contacts: true}.Has(MemberFeatureMailClients))
+
+	withdrawn := MemberFeaturePatch{MailClients: new(false)}
+	assert.False(t, withdrawn.IsEmpty())
+	assert.False(t, withdrawn.Apply(AllMemberFeatures()).MailClients)
+	assert.True(t, withdrawn.Apply(AllMemberFeatures()).Contacts)
 }

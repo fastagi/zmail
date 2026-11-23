@@ -68,11 +68,13 @@ func ProvideService(
 	notices broadcastNoticeSender,
 	inviter domain.OrganizationRosterInviter,
 	notifications domain.NotificationPublisher,
+	reverifier domain.CredentialReverifier,
 ) *service {
 	svc := NewService(repo, memberships, templates, contacts, broadcasts, organize, domains, zones, domainProvider,
 		transport, notifier, settings, transactional, limits, accounts, notices)
 	svc.inviter = inviter
 	svc.notifications = notifications
+	svc.reverifier = reverifier
 	return svc
 }
 

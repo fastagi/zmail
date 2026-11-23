@@ -48,7 +48,8 @@ type mailBroadcastWorker struct {
 // DispatchWebhooks runs one tick, each step with what the batch has left: transactional mail
 // first, then messages that waited for the send limit, broadcast recipients, the trash expired 30
 // days ago, transactional messages past their retention, the copies of external mail connections
-// revoked longer than their retention, and last agent feed events and audit rows past theirs.
+// revoked longer than their retention, agent feed events and audit rows past theirs, and last mail
+// client passwords revoked longer than theirs.
 func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (int, error) {
 	steps := []func(context.Context, int) (int, error){
 		w.dispatcher.DispatchTransactional,
@@ -68,6 +69,13 @@ func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (i
 				return 0, nil
 			}
 			return w.agents.PruneExpiredAgentMail(ctx, time.Now().UTC(), limit)
+		},
+		func(ctx context.Context, limit int) (int, error) {
+			pruner, ok := w.dispatcher.(domain.MailAppPasswordPruner)
+			if !ok {
+				return 0, nil
+			}
+			return pruner.PurgeRevokedAppPasswords(ctx, time.Now().UTC(), limit)
 		},
 	}
 	processed := 0

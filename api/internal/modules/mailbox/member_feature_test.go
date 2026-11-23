@@ -117,6 +117,9 @@ var featureGatedRoutes = map[domain.MemberFeature][]featureRoute{
 		{http.MethodPost, "/transactional-messages", `{}`},
 		{http.MethodGet, "/transactional-messages/1", ""},
 	},
+	domain.MemberFeatureMailClients: {
+		{http.MethodPost, "/mail-app-passwords", `{}`},
+	},
 }
 
 func featuresWith(feature domain.MemberFeature) domain.MemberFeatures {
@@ -130,6 +133,8 @@ func featuresWith(feature domain.MemberFeature) domain.MemberFeatures {
 		features.Templates = true
 	case domain.MemberFeatureAPIKeys:
 		features.APIKeys = true
+	case domain.MemberFeatureMailClients:
+		features.MailClients = true
 	}
 	return features
 }

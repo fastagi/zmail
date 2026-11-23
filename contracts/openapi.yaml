@@ -16399,6 +16399,7 @@ components:
           type: boolean
         mail_clients:
           type: boolean
+          description: Granted when absent.
     MemberImportRequest:
       type: object
       additionalProperties: false
@@ -18813,6 +18814,7 @@ components:
           oneOf:
             - type: string
               enum:
+                - unavailable
                 - organization_disabled
                 - feature_not_granted
             - type: 'null'
