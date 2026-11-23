@@ -61,4 +61,7 @@ type Application struct {
 	// MailAgentEvents prunes agent feed events past retention; nil when the mailbox starter is not
 	// selected.
 	MailAgentEvents domain.MailAgentEventPruner
+	// MailClients serves mailboxes to mail apps for the mail gateway; nil when the mailbox
+	// starter is not selected.
+	MailClients domain.MailClientStore
 }

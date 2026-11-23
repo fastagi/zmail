@@ -102,6 +102,7 @@ type Server struct {
 	nextID   atomic.Uint64
 
 	mu      sync.Mutex
+	sweep   sweepState
 	ctx     context.Context
 	cancel  context.CancelFunc
 	closing bool
@@ -121,6 +122,7 @@ func NewServer(store domain.MailClientStore, cfg Config, logger *slog.Logger) *S
 		cache:    newSourceCache(cfg.SourceCacheBytes),
 		registry: newSessionRegistry(cfg.MaxConnections, cfg.MaxPerUser, cfg.MaxPerIP),
 		ctx:      ctx, cancel: cancel,
+		sweep: sweepState{failClosedAfter: revocationDeadline - defaultRevalidateInterval},
 	}
 	s.imap = imapserver.New(&imapserver.Options{
 		NewSession:  s.newSession,
@@ -157,7 +159,7 @@ func (s *Server) Close() error {
 // Shutdown says goodbye to every session, waits up to the context for them to end, and closes.
 func (s *Server) Shutdown(ctx context.Context) error {
 	for _, live := range s.registry.snapshot() {
-		live.bye("Server shutting down")
+		go live.bye("Server shutting down")
 	}
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()

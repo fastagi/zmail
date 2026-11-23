@@ -16,3 +16,5 @@ func recordAuth(result string)    { metrics.RecordMailGatewayAuth(protocolIMAP, 
 func observeCommand(command string, start time.Time) {
 	metrics.ObserveMailGatewayCommand(command, time.Since(start))
 }
+
+func recordSweepClosed(reason string, n int) { metrics.RecordMailGatewaySweepClosed(reason, n) }

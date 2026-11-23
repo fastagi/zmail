@@ -104,6 +104,7 @@ type Config struct {
 	Asset          AssetConfig
 	Webhook        WebhookConfig
 	Mailbox        MailboxConfig
+	MailGateway    MailGatewayConfig
 	AITriage       AITriageConfig
 	ExternalMail   ExternalMailConfig
 	MailAgent      MailAgentConfig
@@ -870,6 +871,7 @@ func Load() (*Config, error) {
 			ClientIMAPHost:    env.Get("MAIL_GATEWAY_PUBLIC_IMAP_HOST", DefaultMailClientIMAPHost),
 			ClientIMAPPort:    env.GetInt("MAIL_GATEWAY_PUBLIC_IMAP_PORT", DefaultMailClientIMAPPort),
 		},
+		MailGateway: loadMailGatewayConfig(),
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
 			RequestTimeout:      env.GetDuration("WEBHOOK_REQUEST_TIMEOUT", DefaultWebhookRequestTimeout),
@@ -1204,6 +1206,9 @@ func validate(cfg *Config) error {
 		return err
 	}
 	if err := validateMailboxConfig(cfg.Mailbox, cfg.Starters.Selected(StarterMailbox), isProd); err != nil {
+		return err
+	}
+	if err := validateMailGatewayConfig(cfg.MailGateway, cfg.Mailbox, cfg.Starters.Selected(StarterMailbox)); err != nil {
 		return err
 	}
 	if err := validateAITriageConfig(cfg.AITriage, isProd); err != nil {
@@ -1886,5 +1891,19 @@ func loadAITriageConfig() AITriageConfig {
 		Provider: provider,
 		Model:    strings.TrimSpace(env.Get("AI_TRIAGE_MODEL", "")),
 		DailyCap: env.GetInt("AI_TRIAGE_DAILY_CAP", DefaultAITriageDailyCap),
+	}
+}
+
+// loadMailGatewayConfig reads MailGatewayConfig (mail_gateway.go) from the environment.
+func loadMailGatewayConfig() MailGatewayConfig {
+	return MailGatewayConfig{
+		IMAPAddr:              env.Get("MAIL_GATEWAY_IMAP_ADDR", ""),
+		TLSCertFile:           env.Get("MAIL_GATEWAY_TLS_CERT_FILE", ""),
+		TLSKeyFile:            env.Get("MAIL_GATEWAY_TLS_KEY_FILE", ""),
+		HealthAddr:            env.Get("MAIL_GATEWAY_HEALTH_ADDR", DefaultMailGatewayHealthAddr),
+		MaxConnections:        env.GetInt("MAIL_GATEWAY_MAX_CONNECTIONS", DefaultMailGatewayMaxConnections),
+		MaxConnectionsPerUser: env.GetInt("MAIL_GATEWAY_MAX_CONNECTIONS_PER_USER", DefaultMailGatewayMaxConnectionsPerUser),
+		MaxConnectionsPerIP:   env.GetInt("MAIL_GATEWAY_MAX_CONNECTIONS_PER_IP", DefaultMailGatewayMaxConnectionsPerIP),
+		RevalidateInterval:    env.GetDuration("MAIL_GATEWAY_REVALIDATE_INTERVAL", DefaultMailGatewayRevalidateInterval),
 	}
 }

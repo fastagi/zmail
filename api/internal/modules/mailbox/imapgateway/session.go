@@ -80,7 +80,8 @@ func (s *session) current() (*domain.MailClientPrincipal, *selection) {
 	return s.principal, s.selected
 }
 
-// bye ends the connection with an untagged BYE.
+// bye ends the connection with an untagged BYE. Callers outside the session run it on its own
+// goroutine: the write may wait up to byeTimeout for a client that does not read.
 func (s *session) bye(text string) {
 	s.mu.Lock()
 	if s.closed {
@@ -91,10 +92,10 @@ func (s *session) bye(text string) {
 	s.mu.Unlock()
 	// A client that stops reading must not hold the goodbye up.
 	if err := s.conn.NetConn().SetWriteDeadline(time.Now().Add(byeTimeout)); err != nil {
-		s.server.logger.Debug("imap_gateway.bye_deadline_failed", "session_id", s.id, "error", err)
+		s.server.logger.Debug("imap_gateway.bye_deadline_failed", "connection_id", s.id, "error", err)
 	}
 	if err := s.conn.Bye(text); err != nil {
-		s.server.logger.Debug("imap_gateway.bye_failed", "session_id", s.id, "error", err)
+		s.server.logger.Debug("imap_gateway.bye_failed", "connection_id", s.id, "error", err)
 	}
 }
 
@@ -107,7 +108,7 @@ func (s *session) Close() error {
 	s.server.registry.close(s, membershipID)
 	recordConnections(s.server.registry.count())
 	if principal != nil {
-		s.server.logger.Info("imap_gateway.session_closed", "session_id", s.id, "password_id", principal.PasswordID,
+		s.server.logger.Info("imap_gateway.session_closed", "connection_id", s.id, "password_id", principal.PasswordID,
 			"organization_id", principal.Viewer.OrganizationID, "membership_id", principal.Viewer.MembershipID)
 	}
 	return nil
@@ -132,7 +133,7 @@ func (s *session) Login(username, password string) error {
 	}
 	if err != nil {
 		recordAuth("error")
-		s.server.logger.Error("imap_gateway.login_failed", "session_id", s.id, "error", err)
+		s.server.logger.Error("imap_gateway.login_failed", "connection_id", s.id, "error", err)
 		return errTemporary
 	}
 	if err := s.server.registry.signIn(principal.Viewer.MembershipID); err != nil {
@@ -144,7 +145,7 @@ func (s *session) Login(username, password string) error {
 	s.mu.Lock()
 	s.principal = principal
 	s.mu.Unlock()
-	s.server.logger.Info("imap_gateway.session_opened", "session_id", s.id, "password_id", principal.PasswordID,
+	s.server.logger.Info("imap_gateway.session_opened", "connection_id", s.id, "password_id", principal.PasswordID,
 		"organization_id", principal.Viewer.OrganizationID, "membership_id", principal.Viewer.MembershipID)
 	return nil
 }
@@ -168,7 +169,7 @@ func (s *session) storeError(command string, err error) error {
 	case errors.Is(err, errSearchTooDeep):
 		return errSearchLimit
 	}
-	s.server.logger.Error("imap_gateway.command_failed", "session_id", s.id, "command", command, "error", err)
+	s.server.logger.Error("imap_gateway.command_failed", "connection_id", s.id, "command", command, "error", err)
 	return errTemporary
 }
 
@@ -353,7 +354,7 @@ func (s *session) Poll(w *imapserver.UpdateWriter, allowExpunge bool) error {
 	}
 	if err != nil {
 		// A failed refresh changes nothing; the next command tries again.
-		s.server.logger.Warn("imap_gateway.poll_failed", "session_id", s.id, "error", err)
+		s.server.logger.Warn("imap_gateway.poll_failed", "connection_id", s.id, "error", err)
 		return nil
 	}
 	if state.UIDValidity != selected.uidValidity {

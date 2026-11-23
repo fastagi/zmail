@@ -452,6 +452,64 @@ func TestIMAPRateLimitLockout(t *testing.T) {
 	}
 }
 
+// runSweeper sweeps the gateway every interval until the test ends.
+func (g *imapGateway) runSweeper(t *testing.T, interval time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		g.Server.RunSweeper(ctx, interval)
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+func waitDisconnected(t *testing.T, client *imapclient.Client, within time.Duration) {
+	t.Helper()
+	select {
+	case <-client.Closed():
+	case <-time.After(within):
+		t.Fatalf("the session is still open after %s", within)
+	}
+}
+
+func TestIMAPRevokeDisconnectsWithinInterval(t *testing.T) {
+	f := newMailClientFixture(t)
+	gateway := startIMAPGateway(t, f, imapgateway.Config{})
+	gateway.runSweeper(t, 200*time.Millisecond)
+	alice := gateway.login(t, "alice@mail.example", f.AliceSecret)
+	bob := gateway.login(t, "bob@mail.example", f.BobSecret)
+	if _, err := alice.Select("INBOX", nil).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Service.RevokeAppPassword(context.Background(), f.Alice, f.AlicePassword); err != nil {
+		t.Fatal(err)
+	}
+	waitDisconnected(t, alice, 2*time.Second)
+	if err := bob.Noop().Wait(); err != nil {
+		t.Fatalf("Bob's session ended with Alice's: %v", err)
+	}
+}
+
+func TestIMAPAccessChangesDisconnect(t *testing.T) {
+	f := newMailClientFixture(t)
+	ctx := context.Background()
+	gateway := startIMAPGateway(t, f, imapgateway.Config{})
+	gateway.runSweeper(t, 200*time.Millisecond)
+	alice := gateway.login(t, "alice@mail.example", f.AliceSecret)
+	if _, err := alice.Select("Shared/helpdesk@mail.example/INBOX", nil).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	f.Exec(t, `DELETE FROM mailbox_members WHERE mailbox_id = ? AND membership_id = ?`, f.Support.ID, f.Alice.MembershipID)
+	waitDisconnected(t, alice, 2*time.Second)
+
+	bob := gateway.login(t, "bob@mail.example", f.BobSecret)
+	if _, err := f.Service.UpdateMailClientSettings(ctx, f.Owner, false); err != nil {
+		t.Fatal(err)
+	}
+	waitDisconnected(t, bob, 2*time.Second)
+}
+
 func TestIMAPConnectionCaps(t *testing.T) {
 	f := newMailClientFixture(t)
 	gateway := startIMAPGateway(t, f, imapgateway.Config{MaxPerIP: 2, MaxPerUser: 1})
