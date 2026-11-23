@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	register("2026_12_19_090000_add_broadcast_notices", &addBroadcastNotices{
+	register("2026_12_20_090000_add_broadcast_notices", &addBroadcastNotices{
 		BaseMigration: migration.BaseMigration{UseTransaction: true},
 	})
 }

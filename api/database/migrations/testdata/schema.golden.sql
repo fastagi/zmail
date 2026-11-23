@@ -367,6 +367,7 @@ TABLE mail_domains
   COLUMN mail_zone_id bigint
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
   COLUMN cloudflare_connection_id uuid
+  COLUMN last_error_code character varying(64) NOT NULL DEFAULT ''::character varying
 
 TABLE mail_drafts
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_drafts_id_seq'::regclass)

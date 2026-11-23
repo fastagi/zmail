@@ -649,7 +649,7 @@ func (r *repository) NthBroadcastAttemptSince(ctx context.Context, organizationI
 }
 
 // broadcastNoticeState is a broadcast's state in notice terms; keep it in step with the backfill of
-// migration 2026_12_19_090000_add_broadcast_notices.
+// migration 2026_12_20_090000_add_broadcast_notices.
 const broadcastNoticeState = `CASE
 	WHEN status = 'sent' THEN 'sent'
 	WHEN status = 'canceled' AND stop_reason = 'all_recipients_failed' THEN 'failed'

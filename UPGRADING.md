@@ -22,7 +22,7 @@ against the new API. The new Web treats a missing `progress` as none, so roll th
 
 ### Medium — `mailbox.NewService` takes a broadcast notice sender
 
-Migration `2026_12_19_090000_add_broadcast_notices` (mailbox starter) adds `started_by`,
+Migration `2026_12_20_090000_add_broadcast_notices` (mailbox starter) adds `started_by`,
 `notice_state`, and `notice_count` to `mail_broadcasts`; existing broadcasts are recorded as already
 told, so the deploy sends no notices about the past. The `mail:broadcast:work` worker now tells the
 person who started a broadcast when it finishes, fails, pauses on its own, or waits for the send
@@ -32,6 +32,16 @@ mailer (`MAIL_PROVIDER`, `MAIL_FROM`) when it is configured (see `contracts/MAIL
 provided by `NewBroadcastNoticeSender`; `domain.MailBroadcastRepository` gains
 `CountRecipientsFinishedSince`, `NthBroadcastAttemptSince`, `ListBroadcastNoticesDue`, and
 `MarkBroadcastNoticed`; `domain.MailBroadcast` gains `StartedBy`.
+## Unreleased — Mail domain error codes
+
+### Low — Domains gain `last_error_code`
+
+Migration `2026_12_19_090000_add_mail_domain_error_code` (mailbox starter) adds
+`mail_domains.last_error_code varchar(64) NOT NULL DEFAULT ''`. PostgreSQL adds a column with a
+constant default without rewriting the table; the `ALTER TABLE` takes a brief `ACCESS EXCLUSIVE`
+lock. Existing domains get an empty code until their next setup or check. The domain view returns
+`last_error_code` beside `last_error` (see `contracts/MAILBOXES.md`); clients treat an unknown code
+like `domain.setup_failed`.
 
 ## Unreleased — Member feature grants
 

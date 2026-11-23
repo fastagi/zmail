@@ -77,6 +77,9 @@ type MailDomain struct {
 	Records    []MailDomainRecord
 	// LastError is the provider's explanation of the last failed setup or check.
 	LastError string
+	// LastErrorCode classifies LastError for clients (domain.permission_denied and so on); empty
+	// when the last setup or check had no failure.
+	LastErrorCode string
 	// SettingUp is true while a setup runs in the background; it is not stored.
 	SettingUp bool
 	// ZoneCheckLimited is true when the provider refused this check's request to look for the

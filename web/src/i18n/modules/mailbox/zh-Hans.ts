@@ -619,7 +619,46 @@ const messages = {
     settingUpHint: 'Zmail 正在写入收信、发信和 DMARC 记录，大约需要一分钟，完成后记录会显示在这里。你可以先离开此页面。',
     settingUpToast: '正在 Cloudflare 中设置域名',
     pendingHint: '所有记录就绪后，才能在此域名上创建邮箱。DNS 生效可能需要几分钟，稍后再检查一次。',
-    lastError: '上一步设置失败：{error}',
+    setupErrorDetails: '技术详情',
+    setupError: {
+      permissionDenied: {
+        title: 'Cloudflare 没有允许这一步',
+        action: 'Cloudflare 连接缺少权限。请重新连接 Cloudflare，并授予 DNS 和 Email Routing 的编辑权限，然后点“重新设置”。',
+      },
+      providerUnavailable: {
+        title: 'Cloudflare 暂时繁忙或无法访问',
+        action: '你的域名没有问题。等几分钟后点“重新设置”即可。',
+      },
+      routingRefused: {
+        title: 'Cloudflare 没有为这个域名开启收信',
+        action:
+          '通常是因为这个域名还在用其它邮件服务收信。请在 Cloudflare 删除它们的 MX 记录，或改用子域名（例如 mail.你的公司.com），然后点“重新设置”。',
+      },
+      sendingRefused: {
+        title: 'Cloudflare 没有为这个域名开启发信',
+        action: '请确认这个 Cloudflare 账号可以使用 Email Sending，然后点“重新设置”。多次失败时，把下面的技术详情发给 Zmail 客服。',
+      },
+      dnsRecordRefused: {
+        title: '有一条必需的 DNS 记录没能添加',
+        action: '多半是已经存在同名记录。请对照下面的记录列表，在 Cloudflare 删除标为“冲突”的那条，然后点“重新设置”。',
+      },
+      routingRuleRefused: {
+        title: '有邮箱的收信规则没能创建',
+        action: '请点“重新设置”。多次失败时，到 Cloudflare 查看这个区域的 Email Routing 规则。',
+      },
+      providerRefused: {
+        title: 'Cloudflare 拒绝了一个设置步骤',
+        action: '请点“重新设置”。多次失败时，把下面的技术详情发给 Zmail 客服。',
+      },
+      zoneNotFound: {
+        title: '找不到这个域名在 Cloudflare 里的区域了',
+        action: '区域可能已被删除，或当前 Cloudflare 连接不再包含它。请重新连接能访问这个区域的 Cloudflare。',
+      },
+      setupFailed: {
+        title: '有一个设置步骤没有完成',
+        action: '请点“重新设置”。多次失败时，把下面的技术详情发给 Zmail 客服。',
+      },
+    },
     stepsLabel: '设置进度',
     stepConnect: '连接域名',
     stepNameservers: '把域名服务器改到 Cloudflare',

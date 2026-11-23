@@ -110,7 +110,8 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_15_090000_add_external_mail_push",
 			"2026_12_16_090000_add_external_mail_provider_releases",
 			"2026_12_17_090000_add_external_mail_release_owner",
-			"2026_12_19_090000_add_broadcast_notices",
+			"2026_12_19_090000_add_mail_domain_error_code",
+			"2026_12_20_090000_add_broadcast_notices",
 		),
 	)
 }
