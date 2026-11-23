@@ -105,6 +105,9 @@ describe('checking a pending zone', () => {
     expect(screen.getByRole('article', { name: 'example.org' })).toBe(card);
     expect(within(card).queryByRole('button', { name: 'Check now' })).toBeNull();
     expect(within(card).queryByText('Change the name servers of example.org')).toBeNull();
+    // A verified domain folds into one row; its records open on request.
+    expect(within(card).queryByRole('table')).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Show DNS records' }));
     expect(within(card).getByRole('list', { name: 'Test your domain' })).toBeInTheDocument();
     expect(within(card).getAllByRole('row').length).toBeGreaterThan(1);
   });
