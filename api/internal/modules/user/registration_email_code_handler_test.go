@@ -22,7 +22,7 @@ import (
 func registrationCodeEngine(t *testing.T, svc *service) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	handler := NewHandler(svc, nil, nil, nil, nil, newAuthAbuseGuard(config.AuthenticationRateLimitConfig{}))
+	handler := NewHandler(svc, nil, nil, nil, nil, newAuthAbuseGuard(config.AuthenticationRateLimitConfig{}), nil)
 	handler.RegisterErrorMappings(response.DefaultErrorMapper)
 	engine := gin.New()
 	routes := router.New(engine).Prefix("/v1")

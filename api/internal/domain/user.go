@@ -23,6 +23,9 @@ type User struct {
 	LastLogin *time.Time `json:"last_login,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+	// EmailVerifiedAt is when the account proved its email (a registration code or Google sign-in).
+	// It stays out of the API user view.
+	EmailVerifiedAt *time.Time `json:"-"`
 }
 
 // IsActive returns whether the user account is active

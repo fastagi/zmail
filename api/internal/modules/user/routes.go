@@ -19,6 +19,11 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 	h.protectPublicRoute(r.POST("/password/reset", h.RequestPasswordReset).Name("auth.password.reset.request"), authEndpointPasswordReset)
 	h.protectPublicRoute(r.POST("/password/reset/confirm", h.ConfirmPasswordReset).Name("auth.password.reset.confirm"), authEndpointPasswordResetConfirm)
 
+	// Sign in with Google. Both steps share the login source quota.
+	r.GET("/auth/providers", h.AuthProviders).Name("auth.providers")
+	h.protectPublicRoute(r.POST("/auth/google/authorizations", h.StartGoogleSignIn).Name("auth.google.authorizations.create"), authEndpointLogin)
+	h.protectPublicRoute(r.POST("/auth/google/sessions", h.CompleteGoogleSignIn).Name("auth.google.sessions.create"), authEndpointLogin)
+
 	// Protected routes
 	r.Group("", func(auth *router.Router) {
 		auth.WithMiddleware("auth")

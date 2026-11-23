@@ -63,7 +63,7 @@ func (s *service) ProvisionUser(ctx context.Context, req domain.UserProvisionReq
 	if n := len([]rune(username)); n < minUsernameLength || n > maxUsernameLength || strings.Contains(username, "@") {
 		return nil, false, errProvisionUsername
 	}
-	user, err := s.createAccount(ctx, &UserRegisterRequest{Username: username, Email: email, Nickname: username}, string(hash))
+	user, err := s.createAccount(ctx, &UserRegisterRequest{Username: username, Email: email, Nickname: username}, string(hash), nil)
 	if err != nil {
 		return nil, false, err
 	}

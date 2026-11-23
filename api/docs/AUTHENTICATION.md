@@ -19,6 +19,10 @@ sessions as API key scopes or service credentials.
 ## Lifecycle
 
 - Login creates a separate session without invalidating other devices.
+- Sign in with Google (`POST /v1/auth/google/sessions`) issues its session through the same
+  `issueSignInSession` path as `POST /v1/login`, after verifying the ID token and resolving the
+  account by Google subject, then verified email. See "Sign in with Google" in
+  [`../../contracts/AUTHENTICATION.md`](../../contracts/AUTHENTICATION.md).
 - Authentication fails closed with `503 COMMON.SERVICE_UNAVAILABLE` when session state cannot be
   verified. Unknown, revoked, idle-expired, and absolute-expired credentials return
   `401 AUTH.UNAUTHORIZED`.

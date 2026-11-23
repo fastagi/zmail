@@ -60,6 +60,18 @@ const messages = {
   demoCredentials: '演示账号',
   demoCredentialsHint: '使用默认账号',
 
+  // 使用 Google 登录
+  continueWithGoogle: '使用 Google 登录',
+  orDivider: '或',
+  googleCancelled: '已取消 Google 登录。',
+  googleEmailUnverified: '这个 Google 账号的邮箱还没有通过 Google 验证。请先在 Google 完成验证，或换一个账号。',
+  googleRegistrationClosed: '这个 Google 账号还没有 Zmail 账号，而本站已关闭注册。请联系组织管理员邀请你加入。',
+  googleAccountUnavailable: '这个账号无法登录，请联系管理员。',
+  googleTotpRequired: '这个账号开启了验证器两步验证，请用邮箱、密码和验证码登录。',
+  googleStateInvalid: 'Google 登录已过期，或是在另一个浏览器里发起的。请重试。',
+  googleNotConfigured: '本站未开启 Google 登录。',
+  googleFailed: 'Google 登录失败，请稍后重试。',
+
   // Links
   noAccount: '没有账号？',
   inviteOnly: '没有账号？请联系组织管理员邀请你加入。',

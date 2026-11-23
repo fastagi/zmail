@@ -8,6 +8,13 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Sign in with Google.** "Continue with Google" on the sign-in and sign-up pages (OAuth 2.0
+  authorization code with state, nonce, and PKCE; ID token checked against Google's keys). A new
+  Google user gets an account with the verified Google email, an existing account with that email is
+  linked instead of duplicated, and later sign-ins match the Google subject. The return URL survives
+  the round trip. `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` turn it on; the redirect
+  URI is `<NEXT_PUBLIC_APP_URL>/api/auth/google/callback`. Migration
+  `2026_12_29_090000_add_user_identities`.
 - **Registration email codes.** Self-registration proves the address: `POST /v1/register/email-codes`
   mails a 6-digit code (10 minutes, 5 attempts, one per minute and 5 per hour per address, nothing
   mailed to an address that has an account), and `POST /v1/register` takes `email_code`. The Web

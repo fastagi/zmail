@@ -23,6 +23,8 @@ The Web feature service and development mock BFF use a browser-oriented, same-or
 | Request a password reset | `POST /api/auth/password-reset` | `{ email }` | `{ success: true }`, whether or not the address has an account |
 | Reset the password | `POST /api/auth/password-reset/confirm` | `{ token, password }` (6 to 50 characters) | `{ success: true }`; an unknown or used token is `401 AUTH.PASSWORD_RESET_TOKEN_INVALID`, an expired one `401 AUTH.PASSWORD_RESET_TOKEN_EXPIRED` |
 | Change the password | `PUT /api/auth/password` | `{ currentPassword, newPassword }` (`newPassword`: 6 to 50 characters, different from `currentPassword`) | `{ success: true }`; every session of the account ends, this browser's included |
+| Start Google sign-in | `GET /api/auth/google?returnUrl=` | none (browser navigation) | `303` to Google with the state cookie set; on failure `303` to `/login?googleError=<error_code>` |
+| Google callback | `GET /api/auth/google/callback?state&code` | none (Google's redirect) | `303` to the stored return URL with the session cookie set; on failure `303` to `/login?googleError=<error_code>` (`cancelled` when the person declined) |
 
 Changing the password answers `401 AUTH.INVALID_CREDENTIALS` when `currentPassword` is wrong; the
 session stays valid, so clients show a field error rather than treating it as a lost session.
@@ -56,6 +58,9 @@ The Go `user` starter exposes server-side authentication-session endpoints under
 | Update profile | `PUT /v1/users/profile` | `{ nickname?, avatar?, phone?, bio? }` | API user |
 | Change password | `PUT /v1/users/password` | `{ old_password, new_password }` | `{ message }`; every session is revoked |
 | Delete account | `DELETE /v1/users/account` | Bearer token | No content (`204`) |
+| External sign-in providers | `GET /v1/auth/providers` | none | `{ google: { enabled } }` |
+| Start Google sign-in | `POST /v1/auth/google/authorizations` | `{ redirect_uri, return_url? }` | `201 { authorization_url, state, expires_in }` |
+| Complete Google sign-in | `POST /v1/auth/google/sessions` | `{ state, code }` | Login response plus `return_url` |
 
 `access_token` is an opaque, cryptographically random session credential. It is not a JWT and has
 no client-readable claims. The API stores only its SHA-256 hash and resolves identity, account
@@ -180,8 +185,64 @@ mails a 6-digit code; `POST /v1/register` takes it as `email_code`.
   `email_code` is ignored and registration works as before. Codes need a configured system mailer;
   an open instance that requires codes without one logs `user.registration_email_code_mailer_missing`
   at startup and nobody can register.
-- The API user carries no email-verified flag: with codes required, every self-registered account
-  proved its address.
+- The API user view carries no email-verified flag: with codes required, every self-registered
+  account proved its address. The API records the time in `users.email_verified_at` for code
+  registrations and Google sign-ins; accounts from before that keep it empty.
+
+### Sign in with Google
+
+"Continue with Google" (OAuth 2.0 authorization code flow with OpenID Connect) sits on the sign-in
+and sign-up pages when the API has an OAuth client:
+
+```dotenv
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+```
+
+Both are set together or not at all. Unset, `GET /v1/auth/providers` reports `google.enabled: false`,
+the Web hides the button, and both Google endpoints answer `503 AUTH.GOOGLE_NOT_CONFIGURED`. The
+Google Cloud Console OAuth client (type "Web application") lists exactly one authorized redirect URI
+per Web origin: **`<NEXT_PUBLIC_APP_URL>/api/auth/google/callback`**, for example
+`https://mail.example.com/api/auth/google/callback`. The Web adapter derives it from
+`NEXT_PUBLIC_APP_URL` and sends it as `redirect_uri`; Google refuses any URI the client does not
+list. This client is separate from the Gmail mail connector's `EXTERNAL_MAIL_GMAIL_CLIENT_*`, which
+asks for a restricted Gmail scope and returns to a console page; one Google client may serve both
+when it lists both redirect URIs.
+
+Flow:
+
+1. `POST /v1/auth/google/authorizations` stores a pending sign-in for 10 minutes: SHA-256 digests of
+   a random `state` and `nonce`, a PKCE (S256) verifier, the redirect URI, and the checked return
+   URL. A `return_url` that is not a same-origin path (one leading `/`, not `//` or `/\`, no
+   scheme or host) becomes `/console`. `redirect_uri` must be absolute https (http only outside
+   production), without credentials or fragment.
+2. The Web sets the state in an HttpOnly, `SameSite=Lax` cookie (`__Host-zmail_google_state` in
+   production, `zmail_google_state` otherwise; Lax because Google returns with a cross-site
+   top-level GET) and redirects to Google with scope `openid email profile`.
+3. The callback compares the query `state` with the cookie in constant time, drops the cookie, and
+   only then calls `POST /v1/auth/google/sessions`. The API deletes the pending row (a state works
+   once, even when the rest fails), exchanges the code with the verifier and client secret, and
+   verifies the ID token: RS256 against Google's published keys, `iss`, `aud`, `azp`, `exp`, `iat`,
+   and the `nonce` digest.
+4. Only `email_verified: true` is accepted (`403 AUTH.GOOGLE_EMAIL_UNVERIFIED`). The account is
+   found by Google subject (`user_identities`, unique per provider and subject); otherwise by email,
+   ignoring case and preferring an exact match, which links the account and records
+   `users.email_verified_at`; otherwise a new account is created with the verified email, a generated
+   `user_<hex>` username, the Google name as nickname, and no password. Later sign-ins match the
+   subject first, so a changed Google email still reaches the same account.
+5. A disabled account answers `401 AUTH.INVALID_CREDENTIALS`, the password login failure. An account
+   with two-factor sign-in answers `401 AUTH.TOTP_REQUIRED` and signs in with its password and code;
+   Google never replaces the authenticator. With `AUTH_REGISTRATION_ENABLED=false`, a Google account
+   without a Zmail account answers `403 AUTH.GOOGLE_REGISTRATION_CLOSED`; existing and linked
+   accounts still sign in. Nothing is linked or created for a refused sign-in.
+6. The session is issued by the same code as `POST /v1/login` (session row, last-login time, audit
+   entry), and the Web stores it in the same cookie, then redirects to the stored return URL.
+
+Other failures: `400 AUTH.GOOGLE_STATE_INVALID` (unknown, used, or expired state, a nonce mismatch,
+or a state that does not match the browser's cookie) and `502 AUTH.GOOGLE_SIGN_IN_FAILED` (Google
+refused the code or the ID token failed verification). Both Google endpoints share the login per-IP
+quota. A Google-only account sets a password through password reset. Other identity providers and an
+account-linking screen are not part of the contract yet.
 
 ### Closing Registration
 

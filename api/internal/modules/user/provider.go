@@ -32,6 +32,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.CredentialReverifier), new(*service)),
 	wire.Bind(new(domain.UserAdministrator), new(*service)),
 	wire.Bind(new(domain.UserProvisioner), new(*service)),
+	wire.Bind(new(GoogleSignInService), new(*service)),
 	NewAuthAbuseGuard,
 	NewHandler,
 )
@@ -55,6 +56,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_10_04_000000_add_audience_to_authentication_sessions",
 			"2026_11_27_090000_create_registration_email_codes",
 			"2026_12_01_090000_create_user_totp",
+			"2026_12_29_090000_add_user_identities",
 			"2025_06_18_000001_seed_default_users",
 		),
 		assembly.WithStarterSeederNames("users"),

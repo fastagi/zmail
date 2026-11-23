@@ -92,6 +92,23 @@ outcome. A `503` still reports that remote revocation is unknown; browser creden
 even if the client store preserves its last view until the next authoritative resolution. Malformed
 success payloads remain failures.
 
+## Sign In With Google
+
+"Continue with Google" is a link, not a mutation: Google sign-in leaves the site, so
+`GoogleSignInButton` points at `GET /api/auth/google?returnUrl=` and the browser navigates. The
+sign-in and sign-up pages render it only when `isGoogleSignInAvailable()` says the API has an OAuth
+client (`GET /v1/auth/providers`, cached for a minute; any failure, the mock BFF, or a disabled
+adapter hides it).
+
+- The start route asks the API for a pending sign-in with the callback
+  `<NEXT_PUBLIC_APP_URL>/api/auth/google/callback`, stores the returned state in an HttpOnly,
+  `SameSite=Lax` cookie, and redirects to Google.
+- The callback requires the query state to equal that cookie before calling the API, always drops
+  the cookie, and on success stores the session in the same cookie as a password login and redirects
+  to the stored return URL after `resolveReturnUrl()`.
+- Every failure redirects to `/login?googleError=<code>`. The page maps only known codes to copy
+  through `resolveGoogleSignInErrorKey()` and never renders the query value.
+
 ## Security Boundary
 
 - Unsafe mock BFF routes call `guardSameOriginMutation()` after the production availability guard

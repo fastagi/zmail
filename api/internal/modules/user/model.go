@@ -25,6 +25,9 @@ type UserPO struct {
 	Bio       string         `gorm:"size:500"`
 	Status    int            `gorm:"default:1"` // 1: active, 0: disabled
 	LastLogin *time.Time
+	// EmailVerifiedAt is when the account proved its email: a registration code or a Google
+	// sign-in. Accounts from before it was recorded keep it empty.
+	EmailVerifiedAt *time.Time
 }
 
 // TableName specifies the database table name
@@ -88,6 +91,8 @@ func (po *UserPO) toDomain() *domain.User {
 		LastLogin: po.LastLogin,
 		CreatedAt: po.CreatedAt,
 		UpdatedAt: po.UpdatedAt,
+
+		EmailVerifiedAt: po.EmailVerifiedAt,
 	}
 }
 
@@ -109,5 +114,7 @@ func newUserPO(u *domain.User) *UserPO {
 		Bio:       u.Bio,
 		Status:    u.Status,
 		LastLogin: u.LastLogin,
+
+		EmailVerifiedAt: u.EmailVerifiedAt,
 	}
 }

@@ -64,7 +64,7 @@ func TestRegisterRouteRefusesClosedRegistration(t *testing.T) {
 	var created int
 	svc := registrationSwitchService(t, closedRegistrationConfig(), &created)
 
-	handler := NewHandler(svc, nil, nil, nil, nil, newAuthAbuseGuard(config.AuthenticationRateLimitConfig{}))
+	handler := NewHandler(svc, nil, nil, nil, nil, newAuthAbuseGuard(config.AuthenticationRateLimitConfig{}), nil)
 	handler.RegisterErrorMappings(response.DefaultErrorMapper)
 	engine := gin.New()
 	routes := router.New(engine).Prefix("/v1")

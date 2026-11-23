@@ -31,6 +31,17 @@ var (
 	// ErrRegistrationEmailCodeExpired covers an expired code and one whose attempts are spent.
 	ErrRegistrationEmailCodeExpired = errors.New("registration email code is expired")
 
+	// ErrGoogleNotConfigured means GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET are unset.
+	ErrGoogleNotConfigured = errors.New("google sign-in is not configured")
+	// ErrGoogleStateInvalid covers an unknown, used, or expired sign-in state and a nonce mismatch.
+	ErrGoogleStateInvalid = errors.New("google sign-in state is invalid")
+	// ErrGoogleEmailUnverified means Google did not vouch for the account's email address.
+	ErrGoogleEmailUnverified = errors.New("google account email is not verified")
+	// ErrGoogleRegistrationClosed means the Google account has no Zmail account and sign-up is closed.
+	ErrGoogleRegistrationClosed = errors.New("google sign-in cannot create an account while registration is closed")
+	// ErrGoogleSignInFailed means Google refused the code or answered with an unusable ID token.
+	ErrGoogleSignInFailed = errors.New("google sign-in failed")
+
 	// Permission errors
 	ErrPermissionDenied            = errors.New("permission denied")
 	ErrPermissionUnknown           = errors.New("permission is not registered")

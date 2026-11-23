@@ -45,7 +45,25 @@ type AdapterOperation =
   | 'password-reset'
   | 'password-reset-confirm'
   | 'password-change'
-  | 'profile-update';
+  | 'profile-update'
+  | 'providers'
+  | 'google-start'
+  | 'google-session';
+
+/** Where to send the browser for Google sign-in and the state to bind to it. */
+export interface GoogleAuthorization {
+  authorizationUrl: string;
+  state: string;
+  expiresIn: number;
+}
+
+/** A Google sign-in session plus the return URL the API stored when it started. */
+export interface GoogleAdapterSession extends AdapterSession {
+  returnUrl: string;
+}
+
+const GOOGLE_STATE_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+const MAX_GOOGLE_AUTHORIZATION_URL_LENGTH = 4096;
 
 interface GoApiUser {
   id: number;
@@ -300,6 +318,76 @@ export class GoApiAuthAdapter {
     return user ? { ok: true, data: { user } } : adapterUnavailable(result.data.requestId);
   }
 
+  /** Reports whether the API has a Google OAuth client configured. */
+  async googleSignInEnabled(incomingHeaders: Headers, signal?: AbortSignal): Promise<boolean> {
+    const result = await this.request('providers', 'auth/providers', { method: 'GET' }, incomingHeaders, signal);
+    if (!result.ok || !isRecord(result.data.data) || !isRecord(result.data.data.google)) {
+      return false;
+    }
+    return result.data.data.google.enabled === true;
+  }
+
+  /** Starts a Google sign-in; the API stores the state, nonce, PKCE verifier, and return URL. */
+  async startGoogleSignIn(
+    input: { redirectUri: string; returnUrl: string },
+    incomingHeaders: Headers,
+    signal?: AbortSignal
+  ): Promise<AdapterResult<GoogleAuthorization>> {
+    const result = await this.request(
+      'google-start',
+      'auth/google/authorizations',
+      { method: 'POST', body: { redirect_uri: input.redirectUri, return_url: input.returnUrl } },
+      incomingHeaders,
+      signal
+    );
+    if (!result.ok) {
+      return result;
+    }
+    const data = result.data.data;
+    if (
+      !isRecord(data) ||
+      typeof data.state !== 'string' ||
+      !GOOGLE_STATE_PATTERN.test(data.state) ||
+      !isGoogleAuthorizationUrl(data.authorization_url) ||
+      typeof data.expires_in !== 'number' ||
+      !Number.isSafeInteger(data.expires_in) ||
+      data.expires_in < 1
+    ) {
+      return adapterUnavailable(result.data.requestId);
+    }
+    return {
+      ok: true,
+      data: { authorizationUrl: data.authorization_url, state: data.state, expiresIn: data.expires_in },
+    };
+  }
+
+  /** Completes a Google sign-in; the API issues a session exactly like a password login. */
+  async completeGoogleSignIn(
+    input: { state: string; code: string },
+    incomingHeaders: Headers,
+    signal?: AbortSignal
+  ): Promise<AdapterResult<GoogleAdapterSession>> {
+    const result = await this.request(
+      'google-session',
+      'auth/google/sessions',
+      { method: 'POST', body: { state: input.state, code: input.code } },
+      incomingHeaders,
+      signal
+    );
+    if (!result.ok) {
+      return result;
+    }
+    const session = this.sessionFromLoginData(result.data.data, result.data.requestId);
+    if (!session.ok) {
+      return session;
+    }
+    const returnUrl = isRecord(result.data.data) ? result.data.data.return_url : undefined;
+    return {
+      ok: true,
+      data: { ...session.data, returnUrl: typeof returnUrl === 'string' ? returnUrl : '' },
+    };
+  }
+
   private sessionFromLoginData(value: unknown, requestId: string): AdapterResult<AdapterSession> {
     if (!isRecord(value)) {
       return adapterUnavailable(requestId);
@@ -428,6 +516,8 @@ function authFieldMap(operation: AdapterOperation): Readonly<Record<string, stri
       return { old_password: 'currentPassword', new_password: 'newPassword' };
     case 'profile-update':
       return { nickname: 'name' };
+    case 'google-session':
+      return { state: 'state', code: 'code' };
     default:
       return {};
   }
@@ -468,6 +558,19 @@ function genericErrorMessage(operation: AdapterOperation, status: number): strin
     return 'Too many authentication attempts';
   }
   return 'Authentication service unavailable';
+}
+
+/** Accepts only an absolute https URL of bounded length: Google's authorization page. */
+function isGoogleAuthorizationUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > MAX_GOOGLE_AUTHORIZATION_URL_LENGTH) {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function accountDisabled(requestId: string): AdapterResult<never> {
