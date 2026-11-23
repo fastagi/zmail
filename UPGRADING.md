@@ -22,7 +22,7 @@ new Web reads an older API's answers as having no default and no mailbox counts.
 
 ### Medium — One column and one index on `mail_domains`
 
-Migration `2026_12_27_090000_add_mail_domain_default` adds `mail_domains.is_default`
+Migration `2026_12_27_120000_add_mail_domain_default` adds `mail_domains.is_default`
 (`boolean NOT NULL DEFAULT false`) and the partial unique index `idx_mail_domains_default` on
 `(organization_id) WHERE is_default`. A column with a constant default only changes the catalog,
 but the `ALTER TABLE` takes a short `ACCESS EXCLUSIVE` lock on `mail_domains`, and the plain

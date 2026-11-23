@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	register("2026_12_27_090000_add_mail_domain_default", &addMailDomainDefault{
+	register("2026_12_27_120000_add_mail_domain_default", &addMailDomainDefault{
 		BaseMigration: migration.BaseMigration{UseTransaction: true},
 	})
 }
