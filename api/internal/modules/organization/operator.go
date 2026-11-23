@@ -17,13 +17,18 @@ import (
 
 // OperatorOrganizationResponse is the platform-operator view of one organization.
 type OperatorOrganizationResponse struct {
-	ID          uint      `json:"id"`
-	Name        string    `json:"name"`
-	Slug        string    `json:"slug"`
-	CreatedBy   uint      `json:"created_by"`
-	MemberCount int64     `json:"member_count"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uint   `json:"id"`
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	CreatedBy   uint   `json:"created_by"`
+	MemberCount int64  `json:"member_count"`
+	// SuspendedAt is set while the organization is suspended; SuspensionReason says why.
+	SuspendedAt      *time.Time `json:"suspended_at"`
+	SuspensionReason string     `json:"suspension_reason"`
+	// DailySendLimit, when set, replaces the instance limit of every send lane.
+	DailySendLimit *int      `json:"daily_send_limit"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // OperatorMemberResponse is the platform-operator view of one membership. Unlike the tenant member
@@ -42,6 +47,7 @@ type operatorStore interface {
 	operatorList(ctx context.Context, query string, page, pageSize int) ([]OperatorOrganizationResponse, int64, error)
 	operatorFind(ctx context.Context, organizationID uint) (*OperatorOrganizationResponse, error)
 	operatorMembers(ctx context.Context, organizationID uint, page, pageSize int) ([]OperatorMemberResponse, int64, error)
+	operatorUpdate(ctx context.Context, organizationID uint, change operatorChange) (before, after *OperatorOrganizationResponse, err error)
 }
 
 // OperatorHandler serves platform-wide organization reads to the starter that owns operator
@@ -268,13 +274,16 @@ func operatorMemberCounts(db *gorm.DB, organizationIDs []uint) (map[uint]int64, 
 
 func newOperatorOrganizationResponse(row *OrganizationPO, members int64) OperatorOrganizationResponse {
 	return OperatorOrganizationResponse{
-		ID:          row.ID,
-		Name:        row.Name,
-		Slug:        row.Slug,
-		CreatedBy:   row.CreatedBy,
-		MemberCount: members,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		ID:               row.ID,
+		Name:             row.Name,
+		Slug:             row.Slug,
+		CreatedBy:        row.CreatedBy,
+		MemberCount:      members,
+		SuspendedAt:      row.SuspendedAt,
+		SuspensionReason: row.SuspensionReason,
+		DailySendLimit:   row.DailySendLimit,
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
 	}
 }
 
