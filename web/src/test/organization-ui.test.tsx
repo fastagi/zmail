@@ -416,6 +416,23 @@ describe('organization browser workflow', () => {
       }
     });
 
+    it('labels a developer with their sending scope in the members list', () => {
+      state.context.data = organizationContext('member');
+      state.members.data = {
+        items: [
+          memberView({
+            id: 92,
+            features: { ...grants, api_keys: true, mail_clients: true, developer: true },
+            developer_scope: { all_domains: false, domains: ['fast-ui.com'] },
+          }),
+        ],
+        meta: { total: 1 },
+      };
+      renderWithMessages(<OrganizationOverview organizationId={42} />, 'zh-Hans');
+      activateTab('成员');
+      expect(screen.getAllByText('开发者 · fast-ui.com').length).toBeGreaterThan(0);
+    });
+
     it('speaks zh-Hans', () => {
       state.context.data = organizationContext('owner');
       state.members.data = {
@@ -559,6 +576,22 @@ describe('organization browser workflow', () => {
     expect(button).toHaveTextContent('Resend in 42s');
     expect(toastError).toHaveBeenCalledWith(
       'This invitation was resent recently. Try again in a moment.'
+    );
+  });
+
+  it('invites a member as a developer', () => {
+    state.context.data = organizationContext('owner');
+    state.invitations.data = { items: [], meta: { total: 0 } };
+    renderWithMessages(<OrganizationOverview organizationId={42} />);
+    activateTab('Invitations');
+    fireEvent.click(screen.getByRole('button', { name: 'Invite member' }));
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'dev@example.com' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Developer' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    expect(state.invite.mutate).toHaveBeenCalledWith(
+      { email: 'dev@example.com', role: 'member', developer: true },
+      expect.any(Object)
     );
   });
 

@@ -109,6 +109,22 @@ type OrganizationInvitationPO struct {
 	CanUseTemplates   bool `gorm:"not null;default:true"`
 	CanUseAPIKeys     bool `gorm:"column:can_use_api_keys;not null;default:false"`
 	CanUseMailClients bool `gorm:"not null;default:true"`
+	// GrantDeveloper gives the member developer access on accept, scoped to the organization's
+	// default mail domain then. It lives in organization_invitation_developer_grants.
+	GrantDeveloper bool `gorm:"-"`
+}
+
+// InvitationDeveloperGrantPO marks an invitation that gives developer access on accept.
+type InvitationDeveloperGrantPO struct {
+	InvitationID uint `gorm:"primaryKey;autoIncrement:false"`
+	CreatedAt    time.Time
+
+	Invitation *OrganizationInvitationPO `gorm:"foreignKey:InvitationID;references:ID;constraint:OnDelete:CASCADE"`
+}
+
+// TableName returns the invitation developer grant table name.
+func (InvitationDeveloperGrantPO) TableName() string {
+	return "organization_invitation_developer_grants"
 }
 
 // TableName returns the stable organization invitation table name.
@@ -167,6 +183,7 @@ func newInvitationPO(invitation *domain.OrganizationInvitation) *OrganizationInv
 		CanUseTemplates:   invitation.Features.Templates,
 		CanUseAPIKeys:     invitation.Features.APIKeys,
 		CanUseMailClients: invitation.Features.MailClients,
+		GrantDeveloper:    invitation.Features.Developer,
 		CreatedAt:         invitation.CreatedAt,
 		UpdatedAt:         invitation.UpdatedAt,
 	}
@@ -243,6 +260,7 @@ func (po *OrganizationInvitationPO) toDomain() *domain.OrganizationInvitation {
 			Templates:   po.CanUseTemplates,
 			APIKeys:     po.CanUseAPIKeys,
 			MailClients: po.CanUseMailClients,
+			Developer:   po.GrantDeveloper,
 		},
 		CreatedAt: po.CreatedAt,
 		UpdatedAt: po.UpdatedAt,

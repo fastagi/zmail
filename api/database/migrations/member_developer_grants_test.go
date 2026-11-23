@@ -39,7 +39,9 @@ func TestAddMemberDeveloperGrantsUpDown(t *testing.T) {
 	assert.Zero(t, count, "removing the member must remove the grant")
 
 	require.NoError(t, (&addMemberDeveloperGrants{}).Down(db))
-	assert.NotContains(t, dumpSchema(t, db), "member_developer_grants")
+	rolledBack := dumpSchema(t, db)
+	assert.NotContains(t, rolledBack, "member_developer_grants")
+	assert.NotContains(t, rolledBack, "organization_invitation_developer_grants")
 	require.NoError(t, (&addMemberDeveloperGrants{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }

@@ -2,6 +2,7 @@ package organization
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"time"
 
@@ -125,4 +126,36 @@ func saveDeveloperGrant(tx *gorm.DB, organizationID, membershipID, grantedBy uin
 		return nil, err
 	}
 	return po, nil
+}
+
+// grantDeveloperOnAccept gives a member joining through an invitation that carries developer access
+// a grant for the organization's default mail domain: the one an owner or admin chose, else the
+// verified domain connected first. Without a verified domain the member joins without developer
+// access, which a manager grants later.
+func grantDeveloperOnAccept(
+	tx *gorm.DB,
+	invitation OrganizationInvitationPO,
+	membershipID uint,
+	now time.Time,
+) (*MemberDeveloperGrantPO, error) {
+	if !tx.Migrator().HasTable("mail_domains") {
+		return nil, nil
+	}
+	order := "id ASC"
+	if tx.Migrator().HasColumn("mail_domains", "is_default") {
+		order = "is_default DESC, id ASC"
+	}
+	var names []string
+	if err := tx.Raw(`SELECT name FROM mail_domains WHERE organization_id = ? AND status = 'verified' ORDER BY `+order+` LIMIT 1`,
+		invitation.OrganizationID).Scan(&names).Error; err != nil {
+		return nil, fmt.Errorf("find default mail domain: %w", err)
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	grant, err := normalizeDeveloperGrant(domain.DeveloperGrant{Domains: names})
+	if err != nil {
+		return nil, err
+	}
+	return saveDeveloperGrant(tx, invitation.OrganizationID, membershipID, invitation.InvitedBy, grant, now)
 }

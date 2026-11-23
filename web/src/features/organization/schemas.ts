@@ -238,6 +238,8 @@ export const updateOrganizationSchema = object({
 export const createOrganizationInvitationSchema = strictObject({
   email: invitationEmailInputSchema,
   role: organizationInvitationRoleSchema,
+  // Developer access on accept, scoped to the default mail domain then; members only.
+  developer: optional(boolean()),
 });
 
 export const acceptOrganizationInvitationSchema = strictObject({

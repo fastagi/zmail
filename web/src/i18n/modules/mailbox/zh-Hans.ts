@@ -1790,7 +1790,8 @@ const messages = {
       domain: '邮箱域名',
       domainHint: '只写了前缀的行，会在 {domain} 上开邮箱。',
       features: '受邀成员可用的功能',
-      featuresHint: '管理员始终拥有全部功能。已经是成员的人，功能保持不变。',
+      featuresHint:
+        '管理员始终拥有全部功能。已经是成员的人，功能保持不变。“开发者”也可按行开通：在 developer 列填 yes，发件范围为组织默认域名。',
       check: '检查',
       checking: '正在检查…',
       importing: '正在导入 {count} 行…',

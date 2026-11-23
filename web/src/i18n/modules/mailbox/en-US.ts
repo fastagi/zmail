@@ -1870,7 +1870,8 @@ const messages = {
       domain: 'Mailbox domain',
       domainHint: 'A row with only a prefix gets an address on {domain}.',
       features: 'Features for invited members',
-      featuresHint: 'Admins always have every feature. Existing members keep what they have.',
+      featuresHint:
+        'Admins always have every feature. Existing members keep what they have. Developer can also be set per row with developer=yes; it covers the organization’s default mail domain.',
       check: 'Check rows',
       checking: 'Checking the rows…',
       importing: 'Importing {count, plural, one {# row} other {# rows}}…',

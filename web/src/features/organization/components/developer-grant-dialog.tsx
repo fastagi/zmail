@@ -49,10 +49,12 @@ export function DeveloperGrantDialog({
   const t = useT('organization');
   const common = useT('common');
   const domains = useMailboxDomains(organizationId);
+  // The organization's default domain comes first, so a new grant starts with it.
   const verified = useMemo(
     () =>
       (domains.data ?? [])
         .filter(domain => domain.kind === 'organization')
+        .sort((a, b) => Number(Boolean(b.default)) - Number(Boolean(a.default)))
         .map(domain => domain.domain),
     [domains.data]
   );
@@ -105,7 +107,7 @@ function DeveloperScopeForm({
   const t = useT('organization');
   const granted = Boolean(scope);
   const [allDomains, setAllDomains] = useState(scope?.all_domains ?? false);
-  // No organization default domain exists, so a new grant starts with the first verified one.
+  // A new grant starts with the organization's default domain (or the first verified one).
   // A listed domain that lost verification starts unticked: the API refuses to save it.
   const [chosen, setChosen] = useState<string[]>(() =>
     scope ? scope.domains.filter(name => verified.includes(name)) : verified.slice(0, 1)

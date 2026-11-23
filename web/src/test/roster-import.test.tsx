@@ -34,8 +34,23 @@ describe('roster CSV', () => {
     expect(readRosterRows(ROSTER_IMPORT_TEMPLATE)).toEqual({
       ok: true,
       rows: [
-        { email: 'alice@example.com', name: 'Alice Wang', role: 'member', mailbox: 'alice' },
+        {
+          email: 'alice@example.com',
+          name: 'Alice Wang',
+          role: 'member',
+          mailbox: 'alice',
+          developer: true,
+        },
         { email: 'bob@example.com', name: 'Bob Li', role: 'admin', mailbox: '' },
+      ],
+    });
+    // developer=yes, and its Chinese header and values, give a row developer access.
+    expect(readRosterRows('email,开发者\na@example.com,是\nb@example.com,no\nc@example.com,TRUE\n')).toEqual({
+      ok: true,
+      rows: [
+        { email: 'a@example.com', name: '', role: '', mailbox: '', developer: true },
+        { email: 'b@example.com', name: '', role: '', mailbox: '' },
+        { email: 'c@example.com', name: '', role: '', mailbox: '', developer: true },
       ],
     });
     expect(readRosterRows('﻿邮箱,姓名,部门\r\ncarol@example.com,Carol,Sales\r\n')).toEqual({
@@ -480,6 +495,7 @@ describe('roster import dialog', () => {
         templates: true,
         api_keys: false,
         mail_clients: true,
+        developer: false,
       },
       rows,
     });

@@ -4441,7 +4441,8 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
     // mail_clients came later: absent means granted, as the API reads it.
     if (
       keys.some(key => typeof item[key] !== 'boolean') ||
-      (item.mail_clients !== undefined && typeof item.mail_clients !== 'boolean')
+      (item.mail_clients !== undefined && typeof item.mail_clients !== 'boolean') ||
+      (item.developer !== undefined && typeof item.developer !== 'boolean')
     ) {
       return {
         ok: false,
@@ -4454,6 +4455,7 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
       templates: item.templates === true,
       api_keys: item.api_keys === true,
       mail_clients: item.mail_clients !== false,
+      ...(item.developer === true ? { developer: true } : {}),
     };
   }
   if (!Array.isArray(rows) || rows.length === 0 || rows.length > MEMBER_IMPORT_MAX_ROWS) {
@@ -4465,6 +4467,9 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
     const name = item.name ?? '';
     const role = item.role ?? '';
     const mailbox = item.mailbox ?? '';
+    if (item.developer !== undefined && typeof item.developer !== 'boolean') {
+      return { ok: false, response: validationFailed({ rows: ['A row is invalid'] }) };
+    }
     if (
       !boundedString(item.email, MEMBER_IMPORT_EMAIL_MAX_LENGTH) ||
       item.email === '' ||
@@ -4474,7 +4479,7 @@ function memberImportBody(value: Record<string, unknown>): Parsed<MemberImportIn
     ) {
       return { ok: false, response: validationFailed({ rows: ['A row is invalid'] }) };
     }
-    clean.push({ email: item.email, name, role, mailbox });
+    clean.push({ email: item.email, name, role, mailbox, ...(item.developer === true ? { developer: true } : {}) });
   }
   return { ok: true, value: { dryRun, domain: domain.trim(), features: grants, rows: clean } };
 }

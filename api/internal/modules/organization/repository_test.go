@@ -22,6 +22,7 @@ func newOrganizationRepositoryTestDB(t *testing.T) *gorm.DB {
 		&OrganizationMembershipPO{},
 		&OrganizationInvitationPO{},
 		&MemberDeveloperGrantPO{},
+		&InvitationDeveloperGrantPO{},
 	)
 }
 

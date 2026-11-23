@@ -381,6 +381,9 @@ each invitation the feature grants the membership starts with. Only owners and a
 - `features` is applied to every invitation the request creates; absent means the new-member
   defaults, contacts and templates. Owners and admins always have every feature, so an admin row's
   grants only matter if the admin is later made a member.
+- `features.developer`, or a row's `developer: true` (the roster's `developer=yes` column), gives a
+  `member` row developer access on joining, scoped to the organization's default mail domain at
+  accept time (see [Developer access](#developer-access)); it is ignored for an `admin` row.
 - One leading `'` is removed from `email`, `name`, and `mailbox` when the next character is `=`,
   `+`, `-`, or `@`.
 

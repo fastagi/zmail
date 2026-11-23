@@ -6742,6 +6742,8 @@ export interface components {
             api_keys?: boolean;
             broadcasts?: boolean;
             contacts?: boolean;
+            /** @description Gives every invited `member` developer access on joining, scoped to the organization's default mail domain then. */
+            developer?: boolean;
             /** @description Granted when absent. */
             mail_clients?: boolean;
             templates?: boolean;
@@ -6776,6 +6778,8 @@ export interface components {
             message: string;
         };
         MemberImportRow: {
+            /** @description The roster's `developer=yes`. Gives this `member` developer access on joining, scoped to the organization's default mail domain then. Ignored for an `admin`. */
+            developer?: boolean;
             /** @description The address the person signs in and accepts the invitation with. */
             email: string;
             /** @description A local part on `domain`, or a whole address on a verified organization domain. Empty uses the email's local part without a `+tag`. */
@@ -7336,6 +7340,8 @@ export interface components {
             token: string;
         };
         OrganizationInvitationCreateRequest: {
+            /** @description Gives a `member` developer access on accept, scoped to the organization's default mail domain then; without a verified domain the member joins without it. Ignored for an `admin`. */
+            developer?: boolean;
             /**
              * Format: email
              * @description Trimmed and lower-cased before storage.

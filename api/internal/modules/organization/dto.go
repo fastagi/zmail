@@ -27,6 +27,9 @@ type UpdateOrganizationRequest struct {
 type CreateOrganizationInvitationRequest struct {
 	Email string                  `json:"email" binding:"required,max=100"`
 	Role  domain.OrganizationRole `json:"role" binding:"required"`
+	// Developer gives a member developer access on accept, scoped to the organization's default
+	// mail domain then. It is ignored for an admin, who has every feature.
+	Developer bool `json:"developer"`
 }
 
 // AcceptOrganizationInvitationRequest consumes one opaque invitation token.

@@ -245,7 +245,10 @@ fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clie
   `422 COMMON.VALIDATION_FAILED`. Every listed name must be a verified domain of the organization
   (`403 DEVELOPER.DOMAIN_NOT_ALLOWED` otherwise); the shared sending domain never is. Organization,
   context, and member views carry `developer_scope: { all_domains, domains } | null`, null for owners,
-  admins, and members without the grant. Invitations never carry `developer`. The audit change
+  admins, and members without the grant. An invitation may carry `developer` (`POST /v1/organizations/:id/invitations` with
+  `developer: true`, or a roster row with `developer=yes`): the member joins with a grant for the
+  organization's default mail domain at accept time, or without developer access while no domain is
+  verified. The audit change
   records a changed scope as `developer_scope`. Any role change withdraws the grant, so a member
   promoted and later demoted starts without developer access.
 - A route that needs a feature the active membership lacks returns

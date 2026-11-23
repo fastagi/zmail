@@ -13710,6 +13710,11 @@ components:
           description: Trimmed and lower-cased before storage.
         role:
           $ref: '#/components/schemas/OrganizationAssignableRole'
+        developer:
+          type: boolean
+          description: Gives a `member` developer access on accept, scoped to the organization's
+            default mail domain then; without a verified domain the member joins without it.
+            Ignored for an `admin`.
     OrganizationInvitationCreateResult:
       type: object
       additionalProperties: false
@@ -16962,6 +16967,10 @@ components:
           description: A local part on `domain`, or a whole address on a verified organization domain. Empty
             uses the email's local part without a `+tag`.
           maxLength: 320
+        developer:
+          type: boolean
+          description: The roster's `developer=yes`. Gives this `member` developer access on joining,
+            scoped to the organization's default mail domain then. Ignored for an `admin`.
     MemberImportFeatures:
       type: object
       description: The grants every invitation of the import starts the membership with.
@@ -16978,6 +16987,10 @@ components:
         mail_clients:
           type: boolean
           description: Granted when absent.
+        developer:
+          type: boolean
+          description: Gives every invited `member` developer access on joining, scoped to the
+            organization's default mail domain then.
     MemberImportRequest:
       type: object
       additionalProperties: false

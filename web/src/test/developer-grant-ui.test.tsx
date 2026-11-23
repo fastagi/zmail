@@ -108,6 +108,18 @@ describe('developer access grant', () => {
     );
   });
 
+  it('preselects the organization default domain', () => {
+    domains.data = [
+      domainView('fast-ui.com', 'organization'),
+      { ...domainView('acme.dev', 'organization'), default: true },
+    ];
+    renderToggles({ context: owner, member: member(), mutation: mutation() });
+    fireEvent.click(screen.getByRole('button', { name: 'Alex 的开发者' }));
+
+    expect(screen.getByRole('checkbox', { name: 'acme.dev' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'fast-ui.com' })).not.toBeChecked();
+  });
+
   it('grants every verified domain', () => {
     const save = mutation();
     renderToggles({ context: owner, member: member(), mutation: save });

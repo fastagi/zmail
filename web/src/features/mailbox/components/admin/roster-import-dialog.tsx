@@ -73,8 +73,16 @@ const DEFAULT_FEATURES: MemberImportFeatures = {
   templates: true,
   api_keys: false,
   mail_clients: true,
+  developer: false,
 };
-const FEATURE_KEYS = ['broadcasts', 'contacts', 'templates', 'api_keys', 'mail_clients'] as const;
+const FEATURE_KEYS = [
+  'broadcasts',
+  'contacts',
+  'templates',
+  'api_keys',
+  'mail_clients',
+  'developer',
+] as const;
 
 type Step =
   | { kind: 'choose' }

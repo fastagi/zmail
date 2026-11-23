@@ -737,6 +737,10 @@ TABLE notifications
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE organization_invitation_developer_grants
+  COLUMN invitation_id bigint NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
 TABLE organization_invitations
   COLUMN id bigint NOT NULL DEFAULT nextval('organization_invitations_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -1354,6 +1358,8 @@ CONSTRAINT notification_web_push_subscriptions.fk_web_push_subscriptions_user FO
 CONSTRAINT notification_web_push_subscriptions.notification_web_push_subscriptions_pkey PRIMARY KEY (id)
 CONSTRAINT notifications.fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT notifications.notifications_pkey PRIMARY KEY (id)
+CONSTRAINT organization_invitation_developer_grants.fk_organization_invitation_developer_grants_invitation FOREIGN KEY (invitation_id) REFERENCES organization_invitations(id) ON DELETE CASCADE
+CONSTRAINT organization_invitation_developer_grants.organization_invitation_developer_grants_pkey PRIMARY KEY (invitation_id)
 CONSTRAINT organization_invitations.fk_organization_invitations_acceptor FOREIGN KEY (accepted_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_invitations.fk_organization_invitations_inviter FOREIGN KEY (invited_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_invitations.fk_organization_invitations_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -1698,6 +1704,7 @@ INDEX CREATE INDEX idx_notifications_user_created ON notifications USING btree (
 INDEX CREATE UNIQUE INDEX idx_notifications_user_idempotency ON notifications USING btree (user_id, idempotency_key)
 INDEX CREATE INDEX idx_notifications_user_read ON notifications USING btree (user_id, read_at)
 INDEX CREATE UNIQUE INDEX notifications_pkey ON notifications USING btree (id)
+INDEX CREATE UNIQUE INDEX organization_invitation_developer_grants_pkey ON organization_invitation_developer_grants USING btree (invitation_id)
 INDEX CREATE INDEX idx_organization_invitations_accepted_at ON organization_invitations USING btree (accepted_at)
 INDEX CREATE INDEX idx_organization_invitations_accepted_by ON organization_invitations USING btree (accepted_by)
 INDEX CREATE INDEX idx_organization_invitations_expires_at ON organization_invitations USING btree (expires_at)

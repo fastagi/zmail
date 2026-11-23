@@ -144,6 +144,9 @@ const messages = {
     mail_clients: 'Mail apps',
     developer: 'Developer',
   },
+  invitationDeveloper: 'Developer',
+  invitationDeveloperHint:
+    'After joining, they can connect systems with the organization’s default sending domain (API keys, transactional mail, webhooks).',
   developerGrant: {
     title: 'Developer access for {member}',
     description:

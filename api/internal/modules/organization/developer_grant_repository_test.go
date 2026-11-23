@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
@@ -150,4 +151,60 @@ func TestRoleChangeWithdrawsTheDeveloperGrant(t *testing.T) {
 	assert.Nil(t, resolved.DeveloperGrant)
 	_, _, developer := resolved.DeveloperScope()
 	assert.False(t, developer, "the old grant must not come back")
+}
+
+// TestInvitationWithDeveloperGrantsTheDefaultDomainOnAccept: an invitation (or roster row) carrying
+// developer access gives the joining member a grant for the default mail domain then.
+func TestInvitationWithDeveloperGrantsTheDefaultDomainOnAccept(t *testing.T) {
+	db := newOrganizationRepositoryTestDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
+	ownerID := createOrganizationTestUser(t, db, "developer-invite-owner")
+	inviteeID := createOrganizationTestUser(t, db, "developer-invitee")
+	require.NoError(t, db.Table("users").Where("id = ?", inviteeID).Update("email", "dev@example.com").Error)
+	organization := createInvitationTestOrganization(t, db, ownerID)
+	createMailDomainsForGrantTest(t, db, organization.ID, map[string]bool{"first.example": true})
+	require.NoError(t, db.Exec(`ALTER TABLE mail_domains ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO mail_domains (organization_id, name, status, is_default)
+		VALUES (?, 'fast-ui.com', 'verified', true), (?, 'pending.example', 'pending', false)`,
+		organization.ID, organization.ID).Error)
+
+	invitation := newPendingInvitation(organization.ID, ownerID, "dev@example.com", "oinv_dev.secret", now)
+	invitation.Features = domain.DefaultMemberFeatures()
+	invitation.Features.Developer = true
+	require.NoError(t, repo.CreateInvitation(context.Background(), invitation, now))
+
+	membership, accepted, err := repo.AcceptInvitation(context.Background(), crypto.SHA256Hex("oinv_dev.secret"), inviteeID, now.Add(time.Hour))
+	require.NoError(t, err)
+	assert.True(t, accepted.Features.Developer)
+	require.NotNil(t, membership.DeveloperGrant)
+	assert.Equal(t, domain.DeveloperGrant{Domains: []string{"fast-ui.com"}}, *membership.DeveloperGrant)
+	assert.True(t, membership.Features.Developer)
+
+	resolved, err := repo.ResolveContext(context.Background(), organization.ID, inviteeID)
+	require.NoError(t, err)
+	_, _, developer := resolved.DeveloperScope()
+	assert.True(t, developer)
+}
+
+// TestInvitationWithDeveloperJoinsWithoutAccessWhenNoDomainIsVerified: nothing to scope to yet.
+func TestInvitationWithDeveloperJoinsWithoutAccessWhenNoDomainIsVerified(t *testing.T) {
+	db := newOrganizationRepositoryTestDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
+	ownerID := createOrganizationTestUser(t, db, "developer-invite-owner2")
+	inviteeID := createOrganizationTestUser(t, db, "developer-invitee2")
+	require.NoError(t, db.Table("users").Where("id = ?", inviteeID).Update("email", "dev2@example.com").Error)
+	organization := createInvitationTestOrganization(t, db, ownerID)
+	createMailDomainsForGrantTest(t, db, organization.ID, map[string]bool{"pending.example": false})
+
+	invitation := newPendingInvitation(organization.ID, ownerID, "dev2@example.com", "oinv_dev2.secret", now)
+	invitation.Features = domain.DefaultMemberFeatures()
+	invitation.Features.Developer = true
+	require.NoError(t, repo.CreateInvitation(context.Background(), invitation, now))
+
+	membership, _, err := repo.AcceptInvitation(context.Background(), crypto.SHA256Hex("oinv_dev2.secret"), inviteeID, now.Add(time.Hour))
+	require.NoError(t, err)
+	assert.Nil(t, membership.DeveloperGrant)
+	assert.False(t, membership.Features.Developer)
 }

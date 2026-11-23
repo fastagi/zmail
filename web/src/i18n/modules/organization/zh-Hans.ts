@@ -139,6 +139,8 @@ const messages = {
     mail_clients: '邮件客户端',
     developer: '开发者',
   },
+  invitationDeveloper: '开发者',
+  invitationDeveloperHint: '加入后可用组织默认发件域名接入系统（API 密钥、事务邮件、Webhook）。',
   developerGrant: {
     title: '{member} 的开发者授权',
     description:

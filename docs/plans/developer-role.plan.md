@@ -26,7 +26,7 @@
 
 ## Rulings made while planning (not in the spec)
 
-1. There is no "organization default domain" in the model. The grant dialog preselects the organization's first verified custom domain; the API requires either `all_domains=true` or at least one domain.
+1. Superseded after merging origin/main, which added `mail_domains.is_default`: the grant dialog preselects the organization's default mail domain (else the first verified one), and invitations or roster rows carrying developer access get a grant for the default domain at accept time (none while no domain is verified). The API requires either `all_domains=true` or at least one domain.
 2. Grant domains must be verified custom domains of the organization at grant time (`DEVELOPER.DOMAIN_NOT_ALLOWED` otherwise). A domain that later stops being verified simply stops matching.
 3. Transactional sends by a member's key (and console test sends by a member) need the developer grant; without it `403 ORGANIZATION.FEATURE_NOT_GRANTED`. Mailbox (`mail:send`) sends are unchanged: they are governed by mailbox access.
 4. A developer creating an organization-bound key with no `sending_domains` gets the scope's explicit list copied in; with `all_domains` the key stays unrestricted by domain (the send-time check enforces the live scope).
@@ -165,4 +165,4 @@ Behavior: page gate uses `developer`; fallback explains that an admin must grant
 
 ### Task 12 (LAST, blocked on feat/welcome-resend in origin/main): invite and roster developer option
 
-- [ ] When `git log origin/main --oneline | grep -i resend` shows the merge: merge origin/main; add developer (+ default scope = first verified domain) to invitations (`invitation_service.go`, invitation PO/migration column or grant on accept), roster `developer=yes`, invite dialog option, members-list chip; tests; gate; push.
+- [ ] When `git log origin/main --oneline | grep -i resend` shows the merge: merge origin/main; add developer (+ default scope = the default mail domain at accept) to invitations (`invitation_service.go`, invitation PO/migration column or grant on accept), roster `developer=yes`, invite dialog option, members-list chip; tests; gate; push.
