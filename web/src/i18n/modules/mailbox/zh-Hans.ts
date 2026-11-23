@@ -1944,6 +1944,7 @@ const messages = {
       title: '接入外部邮箱',
       description: '把你正在用的邮箱账号接入 Zmail 收件箱。',
       choose: '选择你的邮箱服务商',
+      imapHint: 'QQ、163、126、腾讯企业邮、阿里邮箱、iCloud 等用授权码登录的邮箱',
       comingSoon: '即将支持',
       consentTitle: '接入 {provider} 之前',
       consentDescription: '你将在 {provider} 登录，然后回到这里。',

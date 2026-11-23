@@ -2044,6 +2044,7 @@ const messages = {
       title: 'Add an external mailbox',
       description: 'Bring mail from an account you already use into your Zmail inbox.',
       choose: 'Choose where your mail is',
+      imapHint: 'QQ, 163, 126, Tencent Exmail, Aliyun, iCloud, and other mail you sign in to with an app password',
       comingSoon: 'Coming soon',
       consentTitle: 'Before you connect {provider}',
       consentDescription: 'You will sign in on {provider} and come back here.',

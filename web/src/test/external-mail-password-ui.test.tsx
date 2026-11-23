@@ -481,6 +481,7 @@ describe('app password connect step', () => {
 
   it('names Chinese providers in Chinese', async () => {
     renderWith(<ConnectDialog />, 'zh-Hans');
+    expect(screen.getByRole('button', { name: 'IMAP' })).toHaveAccessibleDescription(/QQ、163/);
     fireEvent.click(screen.getByRole('button', { name: 'IMAP' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     const form = await screen.findByRole('dialog', { name: '使用应用专用密码连接' });
