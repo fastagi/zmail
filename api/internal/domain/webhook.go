@@ -40,6 +40,19 @@ type WebhookEvent struct {
 	Type           string
 	OccurredAt     time.Time
 	Data           json.RawMessage
+	// Origin describes the mail an event is about, so endpoints created by developers receive only
+	// what their grant covers. Nil for events that are not about programmatic mail.
+	Origin *WebhookEventOrigin
+}
+
+// WebhookEventOrigin is the sending side of a mail event.
+type WebhookEventOrigin struct {
+	// Programmatic is true for transactional and API sends, never for mail written in a mailbox.
+	Programmatic bool
+	// SenderDomain is the normalized domain of the from address.
+	SenderDomain string
+	// SenderDomainVerified says whether the domain is a verified domain of the organization.
+	SenderDomainVerified bool
 }
 
 // WebhookReceipt is the durable identity returned to a trusted publisher.
@@ -70,6 +83,8 @@ type WebhookEndpoint struct {
 	PreviousSecretExpiry *time.Time
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+	// CreatedBy is the user who created the endpoint; a developer manages only their own.
+	CreatedBy uint
 }
 
 // WebhookEndpointSecret returns plaintext only at creation or rotation.

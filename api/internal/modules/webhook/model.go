@@ -148,6 +148,7 @@ func endpointFromPO(po *EndpointPO) *domain.WebhookEndpoint {
 		PreviousSecretExpiry: cloneTime(po.PreviousSecretValidUntil),
 		CreatedAt:            po.CreatedAt,
 		UpdatedAt:            po.UpdatedAt,
+		CreatedBy:            po.CreatedBy,
 	}
 }
 

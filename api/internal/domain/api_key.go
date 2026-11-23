@@ -114,6 +114,9 @@ type SendingDomainDirectory interface {
 	// SendingDomains returns lowercase domain names, or ErrOrganizationNotFound when userID is not
 	// a member of organizationID.
 	SendingDomains(ctx context.Context, organizationID, userID uint) ([]string, error)
+	// DeveloperSendingScope returns, for a member whose keys a developer grant limits, the grant
+	// and the domains it covers now; a nil grant limits nothing (owners, admins, other members).
+	DeveloperSendingScope(ctx context.Context, organizationID, userID uint) (*DeveloperGrant, []string, error)
 }
 
 // IsActive returns whether the API key can still be used.

@@ -17,10 +17,13 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		// A member uses broadcasts, contacts, and templates only with the matching grant from an
 		// owner or admin. Composing a broadcast reads templates and list names, so that grant
 		// reads them too; a template read also serves the developer pages an API key grant opens.
+		// A developer writes transactional templates inside the grant's sending domains; the
+		// service decides which kind and sender each caller may write.
 		broadcasts := requireFeature(domain.MemberFeatureBroadcasts)
 		contacts := requireFeature(domain.MemberFeatureContacts)
 		contactLists := requireFeature(domain.MemberFeatureContacts, domain.MemberFeatureBroadcasts)
 		templates := requireFeature(domain.MemberFeatureTemplates)
+		templateWrites := requireFeature(domain.MemberFeatureTemplates, domain.MemberFeatureDeveloper)
 		templateReads := requireFeature(
 			domain.MemberFeatureTemplates, domain.MemberFeatureBroadcasts, domain.MemberFeatureAPIKeys)
 
@@ -132,10 +135,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_suppressions.destroy").WhereNumber("suppression_id")
 
 		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index").Middleware(templateReads)
-		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store").Middleware(templates)
+		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store").Middleware(templateWrites)
 		auth.GET("/mail-templates/:template_id", h.GetTemplate).Name("mail_templates.show").WhereNumber("template_id").Middleware(templateReads)
-		auth.PUT("/mail-templates/:template_id", h.UpdateTemplate).Name("mail_templates.update").WhereNumber("template_id").Middleware(templates)
-		auth.DELETE("/mail-templates/:template_id", h.DeleteTemplate).Name("mail_templates.destroy").WhereNumber("template_id").Middleware(templates)
+		auth.PUT("/mail-templates/:template_id", h.UpdateTemplate).Name("mail_templates.update").WhereNumber("template_id").Middleware(templateWrites)
+		auth.DELETE("/mail-templates/:template_id", h.DeleteTemplate).Name("mail_templates.destroy").WhereNumber("template_id").Middleware(templateWrites)
 		auth.POST("/mail-templates/:template_id/tests", h.SendTemplateTest).
 			Name("mail_templates.tests.store").WhereNumber("template_id").Middleware(templates)
 		auth.POST("/mail-template-previews", h.PreviewTemplate).Name("mail_template_previews.store").Middleware(templateReads)

@@ -39,3 +39,34 @@ func (s *service) SendingDomains(ctx context.Context, organizationID, userID uin
 	}
 	return names, nil
 }
+
+// DeveloperSendingScope returns the developer grant limiting a member's keys and the domains it
+// covers now: its list, or every verified organization domain for an all-domains grant. Owners,
+// admins, and members without the grant get nil.
+func (s *service) DeveloperSendingScope(ctx context.Context, organizationID, userID uint) (*domain.DeveloperGrant, []string, error) {
+	if s.memberships == nil {
+		return nil, nil, domain.ErrServiceUnavailable
+	}
+	membership, err := s.memberships.FindForUser(ctx, organizationID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if membership.Role.CanManageOrganization() || membership.DeveloperGrant == nil {
+		return nil, nil, nil
+	}
+	grant := *membership.DeveloperGrant
+	if !grant.AllDomains {
+		return &grant, append([]string{}, grant.Domains...), nil
+	}
+	domains, err := s.MailboxDomains(ctx, organizationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	allowed := make([]string, 0, len(domains))
+	for _, mailboxDomain := range domains {
+		if !mailboxDomain.Shared {
+			allowed = append(allowed, domain.NormalizeDomainName(mailboxDomain.Name))
+		}
+	}
+	return &grant, allowed, nil
+}

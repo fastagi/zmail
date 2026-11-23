@@ -35,6 +35,11 @@ func (po *MemberDeveloperGrantPO) toDomain() *domain.DeveloperGrant {
 	return developerGrantFromColumns(po.AllDomains, po.ScopeDomains)
 }
 
+// DecodeDeveloperGrant decodes a stored grant row's scope columns for modules that read them.
+func DecodeDeveloperGrant(allDomains bool, scopeDomains string) domain.DeveloperGrant {
+	return *developerGrantFromColumns(allDomains, scopeDomains)
+}
+
 // developerGrantFromColumns decodes a stored scope. An all-domains grant lists no domain.
 func developerGrantFromColumns(allDomains bool, sendingDomains string) *domain.DeveloperGrant {
 	grant := &domain.DeveloperGrant{AllDomains: allDomains, Domains: []string{}}

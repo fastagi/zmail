@@ -216,6 +216,7 @@ type Service interface {
 	MemberJoined(ctx context.Context, event domain.OrganizationMemberJoinedEvent) error
 	// ListTemplates lists templates of one kind, or every template when kind is empty.
 	ListTemplates(ctx context.Context, organizationID uint, kind domain.MailTemplateKind) ([]*domain.MailTemplate, error)
+	TemplatesOutsideSendingScope(ctx context.Context, viewer domain.OrganizationContext, templates []*domain.MailTemplate) map[uint]bool
 	GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error)
 	// CreateTemplate, UpdateTemplate, and DeleteTemplate let every member write standard
 	// templates and only owners and admins write transactional ones.

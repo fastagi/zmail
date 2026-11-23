@@ -83,6 +83,9 @@ type TransactionalActor struct {
 	// APIKeyID is nil for a console test send.
 	APIKeyID *uint
 	Mode     domain.APIKeyMode
+	// Viewer is the key owner's membership as resolved for this request; a member needs the
+	// developer grant and a sender inside it.
+	Viewer domain.OrganizationContext
 }
 
 // TransactionalSendInput is one send request of an API key.
@@ -230,6 +233,9 @@ func (s *service) SendTransactional(ctx context.Context, actor TransactionalActo
 	if err != nil {
 		return nil, false, err
 	}
+	if err = s.requireDeveloperSender(ctx, actor.Viewer, template.FromAddress); err != nil {
+		return nil, false, err
+	}
 	if err = requireAPIKeySendingDomain(ctx, template.FromAddress); err != nil {
 		return nil, false, err
 	}
@@ -278,6 +284,9 @@ func (s *service) SendTransactionalTest(ctx context.Context, viewer domain.Organ
 	if err != nil {
 		return nil, err
 	}
+	if err = s.requireDeveloperSender(ctx, viewer, template.FromAddress); err != nil {
+		return nil, err
+	}
 	declared := make(map[string]string, len(template.Variables))
 	for _, variable := range template.Variables {
 		if sample, ok := template.SampleVariables[variable.Name]; ok {
@@ -288,7 +297,7 @@ func (s *service) SendTransactionalTest(ctx context.Context, viewer domain.Organ
 	// crypto/rand.Read always fills the buffer and never returns an error.
 	_, _ = rand.Read(random[:])
 	key := "test-send:" + strconv.FormatUint(uint64(viewer.UserID), 10) + ":" + hex.EncodeToString(random[:])
-	actor := TransactionalActor{OrganizationID: viewer.OrganizationID, UserID: viewer.UserID, Mode: input.Mode}
+	actor := TransactionalActor{OrganizationID: viewer.OrganizationID, UserID: viewer.UserID, Mode: input.Mode, Viewer: viewer}
 	send, err := s.newTransactionalSend(actor, template, parsed, account.Email, mergeValues(declared, input.Variables), key)
 	if err != nil {
 		return nil, err

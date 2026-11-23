@@ -530,6 +530,7 @@ func (s *service) normalizePublication(
 		PayloadJSON:    payload,
 		OccurredAt:     occurredAt,
 		Now:            now,
+		Origin:         event.Origin,
 	}, nil
 }
 

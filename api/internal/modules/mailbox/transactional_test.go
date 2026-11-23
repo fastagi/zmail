@@ -90,14 +90,23 @@ func newTxFixture(t *testing.T, edit func(*Settings)) *txFixture {
 	return f
 }
 
+// txDeveloper is the key owner: a member whose developer grant covers mail.example.
+func txDeveloper() domain.OrganizationContext {
+	viewer := viewerOf(10, txUser, domain.OrganizationRoleMember)
+	viewer.DeveloperGrant = &domain.DeveloperGrant{Domains: []string{"mail.example"}}
+	return viewer
+}
+
 func liveActor() TransactionalActor {
 	key := uint(31)
-	return TransactionalActor{OrganizationID: 10, UserID: txUser, APIKeyID: &key, Mode: domain.APIKeyModeLive}
+	return TransactionalActor{
+		OrganizationID: 10, UserID: txUser, APIKeyID: &key, Mode: domain.APIKeyModeLive, Viewer: txDeveloper()}
 }
 
 func testActor() TransactionalActor {
 	key := uint(32)
-	return TransactionalActor{OrganizationID: 10, UserID: txUser, APIKeyID: &key, Mode: domain.APIKeyModeTest}
+	return TransactionalActor{
+		OrganizationID: 10, UserID: txUser, APIKeyID: &key, Mode: domain.APIKeyModeTest, Viewer: txDeveloper()}
 }
 
 func codeInput(key, to, code string) TransactionalSendInput {
@@ -589,7 +598,7 @@ func TestTransactionalDisabled(t *testing.T) {
 func TestTransactionalTestSendGoesToTheCallersAccount(t *testing.T) {
 	f := newTxFixture(t, nil)
 	ctx := context.Background()
-	viewer := viewerOf(10, txUser, domain.OrganizationRoleMember)
+	viewer := txDeveloper()
 	message, err := f.service.SendTransactionalTest(ctx, viewer, TransactionalTestInput{
 		Template: "signup-code", Mode: domain.APIKeyModeLive, Variables: map[string]string{"app": "Given"},
 	})

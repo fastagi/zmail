@@ -139,6 +139,7 @@ var mailboxErrorCodes = []struct {
 // RegisterErrorMappings maps this starter's own domain errors to public status and error codes.
 func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	for _, entry := range mailboxErrorCodes {
+		mapper.Register(domain.ErrDeveloperDomainNotAllowed, http.StatusForbidden, domain.CodeDeveloperDomainNotAllowed)
 		mapper.Register(entry.err, entry.status, entry.code)
 	}
 }

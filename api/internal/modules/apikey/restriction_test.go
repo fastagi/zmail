@@ -20,6 +20,22 @@ type fakeSendingDomains struct {
 	domains map[uint][]string
 	members map[uint][]uint
 	calls   int
+	// developers maps a user to a developer grant limiting their keys.
+	developers map[uint]developerScope
+}
+
+type developerScope struct {
+	grant   domain.DeveloperGrant
+	allowed []string
+}
+
+func (f *fakeSendingDomains) DeveloperSendingScope(_ context.Context, _, userID uint) (*domain.DeveloperGrant, []string, error) {
+	scope, ok := f.developers[userID]
+	if !ok {
+		return nil, nil, nil
+	}
+	grant := scope.grant
+	return &grant, append([]string(nil), scope.allowed...), nil
 }
 
 func (f *fakeSendingDomains) SendingDomains(_ context.Context, organizationID, userID uint) ([]string, error) {

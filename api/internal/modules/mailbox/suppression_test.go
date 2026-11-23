@@ -56,6 +56,7 @@ func (f *txHandlerFixture) suppressionCount(t *testing.T) int64 {
 
 func TestMemberCannotReadLaneUsage(t *testing.T) {
 	f := newTxHandlerFixture(t, nil)
+	f.grant = nil
 	id := f.suppress(t, 10, "gone@example.com", domain.MailSuppressionReasonBounced, f.clock)
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/mail-send-lanes"},

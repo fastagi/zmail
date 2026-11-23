@@ -272,11 +272,16 @@ func newWebhookRepositoryTest(t *testing.T) (*repository, *gorm.DB, uint, uint) 
 		&EventPO{},
 		&DeliveryPO{},
 		&AttemptPO{},
+		&organization.OrganizationMembershipPO{},
+		&organization.MemberDeveloperGrantPO{},
 	)
 	actor := user.UserPO{Username: "webhook-owner", Email: "owner@example.com", Password: "unused", Status: 1}
 	require.NoError(t, db.Create(&actor).Error)
 	owner := organization.OrganizationPO{Name: "Webhook Test", Slug: "webhook-test", CreatedBy: actor.ID}
 	require.NoError(t, db.Create(&owner).Error)
+	require.NoError(t, db.Omit(clause.Associations).Create(&organization.OrganizationMembershipPO{
+		OrganizationID: owner.ID, UserID: actor.ID, Role: string(domain.OrganizationRoleOwner),
+	}).Error)
 	var foreignKeys []webhookForeignKey
 	require.NoError(t, db.Raw(webhookForeignKeyQuery, "webhook_events").Scan(&foreignKeys).Error)
 	assert.Equal(t, []webhookForeignKey{{Table: "organizations", From: "organization_id", To: "id"}}, foreignKeys)

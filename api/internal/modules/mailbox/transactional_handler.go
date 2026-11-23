@@ -162,6 +162,7 @@ func (h *Handler) SendTransactional(c *gin.Context) {
 		UserID:         viewer.UserID,
 		APIKeyID:       apiKeyID(c),
 		Mode:           apikey.APIKeyModeFromContext(c),
+		Viewer:         viewer,
 	}
 	message, created, err := h.service.SendTransactional(c.Request.Context(), actor, TransactionalSendInput{
 		Template:       req.Template,
