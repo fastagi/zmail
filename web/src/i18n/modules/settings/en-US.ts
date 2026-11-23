@@ -161,6 +161,24 @@ const messages = {
       custom: 'Custom date',
       date: 'Expiry date',
     },
+    restriction: {
+      title: 'Limits (optional)',
+      organization: 'Use only in one organization',
+      organizationHint:
+        'A limited key works only in the organization you pick, and your code no longer has to send the Organization-Id header.',
+      anyOrganization: 'Any organization I belong to',
+      organizationsLoading: 'Loading your organizations...',
+      organizationsError: 'Your organizations could not be loaded, so this key cannot be limited right now.',
+      domains: 'Send only from these domains',
+      domainsHint:
+        'Leave all unchecked to send from any domain of this organization. Email from any other domain is refused.',
+      domainsLoading: 'Loading domains...',
+      domainsError: 'Domains could not be loaded. You can still limit the key to the organization.',
+      domainsEmpty: 'This organization has no domains to send from yet.',
+      onlyOrganization: 'Only in {organization}',
+      unknownOrganization: 'organization #{id}',
+      onlyDomains: 'Sends only from {domains}',
+    },
     errors: {
       nameRequired: 'Enter a name of up to 100 characters.',
       scopeRequired: 'Choose at least one permission.',
