@@ -13,6 +13,8 @@ export default async function OrganizationRouteLayout({ children }: PropsWithChi
     ...(isWebFeatureEnabled('setting') ? CLIENT_MESSAGE_NAMESPACES.setting : []),
     ...(isWebFeatureEnabled('usage') ? CLIENT_MESSAGE_NAMESPACES.usage : []),
     ...(isWebFeatureEnabled('webhook') ? CLIENT_MESSAGE_NAMESPACES.webhook : []),
+    // The Members tab's roster import is the mailbox feature's dialog.
+    ...(isWebFeatureEnabled('mailbox') ? CLIENT_MESSAGE_NAMESPACES.mailbox : []),
   ];
   const messages = selectMessageNamespaces(await getMessages(), namespaces);
 

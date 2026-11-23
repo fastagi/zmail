@@ -1742,6 +1742,8 @@ const messages = {
       description:
         'Invite people in bulk. Each person gets an invitation, a personal mailbox reserved on your domain, and the features you pick. They own the mailbox once they accept with the same email.',
       file: 'CSV file',
+      chooseFile: 'Choose file',
+      noFile: 'No file chosen',
       template: 'Download template',
       paste: 'Or paste rows',
       columnsHint:

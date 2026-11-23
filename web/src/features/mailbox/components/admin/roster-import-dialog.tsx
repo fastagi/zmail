@@ -18,7 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -214,6 +213,7 @@ function RosterImportSteps({
   const textId = useId();
   const domainId = useId();
   const [text, setText] = useState('');
+  const [fileName, setFileName] = useState<string | null>(null);
   const [domain, setDomain] = useState(domains[0] ?? '');
   const [features, setFeatures] = useState<MemberImportFeatures>(DEFAULT_FEATURES);
   const [step, setStep] = useState<Step>({ kind: 'choose' });
@@ -227,6 +227,7 @@ function RosterImportSteps({
     if (!file) return;
     try {
       setText(await file.text());
+      setFileName(file.name);
     } catch {
       setError(t('admin.rosterImport.errors.unreadable'));
     }
@@ -323,14 +324,31 @@ function RosterImportSteps({
           <div className="space-y-4">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-0 flex-1 basis-56 space-y-2">
-                <Label htmlFor={fileId}>{t('admin.rosterImport.file')}</Label>
-                <Input
-                  id={fileId}
-                  type="file"
-                  accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
-                  disabled={pending}
-                  onChange={event => void chooseFile(event)}
-                />
+                <p className="text-sm font-medium">{t('admin.rosterImport.file')}</p>
+                {/* The native picker's own text follows the browser, not the console language. */}
+                <div className="flex min-w-0 items-center gap-3">
+                  <input
+                    id={fileId}
+                    type="file"
+                    className="peer sr-only"
+                    accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+                    disabled={pending}
+                    onChange={event => void chooseFile(event)}
+                  />
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="shrink-0 cursor-pointer peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+                  >
+                    <label htmlFor={fileId}>
+                      <Upload className="size-4" aria-hidden="true" />
+                      {t('admin.rosterImport.chooseFile')}
+                    </label>
+                  </Button>
+                  <span className="min-w-0 truncate text-sm text-muted-foreground">
+                    {fileName ?? t('admin.rosterImport.noFile')}
+                  </span>
+                </div>
               </div>
               <Button
                 type="button"
@@ -375,9 +393,7 @@ function RosterImportSteps({
                 </p>
               </div>
               <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">
-                  {t('admin.rosterImport.features')}
-                </legend>
+                <legend className="text-sm font-medium">{t('admin.rosterImport.features')}</legend>
                 <div className="grid grid-cols-2 gap-2">
                   {FEATURE_KEYS.map(key => {
                     const id = `${domainId}-${key}`;
@@ -530,9 +546,15 @@ function RosterResultTable({ rows }: { rows: MemberImportRowResult[] }) {
           <TableRow>
             <TableHead className="w-12">{t('admin.rosterImport.columns.row')}</TableHead>
             <TableHead>{t('admin.rosterImport.columns.email')}</TableHead>
-            <TableHead>{t('admin.rosterImport.columns.address')}</TableHead>
-            <TableHead>{t('admin.rosterImport.columns.status')}</TableHead>
-            <TableHead>{t('admin.rosterImport.columns.note')}</TableHead>
+            <TableHead className="hidden sm:table-cell">
+              {t('admin.rosterImport.columns.address')}
+            </TableHead>
+            <TableHead className="hidden sm:table-cell">
+              {t('admin.rosterImport.columns.status')}
+            </TableHead>
+            <TableHead className="hidden sm:table-cell">
+              {t('admin.rosterImport.columns.note')}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -543,21 +565,31 @@ function RosterResultTable({ rows }: { rows: MemberImportRowResult[] }) {
               className={cn(row.status === 'failed' && 'bg-destructive/5 hover:bg-destructive/10')}
             >
               <TableCell className="tabular-nums text-muted-foreground">{row.row}</TableCell>
-              <TableCell className="max-w-48 truncate" title={row.email}>
-                {row.email || '—'}
+              <TableCell className="max-w-48 whitespace-normal sm:truncate" title={row.email}>
+                <span className="break-all sm:break-normal">{row.email || '—'}</span>
+                {/* On a phone the other columns stack here instead of scrolling sideways. */}
+                <div className="mt-1 space-y-1 sm:hidden">
+                  {row.address ? (
+                    <p className="break-all text-xs text-muted-foreground">{row.address}</p>
+                  ) : null}
+                  <Badge variant={statusVariant(row.status)}>
+                    {t(`admin.rosterImport.status.${row.status}`)}
+                  </Badge>
+                  <p className={cn('text-xs', noteTone(row))}>{rowNote(t, row)}</p>
+                </div>
               </TableCell>
-              <TableCell className="max-w-48 truncate" title={row.address}>
+              <TableCell className="hidden max-w-48 truncate sm:table-cell" title={row.address}>
                 {row.address || '—'}
               </TableCell>
-              <TableCell>
+              <TableCell className="hidden sm:table-cell">
                 <Badge variant={statusVariant(row.status)}>
                   {t(`admin.rosterImport.status.${row.status}`)}
                 </Badge>
               </TableCell>
               <TableCell
                 className={cn(
-                  'min-w-48 whitespace-normal text-sm',
-                  row.status === 'failed' ? 'text-error' : 'text-muted-foreground'
+                  'hidden min-w-48 whitespace-normal text-sm sm:table-cell',
+                  noteTone(row)
                 )}
               >
                 {rowNote(t, row)}
@@ -568,6 +600,10 @@ function RosterResultTable({ rows }: { rows: MemberImportRowResult[] }) {
       </Table>
     </div>
   );
+}
+
+function noteTone(row: MemberImportRowResult) {
+  return row.status === 'failed' ? 'text-error' : 'text-muted-foreground';
 }
 
 function statusVariant(status: MemberImportRowResult['status']) {

@@ -346,8 +346,8 @@ describe('roster import dialog', () => {
       rows,
     });
     const failedRow = screen
-      .getByText('Enter a valid email of up to 100 characters.')
-      .closest('tr');
+      .getAllByText('Enter a valid email of up to 100 characters.')[0]
+      ?.closest('tr');
     expect(failedRow).toHaveAttribute('data-status', 'failed');
 
     fireEvent.click(screen.getByRole('button', { name: 'Import 2 rows' }));
@@ -372,10 +372,10 @@ describe('roster import dialog', () => {
     const bobRow = screen.getByText('bob@example.com').closest('tr');
     expect(bobRow).not.toBeNull();
     expect(
-      within(bobRow as HTMLElement).getByText(
+      within(bobRow as HTMLElement).getAllByText(
         'Invitation created, but no email went out. Resend it from the Invitations tab.'
       )
-    ).toBeInTheDocument();
+    ).toHaveLength(2);
     expect(toast.warning).toHaveBeenCalled();
   });
 
