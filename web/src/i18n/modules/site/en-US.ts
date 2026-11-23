@@ -1,66 +1,51 @@
 const messages = {
-  nav: {
-    home: 'Home',
-    console: 'Console',
+  "nav": {
+    "home": "Overview",
+    "console": "Console"
   },
-  footer: {
-    tagline: 'Team mailboxes and safe broadcasts on your own domain',
-    copyright: '© {year} Zmail. All rights reserved.',
+  "footer": {
+    "tagline": "Email on your own domain",
+    "copyright": "© {year} Zmail"
   },
-  hero: {
-    eyebrow: 'Team email on your own domain',
-    titlePrefix: 'Send, receive, and broadcast',
-    titleAccent: 'from domains you own',
-    description:
-      'Zmail brings shared team mailboxes, visual email templates, contact lists, and staged broadcasts with automatic bounce and spam protection into one workspace.',
-    primaryAction: 'Open console',
-    secondaryAction: 'Sign in',
+  "hero": {
+    "title": "Team email on your own domain.",
+    "description": "Send a product update, reply to a customer, or deliver a receipt from your app. Give every message an address your customers recognize.",
+    "primary": "Create an account",
+    "secondary": "Explore the API"
   },
-  features: {
-    title: 'Built for daily mail and product updates',
-    description:
-      'Everything an organization needs to run team addresses and send announcements safely.',
-    authentication: {
-      title: 'Your own mail domains',
-      description:
-        'Connect domains on Cloudflare with automated routing, sending, and DMARC checks.',
+  "preview": {
+    "update": "Product update",
+    "releaseSubject": "The autumn release",
+    "releaseBody": "Monthly reports are here. Choose a date range in Reports to see how your team did, then export the results to share.",
+    "address": "support@atlas.example",
+    "label": "Example conversation",
+    "inbox": "Shared inbox",
+    "subject": "Re: The autumn release",
+    "sender": "Maya Chen",
+    "question": "Love the new reports. Can I export last month’s numbers?",
+    "reply": "Absolutely, Maya. Open Reports, choose last month, then select Export.",
+    "team": "Atlas Support"
+  },
+  "sample": {
+    "title": "An order receipt over HTTP",
+    "description": "Use your own sender address and a key with the mail:send scope. Give each order a unique idempotency key.",
+    "action": "Open developer console"
+  },
+  "flows": {
+    "heading": "How teams use Zmail",
+    "inbox": {
+      "title": "Share a team address",
+      "description": "Give the right people access to support@. Read the conversation and reply from the same address."
     },
-    console: {
-      title: 'Shared team mailboxes',
-      description:
-        'Create addresses for people and teams, read incoming mail, reply with attachments, and track delivery.',
+    "broadcast": {
+      "title": "Send a product update",
+      "description": "Build an email from a template and send it to a test group first. Zmail can pause the broadcast if bounces or spam complaints rise above your thresholds."
     },
-    i18n: {
-      title: 'Visual templates & variables',
-      description:
-        'Design responsive emails with blocks or HTML, contact fields, fallbacks, and campaign-wide values.',
-    },
-    ui: {
-      title: 'Staged, protected broadcasts',
-      description:
-        'Send to a random test wave first and pause automatically when bounces or spam reports spike.',
-    },
-  },
-  techStack: {
-    title: 'Ready for teams and backend services',
-    description:
-      'Operate from the web console or trigger idempotent transactional mail over HTTP.',
-    pills: {
-      domains: 'Multi-domain DNS checks',
-      templates: 'Visual block editor',
-      staged: 'Test-wave broadcasts',
-      unsubscribe: 'One-click unsubscribe',
-      organizations: 'Multi-organization roles',
-      api: 'Idempotent HTTP API',
-    },
-  },
-  cta: {
-    title: 'Ready to manage your team mail?',
-    description:
-      'Sign in to your organization workspace to set up domains, mailboxes, templates, and broadcasts.',
-    primaryAction: 'Enter console',
-    githubAction: 'View on GitHub',
-  },
+    "api": {
+      "title": "Deliver mail from your app",
+      "description": "Send receipts over HTTP with a scoped API key. Reuse an idempotency key when you retry a request to avoid sending a second copy."
+    }
+  }
 } as const;
 
 export default messages;

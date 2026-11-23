@@ -1,6 +1,7 @@
 import { PropsWithChildren } from 'react';
 import Link from 'next/link';
 import { SiteHeaderNav } from '@/components/features/site/site-header-nav';
+import { LanguageSwitcher } from '@/components/common/locale-switcher';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Logo } from '@/components/ui/icons';
 import { getT } from '@/i18n/server';
@@ -43,6 +44,7 @@ export default async function SiteLayout({ children }: PropsWithChildren) {
 
           {/* Right side actions */}
           <div className="flex items-center gap-2">
+            <LanguageSwitcher />
             <ThemeToggle />
             <SiteHeaderNav />
           </div>
