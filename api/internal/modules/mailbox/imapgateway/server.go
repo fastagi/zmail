@@ -28,6 +28,8 @@ const (
 	DefaultIdlePoll         = 30 * time.Second
 	DefaultFetchBatch       = 500
 	DefaultSourceCacheBytes = 64 << 20
+	// DefaultAuthTimeout is how long a connection may stay without signing in (spec §4, §6.4).
+	DefaultAuthTimeout = 60 * time.Second
 	// commandTimeout bounds the store calls of one command.
 	commandTimeout = 30 * time.Second
 )
@@ -44,6 +46,9 @@ type Config struct {
 	// FetchBatch is how many messages one store read of a FETCH covers.
 	FetchBatch       int
 	SourceCacheBytes int64
+	// AuthTimeout closes a connection that has not signed in by then, however many commands it
+	// sends: go-imap's read timeout restarts with every command.
+	AuthTimeout time.Duration
 	// Limits backs the sign-in rate limits; nil keeps them in this process.
 	Limits *ratelimit.Stores
 	Now    func() time.Time
@@ -72,6 +77,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SourceCacheBytes <= 0 {
 		c.SourceCacheBytes = DefaultSourceCacheBytes
+	}
+	if c.AuthTimeout <= 0 {
+		c.AuthTimeout = DefaultAuthTimeout
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -184,6 +192,7 @@ func (s *Server) newSession(conn *imapserver.Conn) (imapserver.Session, *imapser
 		return nil, nil, &imap.Error{Type: imap.StatusResponseTypeBye, Code: imap.ResponseCodeUnavailable, Text: err.Error()}
 	}
 	recordConnections(s.registry.count())
+	sess.startAuthDeadline(s.cfg.AuthTimeout)
 	return sess, nil, nil
 }
 

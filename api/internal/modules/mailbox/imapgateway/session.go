@@ -55,6 +55,8 @@ type session struct {
 	principal *domain.MailClientPrincipal
 	selected  *selection
 	closed    bool
+	// authTimer closes the connection if it has not signed in in time.
+	authTimer *time.Timer
 }
 
 // selection is the selected folder and its messages' UIDs as the client knows them, by sequence
@@ -99,7 +101,29 @@ func (s *session) bye(text string) {
 	}
 }
 
+// startAuthDeadline closes the connection with a BYE unless it signs in within timeout.
+func (s *session) startAuthDeadline(timeout time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authTimer = time.AfterFunc(timeout, func() {
+		if principal, _ := s.current(); principal != nil {
+			return
+		}
+		s.bye("Sign-in timed out")
+	})
+}
+
+// stopAuthDeadline stops the sign-in deadline.
+func (s *session) stopAuthDeadline() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.authTimer != nil {
+		s.authTimer.Stop()
+	}
+}
+
 func (s *session) Close() error {
+	s.stopAuthDeadline()
 	principal, _ := s.current()
 	var membershipID uint
 	if principal != nil {
@@ -145,6 +169,7 @@ func (s *session) Login(username, password string) error {
 	s.mu.Lock()
 	s.principal = principal
 	s.mu.Unlock()
+	s.stopAuthDeadline()
 	s.server.logger.Info("imap_gateway.session_opened", "connection_id", s.id, "password_id", principal.PasswordID,
 		"organization_id", principal.Viewer.OrganizationID, "membership_id", principal.Viewer.MembershipID)
 	return nil

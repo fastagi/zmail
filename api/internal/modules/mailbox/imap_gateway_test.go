@@ -573,3 +573,24 @@ func waitFor(t *testing.T, condition func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// TestIMAPUnauthenticatedTimeout checks a connection that never signs in is closed after the
+// sign-in deadline even while it keeps sending commands, and a signed-in one is not.
+func TestIMAPUnauthenticatedTimeout(t *testing.T) {
+	f := newMailClientFixture(t)
+	gateway := startIMAPGateway(t, f, imapgateway.Config{AuthTimeout: 300 * time.Millisecond})
+	signedIn := gateway.login(t, "alice@mail.example", f.AliceSecret)
+	idle := gateway.dial(t, nil)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if idle.Noop().Wait() != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	waitDisconnected(t, idle, time.Second)
+	if err := signedIn.Noop().Wait(); err != nil {
+		t.Fatalf("a signed-in session was closed by the sign-in deadline: %v", err)
+	}
+	waitFor(t, func() bool { return gateway.Server.Connections() == 1 })
+}
