@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { isWebFeatureEnabled } from '@/config/features';
 import { ApiKeyPanel } from '@/features/api-key';
+import { MailClientsAvailable } from '@/features/mailbox/components/mail-clients-available';
 import { LazyMailClientsTab } from '@/features/mailbox/components/mail-clients-tab-lazy';
 import { MemberFeatureGate } from '@/features/mailbox/components/member-feature-gate';
 import { NotificationSettingsTab } from '@/features/notification/components/notification-settings-tab';
@@ -92,10 +93,12 @@ export default async function SettingsPage() {
           </TabsTrigger>
           {mailClientsEnabled ? (
             <MemberFeatureGate feature="mail_clients" fallback={null}>
-              <TabsTrigger value="mail-clients">
-                <Mail aria-hidden="true" />
-                {t('tabs.mailClients')}
-              </TabsTrigger>
+              <MailClientsAvailable>
+                <TabsTrigger value="mail-clients">
+                  <Mail aria-hidden="true" />
+                  {t('tabs.mailClients')}
+                </TabsTrigger>
+              </MailClientsAvailable>
             </MemberFeatureGate>
           ) : null}
           {gateApiKeys ? (

@@ -21,7 +21,7 @@ export function MailClientGuides() {
       </CardHeader>
       <CardContent className="space-y-4">
         <Tabs defaultValue="ios">
-          <TabsList className="max-w-full overflow-x-auto">
+          <TabsList className="max-w-full justify-start overflow-x-auto">
             {CLIENTS.map(client => (
               <TabsTrigger key={client} value={client}>
                 {t(`clients.${client}.name`)}
