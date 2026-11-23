@@ -161,14 +161,28 @@ export function ExternalConnectDialog({
                         disabled={!supported}
                         data-connector={connector.id}
                         className={cn(
-                          'flex h-11 w-full items-center gap-3 rounded-lg border border-border-main bg-bg-surface px-3 text-left text-sm text-text-main transition-colors focus-ring hover:bg-nav-hover motion-reduce:transition-none',
+                          'flex min-h-11 w-full items-center gap-3 rounded-lg py-2 border border-border-main bg-bg-surface px-3 text-left text-sm text-text-main transition-colors focus-ring hover:bg-nav-hover motion-reduce:transition-none',
                           'disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-bg-surface'
                         )}
+                        aria-describedby={
+                          connector.id === 'imap' ? `${connector.id}-connector-hint` : undefined
+                        }
                         onClick={() => setChosen(connector)}
                       >
                         <ProviderMark id={connector.id} />
-                        <span className="min-w-0 flex-1 truncate font-medium">
-                          {providerName(connector.id)}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">
+                            {providerName(connector.id)}
+                          </span>
+                          {connector.id === 'imap' ? (
+                            <span
+                              id={`${connector.id}-connector-hint`}
+                              aria-hidden="true"
+                              className="block text-xs text-text-muted"
+                            >
+                              {t('external.connect.imapHint')}
+                            </span>
+                          ) : null}
                         </span>
                         {supported ? null : (
                           <Badge variant="outline" className="shrink-0 text-[0.6875rem]">
