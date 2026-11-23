@@ -11,7 +11,7 @@ const rosterHeaders = {
   developer: ['developer', '\u5f00\u53d1\u8005'],
 } as const;
 
-/** Cell values that turn on developer access for a row: yes, true, 1, and 是 or 开通. */
+/** Cell values that turn on developer access for a row: yes, true, 1, and the Chinese "yes" and "grant". */
 const YES = new Set(['yes', 'y', 'true', '1', '\u662f', '\u5f00\u901a']);
 
 /** The roster template: the header line and two example rows to replace. */
