@@ -557,6 +557,8 @@ func (s *service) AgentMailMessage(ctx context.Context, viewer domain.Organizati
 	if err != nil {
 		return nil, err
 	}
+	// An agent reads for no member: blind copies stay with the member who sent them.
+	hideBlindCopies(0, message)
 	if message, err = s.withEvents(ctx, message); err != nil {
 		return nil, err
 	}

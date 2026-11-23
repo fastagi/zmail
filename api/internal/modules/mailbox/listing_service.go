@@ -153,6 +153,7 @@ func (s *service) GetThread(ctx context.Context, viewer domain.OrganizationConte
 	if len(messages) == 0 {
 		return nil, ErrMailMessageNotFound
 	}
+	hideBlindCopies(viewer.MembershipID, messages...)
 	if err := s.fillLabels(ctx, messages...); err != nil {
 		return nil, err
 	}

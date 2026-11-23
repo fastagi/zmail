@@ -40,8 +40,9 @@ type mailClientRepository interface {
 	FindClientViewer(ctx context.Context, organizationID, membershipID, userID uint) (*clientViewer, error)
 	// TouchAppPassword records a sign-in unless one was recorded after notBefore.
 	TouchAppPassword(ctx context.Context, id uint, ip string, protocol domain.MailClientProtocol, at, notBefore time.Time) error
-	// ValidClientPasswords lists, of ids, the passwords that may still sign in to IMAP: not revoked,
-	// membership present with the mail_clients feature, and the organization switch on.
+	// ValidClientPasswords lists, of ids, the passwords that may still sign in: not revoked, with a
+	// scope (scopes never change, and each sign-in checked its protocol's), membership present with
+	// the mail_clients feature, and the organization switch on.
 	ValidClientPasswords(ctx context.Context, ids []uint) (map[uint]bool, error)
 	// FolderExists reports whether the mailbox has the user folder.
 	FolderExists(ctx context.Context, mailboxID, folderID uint) (bool, error)
@@ -143,7 +144,7 @@ func (r *repository) ValidClientPasswords(ctx context.Context, ids []uint) (map[
 		Joins(`JOIN organization_memberships AS memberships ON memberships.id = passwords.membership_id
 			AND memberships.organization_id = passwords.organization_id AND memberships.user_id = passwords.user_id`).
 		Joins("LEFT JOIN mail_client_settings AS settings ON settings.organization_id = passwords.organization_id").
-		Where("passwords.id IN ? AND passwords.revoked_at IS NULL AND passwords.scope_imap AND COALESCE(settings.access_enabled, true)", ids).
+		Where("passwords.id IN ? AND passwords.revoked_at IS NULL AND (passwords.scope_imap OR passwords.scope_smtp) AND COALESCE(settings.access_enabled, true)", ids).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err

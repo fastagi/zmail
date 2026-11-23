@@ -59,6 +59,10 @@ export const mailAppPasswordListSchema = strictObject({
     imap_host: string(),
     imap_port: number().check(int(), minimum(1), maximum(65535)),
     imap_security: literal('ssl_tls'),
+    smtp_host: string(),
+    smtp_port: number().check(int(), minimum(1), maximum(65535)),
+    smtp_security: literal('ssl_tls'),
+    smtp_starttls_port: number().check(int(), minimum(1), maximum(65535)),
   }),
 });
 export type MailAppPasswordList = Infer<typeof mailAppPasswordListSchema>;

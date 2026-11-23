@@ -39,6 +39,7 @@ type mailClientFixture struct {
 	ConnectedID             uint
 	AliceSecret, BobSecret  string
 	AlicePassword, BobPwdID uint
+	Transport               *fakeTransport
 }
 
 // newMailClientFixture migrates a disposable schema and seeds the scenario.
@@ -68,7 +69,8 @@ func newMailClientFixture(t *testing.T) *mailClientFixture {
 	repo := NewRepository(db)
 	settings := accessSettings()
 	settings.AppPasswordPepper = testAppPasswordPepper
-	svc := NewService(repo, newAccessMemberships(), repo, repo, repo, repo, nil, nil, nil, &fakeTransport{},
+	transport := &fakeTransport{}
+	svc := NewService(repo, newAccessMemberships(), repo, repo, repo, repo, nil, nil, nil, transport,
 		&fakeNotifier{}, settings, nil, ratelimit.NewMemoryStores(), nil, nil)
 	svc.reverifier = &fakeReverifier{}
 	viewer := func(user uint, role domain.OrganizationRole) domain.OrganizationContext {
@@ -78,7 +80,7 @@ func newMailClientFixture(t *testing.T) *mailClientFixture {
 		}
 	}
 	f := &mailClientFixture{
-		Service: svc, DB: db,
+		Service: svc, DB: db, Transport: transport,
 		Owner: viewer(clientOwner, domain.OrganizationRoleOwner),
 		Alice: viewer(clientAlice, domain.OrganizationRoleMember),
 		Bob:   viewer(clientBob, domain.OrganizationRoleMember),

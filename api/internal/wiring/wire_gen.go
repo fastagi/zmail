@@ -204,6 +204,7 @@ func InitApplication() (*app.Application, error) {
 		ExternalMail:               mailboxService,
 		MailAgentEvents:            mailboxService,
 		MailClients:                mailboxService,
+		MailSubmissions:            mailboxService,
 	}
 	return application, nil
 }
@@ -376,6 +377,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		ExternalMail:               mailboxService,
 		MailAgentEvents:            mailboxService,
 		MailClients:                mailboxService,
+		MailSubmissions:            mailboxService,
 	}
 	return application, nil
 }

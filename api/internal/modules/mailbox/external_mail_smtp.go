@@ -189,7 +189,8 @@ func (s *imapSource) SendMail(ctx context.Context, token ExternalMailToken, mess
 		return mailtransport.Result{}, &mailtransport.Error{Code: failureSMTPUnavailable, Responded: true}
 	}
 	defer func() { _ = client.Close() }()
-	recipients := append(append([]string{}, message.To...), message.Cc...)
+	// Blind copies are envelope recipients only; buildMIMEMessage never names them.
+	recipients := append(append(append([]string{}, message.To...), message.Cc...), message.Bcc...)
 	if err := smtpTransaction(client, message.FromAddress, recipients, raw); err != nil {
 		return mailtransport.Result{}, err
 	}
@@ -322,6 +323,10 @@ func buildMIMEMessage(message mailtransport.Message, messageID string, now time.
 	}
 	names := make([]string, 0, len(message.Headers))
 	for name := range message.Headers {
+		// Blind copies never travel in a header.
+		if strings.EqualFold(strings.TrimSpace(name), "bcc") {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -400,15 +405,23 @@ func writeMIMEBody(body *bytes.Buffer, message mailtransport.Message) (string, e
 		if contentType == "" {
 			contentType = mime.FormatMediaType("application/octet-stream", map[string]string{"name": file.Filename})
 		}
-		disposition := mime.FormatMediaType("attachment", map[string]string{"filename": file.Filename})
-		if disposition == "" {
-			disposition = "attachment"
+		placement := "attachment"
+		if file.Inline && file.ContentID != "" {
+			placement = "inline"
 		}
-		part, err := mixed.CreatePart(nettextproto.MIMEHeader{
+		disposition := mime.FormatMediaType(placement, map[string]string{"filename": file.Filename})
+		if disposition == "" {
+			disposition = placement
+		}
+		partHeader := nettextproto.MIMEHeader{
 			"Content-Type":              {contentType},
 			"Content-Disposition":       {disposition},
 			"Content-Transfer-Encoding": {"base64"},
-		})
+		}
+		if id, ok := cleanContentID(file.ContentID); ok && id != "" {
+			partHeader["Content-ID"] = []string{"<" + id + ">"}
+		}
+		part, err := mixed.CreatePart(partHeader)
 		if err != nil {
 			return "", err
 		}

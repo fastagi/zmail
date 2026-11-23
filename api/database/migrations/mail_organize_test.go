@@ -33,6 +33,7 @@ func mailOrganizeFixture(t *testing.T) (*gorm.DB, func(string, ...any)) {
 // rebuilds the same column order.
 func rollBackMailOrganize(t *testing.T, db *gorm.DB) {
 	t.Helper()
+	require.NoError(t, (&addMailSubmissionFields{}).Down(db))
 	require.NoError(t, (&addMailImapUIDs{}).Down(db))
 	require.NoError(t, (&addMailboxPendingOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
@@ -73,6 +74,7 @@ func applyMailOrganize(t *testing.T, db *gorm.DB) {
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
 	require.NoError(t, (&addMailboxPendingOwner{}).Up(db))
 	require.NoError(t, (&addMailImapUIDs{}).Up(db))
+	require.NoError(t, (&addMailSubmissionFields{}).Up(db))
 }
 
 // TestMailOrganizeMigrationUpDown rolls both organize migrations back over stored folders, labels,

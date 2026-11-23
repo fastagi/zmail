@@ -271,6 +271,8 @@ TABLE mail_attachments
   COLUMN size bigint NOT NULL
   COLUMN content bytea NOT NULL
   COLUMN created_at timestamp with time zone
+  COLUMN content_id character varying(250) NOT NULL DEFAULT ''::character varying
+  COLUMN inline boolean NOT NULL DEFAULT false
 
 TABLE mail_broadcast_recipients
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_broadcast_recipients_id_seq'::regclass)
@@ -503,6 +505,8 @@ TABLE mail_messages
   COLUMN send_lane character varying(16) NOT NULL DEFAULT 'personal'::character varying
   COLUMN source character varying(16) NOT NULL DEFAULT 'zmail'::character varying
   COLUMN external_id character varying(255)
+  COLUMN bcc_addresses text NOT NULL DEFAULT '[]'::text
+  COLUMN sent_by_membership_id bigint
 
 TABLE mail_roles
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_roles_id_seq'::regclass)
@@ -1141,6 +1145,7 @@ CONSTRAINT mail_app_passwords.fk_mail_app_passwords_organization FOREIGN KEY (or
 CONSTRAINT mail_app_passwords.fk_mail_app_passwords_revoked_by FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mail_app_passwords.fk_mail_app_passwords_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT mail_app_passwords.mail_app_passwords_pkey PRIMARY KEY (id)
+CONSTRAINT mail_attachments.chk_mail_attachments_content_id CHECK (((content_id)::text !~ '[<>[:space:]]'::text))
 CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
 CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)

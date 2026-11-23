@@ -212,7 +212,7 @@ const messages = {
   mailClients: {
     title: '邮件客户端',
     description:
-      '在 Apple 邮件、Outlook、Thunderbird 或手机自带的邮件 App 里收 Zmail 的邮件。每台设备使用单独的密码，撤销其中一台不影响其他设备。',
+      '在 Apple 邮件、Outlook、Thunderbird 或手机自带的邮件 App 里收发 Zmail 的邮件。每台设备使用单独的密码，撤销其中一台不影响其他设备。',
     server: {
       title: '服务器设置',
       description: '在邮件 App 里手动添加账户时，填写以下信息。',
@@ -223,6 +223,7 @@ const messages = {
       securityValue: 'SSL/TLS',
       username: '用户名',
       usernameValue: '完整的 Zmail 邮箱地址，例如 you@acme.zmail.im',
+      copyAddress: '复制 {address}',
       password: '密码',
       passwordValue: '下方生成的客户端密码，不是账户登录密码',
       copyHost: '复制服务器',
@@ -230,7 +231,9 @@ const messages = {
       copied: '已复制',
       copyError: '复制失败，请手动选中文字复制。',
       outgoing: '发件服务器（SMTP）',
-      outgoingSoon: '即将支持：暂时还不能从邮件 App 发信。',
+      starttlsPort: '或端口（STARTTLS）',
+      copyStarttlsPort: '复制 STARTTLS 端口',
+      sameSignIn: '用户名和密码与收件服务器相同。发件服务器需要开启身份验证。',
     },
     access: {
       unavailable: '这个 Zmail 服务器还没有开通邮件客户端，请联系服务器管理员。',
@@ -271,7 +274,6 @@ const messages = {
       access: '访问范围',
       imap: '收信（IMAP）',
       smtp: '发信（SMTP）',
-      smtpHint: '即将支持：暂时还不能从邮件 App 发信。',
       currentPassword: '账户登录密码',
       currentPasswordHint: '客户端密码不经过两步验证，所以需要先确认是你本人。',
       totp: '验证码',
@@ -315,6 +317,8 @@ const messages = {
         ios: 'iPhone 和 iPad 上，新邮件在 App 拉取时到达，暂不支持后台实时推送。',
         outlook: '新版 Outlook 会经微软云同步，微软会保留一份邮件副本。',
         shared: '共享邮箱显示在 Shared/ 下，目前只能阅读。',
+        sending:
+          '发信时，发件服务器填上方地址，端口 465 + SSL/TLS（或 587 + STARTTLS）。邮件以“发件人”中的地址发出，该地址必须是你有发信权限的邮箱。',
       },
       clients: {
         ios: {

@@ -46,7 +46,20 @@ var (
 		},
 		[]string{"command"},
 	)
+	mailGatewaySubmissions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zmail_mail_gateway_smtp_submissions_total",
+			Help: "Messages mail apps submitted over SMTP, by outcome",
+		},
+		[]string{"outcome"},
+	)
 )
+
+// RecordMailGatewaySubmission counts a submitted message; outcome is sent, queued, error, or the
+// kind of a refusal (domain.MailClientSubmitErrorKind).
+func RecordMailGatewaySubmission(outcome string) {
+	mailGatewaySubmissions.WithLabelValues(outcome).Inc()
+}
 
 // SetMailGatewayConnections sets the live connections of a protocol.
 func SetMailGatewayConnections(protocol string, count int) {

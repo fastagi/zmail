@@ -48,6 +48,10 @@ export function MailClientGuides() {
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           {t('notes.shared')}
         </p>
+        <p className="flex gap-2 text-sm text-muted-foreground">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          {t('notes.sending')}
+        </p>
       </CardContent>
     </Card>
   );

@@ -420,6 +420,7 @@ const messages = {
     from: 'From',
     to: 'To',
     cc: 'Cc',
+    bcc: 'Bcc',
     date: 'Date',
     failed: 'This message was not delivered. Reason: {code}',
     failedUnknown: 'This message was not delivered.',

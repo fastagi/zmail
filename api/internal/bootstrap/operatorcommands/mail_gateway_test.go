@@ -51,6 +51,13 @@ func (refusingClientStore) AuthenticateClient(context.Context, string, string, d
 	return nil, domain.ErrMailClientAuthFailed
 }
 
+// refusingSubmissionStore refuses every sign-in too.
+type refusingSubmissionStore struct{ domain.MailSubmissionStore }
+
+func (refusingSubmissionStore) AuthenticateClient(context.Context, string, string, domain.MailClientProtocol, string) (*domain.MailClientPrincipal, error) {
+	return nil, domain.ErrMailClientAuthFailed
+}
+
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -79,11 +86,15 @@ func writeTestCertificate(t *testing.T) (string, string) {
 
 func TestRunMailGatewayServesAndStops(t *testing.T) {
 	certFile, keyFile := writeTestCertificate(t)
-	cfg := config.MailGatewayConfig{IMAPAddr: freeAddr(t), HealthAddr: freeAddr(t), TLSCertFile: certFile, TLSKeyFile: keyFile}.Resolved()
+	cfg := config.MailGatewayConfig{IMAPAddr: freeAddr(t), SMTPSAddr: freeAddr(t), SubmissionAddr: freeAddr(t),
+		HealthAddr: freeAddr(t), TLSCertFile: certFile, TLSKeyFile: keyFile}.Resolved()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runMailGateway(ctx, cfg, refusingClientStore{}, ratelimit.NewMemoryStores(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		done <- runMailGateway(ctx, mailGatewayRuntime{
+			cfg: cfg, smtpDomain: "smtp.test", clients: refusingClientStore{}, submissions: refusingSubmissionStore{},
+			limits: ratelimit.NewMemoryStores(), logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
 	}()
 
 	var conn *tls.Conn
@@ -97,6 +108,17 @@ func TestRunMailGatewayServesAndStops(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(greeting[:n]), "* OK")
 	assert.GreaterOrEqual(t, conn.ConnectionState().Version, uint16(tls.VersionTLS12))
+
+	smtps, err := tls.Dial("tcp", cfg.SMTPSAddr, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // the test's own certificate
+	require.NoError(t, err)
+	n, err = smtps.Read(greeting)
+	require.NoError(t, err)
+	assert.Contains(t, string(greeting[:n]), "220 smtp.test ESMTP")
+	submission, err := net.Dial("tcp", cfg.SubmissionAddr)
+	require.NoError(t, err)
+	n, err = submission.Read(greeting)
+	require.NoError(t, err)
+	assert.Contains(t, string(greeting[:n]), "220 smtp.test ESMTP")
 
 	response, err := http.Get("http://" + cfg.HealthAddr + "/health") //nolint:noctx // a local test request
 	require.NoError(t, err)
@@ -112,4 +134,6 @@ func TestRunMailGatewayServesAndStops(t *testing.T) {
 	}
 	rest, _ := io.ReadAll(conn)
 	assert.Contains(t, string(rest), "* BYE")
+	rest, _ = io.ReadAll(submission)
+	assert.Contains(t, string(rest), "421")
 }

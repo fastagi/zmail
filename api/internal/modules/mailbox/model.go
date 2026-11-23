@@ -211,8 +211,12 @@ type MailMessagePO struct {
 	// Source is zmail, gmail, or outlook; ExternalID is the provider's id of a synced copy.
 	Source     string  `gorm:"size:16;not null;default:'zmail'"`
 	ExternalID *string `gorm:"size:255;uniqueIndex:idx_mail_messages_external,priority:2,where:external_id IS NOT NULL"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// BccAddresses are the blind copies of an outbound message, a JSON array like ToAddresses.
+	BccAddresses string `gorm:"type:text;not null;default:'[]'"`
+	// SentByMembershipID is the member who sent an outbound message; only they see its blind copies.
+	SentByMembershipID *uint
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 func (MailMessagePO) TableName() string {
@@ -304,6 +308,7 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 		FromName:    po.FromName,
 		To:          decodeAddresses(po.ToAddresses),
 		Cc:          decodeAddresses(po.CcAddresses),
+		Bcc:         decodeAddresses(po.BccAddresses),
 		Subject:     po.Subject,
 		TextBody:    po.TextBody,
 		HTMLBody:    po.HTMLBody,
@@ -353,6 +358,9 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 	if po.ExternalID != nil {
 		message.ExternalID = *po.ExternalID
 	}
+	if po.SentByMembershipID != nil {
+		message.SentByMembershipID = *po.SentByMembershipID
+	}
 	return message
 }
 
@@ -366,12 +374,14 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		FromName:    message.FromName,
 		ToAddresses: encodeAddresses(message.To),
 		CcAddresses: encodeAddresses(message.Cc),
-		Subject:     message.Subject,
-		TextBody:    message.TextBody,
-		HTMLBody:    message.HTMLBody,
-		MessageID:   message.MessageID,
-		InReplyTo:   message.InReplyTo,
-		FailureCode: message.FailureCode,
+		// A blind copy is never stored beside cc.
+		BccAddresses: encodeAddresses(message.Bcc),
+		Subject:      message.Subject,
+		TextBody:     message.TextBody,
+		HTMLBody:     message.HTMLBody,
+		MessageID:    message.MessageID,
+		InReplyTo:    message.InReplyTo,
+		FailureCode:  message.FailureCode,
 	}
 	if message.DedupeKey != "" {
 		key := message.DedupeKey
@@ -415,6 +425,10 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 	if message.ExternalID != "" {
 		externalID := message.ExternalID
 		po.ExternalID = &externalID
+	}
+	if message.SentByMembershipID != 0 {
+		sentBy := message.SentByMembershipID
+		po.SentByMembershipID = &sentBy
 	}
 	return po
 }
@@ -505,7 +519,10 @@ type MailAttachmentPO struct {
 	ContentType string `gorm:"size:127;not null"`
 	Size        int    `gorm:"not null"`
 	Content     []byte `gorm:"type:bytea;not null"`
-	CreatedAt   time.Time
+	// ContentID is the part's Content-ID without angle brackets; Inline places it in the body.
+	ContentID string `gorm:"size:250;not null;default:''"`
+	Inline    bool   `gorm:"not null;default:false"`
+	CreatedAt time.Time
 }
 
 func (MailAttachmentPO) TableName() string {
@@ -520,6 +537,8 @@ func (po *MailAttachmentPO) toDomain() domain.MailAttachment {
 		ContentType: po.ContentType,
 		Size:        po.Size,
 		Content:     po.Content,
+		ContentID:   po.ContentID,
+		Inline:      po.Inline,
 	}
 }
 
