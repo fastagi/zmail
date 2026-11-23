@@ -16,7 +16,7 @@ const messages = {
   inApp: '站内通知',
   inAppDescription: '在 Zmail 控制台通知中心显示新消息。',
   email: '邮件通知',
-  emailDescription: '通过已配置的邮件供应商发送新消息。',
+  emailDescription: '同时把通知发到你的登录邮箱。',
   cancel: '取消',
   save: '保存偏好',
   saved: '通知偏好已更新',

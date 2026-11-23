@@ -13,7 +13,7 @@ const messages = {
   inApp: 'In-app notifications',
   inAppDescription: 'Show new messages in the Zmail console notification center.',
   email: 'Email notifications',
-  emailDescription: 'Send new messages through the configured email provider.',
+  emailDescription: 'Also send notifications to your sign-in email.',
   cancel: 'Cancel',
   save: 'Save preferences',
   saved: 'Notification preferences updated',
