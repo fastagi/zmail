@@ -1625,7 +1625,7 @@ paths:
       parameters: []
       responses:
         '200':
-          description: Effective preferences; both default to true.
+          description: Effective preferences; all default to true.
           content:
             application/json:
               schema:
@@ -1775,6 +1775,115 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/web-push-config:
+    get:
+      operationId: getWebPushConfig
+      summary: Read whether browser push is available and its VAPID public key
+      tags:
+        - Notifications
+      security:
+        - bearerSession: []
+      parameters: []
+      responses:
+        '200':
+          description: Push availability; `public_key` is empty when push is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushConfigResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/web-push-subscriptions:
+    get:
+      operationId: listWebPushSubscriptions
+      summary: List the caller's browser push subscriptions
+      description: Newest first, at most 20. Endpoints and keys are never returned.
+      tags:
+        - Notifications
+      security:
+        - bearerSession: []
+      parameters: []
+      responses:
+        '200':
+          description: The caller's subscriptions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushSubscriptionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: putWebPushSubscription
+      summary: Register this browser's push subscription
+      description: >-
+        Idempotent upsert keyed by the SHA-256 of the endpoint; an endpoint registered by another
+        user moves to the caller. A user keeps at most 20 subscriptions; one more replaces the least
+        recently registered.
+      tags:
+        - Notifications
+      security:
+        - bearerSession: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebPushSubscriptionRequest'
+      responses:
+        '200':
+          description: The stored subscription, without endpoint or keys.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebPushSubscriptionResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: >-
+            A field failed validation, the endpoint is not https on a known browser push service
+            (`NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID`), or the keys are malformed
+            (`NOTIFICATION.WEB_PUSH_KEYS_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Push is not configured (`NOTIFICATION.WEB_PUSH_DISABLED`) or persistence is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/web-push-subscriptions/{subscription_id}:
+    delete:
+      operationId: deleteWebPushSubscription
+      summary: Remove one of the caller's browser push subscriptions
+      tags:
+        - Notifications
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/WebPushSubscriptionID'
+      responses:
+        '204':
+          description: The subscription was removed.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: '`NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND`: absent or owned by another user.'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/asset-transfers/{transfer_token}:
@@ -10812,6 +10921,13 @@ components:
       description: Positive notification identifier owned by the caller.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    WebPushSubscriptionID:
+      name: subscription_id
+      in: path
+      required: true
+      description: Positive push subscription identifier owned by the caller.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     NotificationStatusFilter:
       name: status
       in: query
@@ -11508,6 +11624,10 @@ components:
         - NOTIFICATION.NOT_FOUND
         - NOTIFICATION.IDEMPOTENCY_CONFLICT
         - NOTIFICATION.INVALID_CHANNEL
+        - NOTIFICATION.WEB_PUSH_DISABLED
+        - NOTIFICATION.WEB_PUSH_ENDPOINT_INVALID
+        - NOTIFICATION.WEB_PUSH_KEYS_INVALID
+        - NOTIFICATION.WEB_PUSH_SUBSCRIPTION_NOT_FOUND
         - ASSET.NOT_FOUND
         - ASSET.NOT_READY
         - ASSET.IDEMPOTENCY_CONFLICT
@@ -13220,11 +13340,124 @@ components:
       required:
         - in_app_enabled
         - email_enabled
+        - web_push_enabled
       properties:
         in_app_enabled:
           type: boolean
         email_enabled:
           type: boolean
+        web_push_enabled:
+          type: boolean
+          description: Defaults to true; a push is sent only to subscribed devices.
+    WebPushConfig:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - public_key
+      properties:
+        enabled:
+          type: boolean
+        public_key:
+          type: string
+          description: Base64url VAPID application server key; empty when push is not configured.
+    WebPushConfigResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/WebPushConfig'
+    WebPushSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - endpoint
+        - keys
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: The PushSubscription endpoint; https on a known browser push service.
+        keys:
+          type: object
+          additionalProperties: false
+          required:
+            - p256dh
+            - auth
+          properties:
+            p256dh:
+              type: string
+              maxLength: 256
+              description: Base64url (or base64) 65-byte uncompressed P-256 public key.
+            auth:
+              type: string
+              maxLength: 64
+              description: Base64url (or base64) 16-byte authentication secret.
+        device_label:
+          type: string
+          maxLength: 120
+          description: Optional plain-text name of the device, such as "Chrome on macOS".
+    WebPushSubscription:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - device_label
+        - created_at
+        - last_success_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        device_label:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_success_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    WebPushSubscriptionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/WebPushSubscription'
+    WebPushSubscriptionListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/WebPushSubscription'
     NotificationPreferenceResponse:
       type: object
       additionalProperties: false
@@ -13991,6 +14224,9 @@ components:
           type: boolean
         email_enabled:
           type: boolean
+        web_push_enabled:
+          type: boolean
+          description: Optional; omitted keeps the stored value.
     OperatorSignInRequest:
       type: object
       required:

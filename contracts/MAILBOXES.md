@@ -3566,6 +3566,33 @@ and the mailbox its organization. A message is identified by its `Message-ID`, o
 content when it has none, once per mailbox. The API stores the first `text/plain` and first `text/html` part, converted to UTF-8 and
 truncated to 256 KiB each. Attachments are not stored.
 
+### New-Mail Notifications
+
+When the optional notification starter runs (see [`NOTIFICATIONS.md`](NOTIFICATIONS.md)), a newly
+stored inbound delivery (`201`, never a `200` duplicate) publishes one `mail.received` notification to
+every user who can read the mailbox at that moment, and to no one else:
+
+- a personal mailbox: its owner, while the owner is a member of the organization;
+- a shared mailbox: each member whose permission includes `view`, while still a member of the
+  organization.
+
+The audience is the same rule as reading the mail (`MailboxAccessFor` granting `View`): organization
+owners and admins who only administer the mailbox are not notified. Mail synced from a connected
+outside account does not publish.
+
+| Field | Value |
+|---|---|
+| `kind` | `mail.received` |
+| `idempotency_key` | `mail.received:<message_id>` |
+| `title` | The sender's display name, or address without one; control characters folded, at most 160 characters |
+| `body` | The subject with codes and sensitive links masked as in [Masked Secrets](#masked-secrets), at most 80 characters (cut with `…`), or `(no subject)` |
+| `action_url` | `/console/mailboxes?org=<organization_id>&mailbox=<mailbox_id>&open=<message_id>` |
+| `channels` | `in_app`, `web_push`; none required |
+
+No message body, recipient list, or attachment name is published. Publishing runs after the message
+is stored; a failure is logged at `warn` with mailbox, message, and user ids only and never changes the
+inbound response. Without the notification starter nothing is published.
+
 ## Errors
 
 | Code | Status |
