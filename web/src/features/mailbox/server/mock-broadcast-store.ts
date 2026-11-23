@@ -15,6 +15,7 @@ import type {
   MailBroadcast,
   MailBroadcastInput,
   MailBroadcastPage,
+  MailBroadcastProgress,
   MailBroadcastRecipient,
   MailBroadcastRecipientPage,
   MailRecipientStatus,
@@ -75,9 +76,28 @@ export class MockBroadcastStore {
     };
   }
 
+  /** One broadcast with its progress, like `GET /v1/mail-broadcasts/{id}`. */
   get(organizationId: number, id: number): MockBroadcastResult {
     const stored = this.of(organizationId).get(id);
-    return stored ? { ok: true, broadcast: withCounts(stored) } : { ok: false, error: 'not_found' };
+    if (!stored) return { ok: false, error: 'not_found' };
+    const broadcast = withCounts(stored);
+    return { ok: true, broadcast: { ...broadcast, progress: this.progress(broadcast) } };
+  }
+
+  /**
+   * The mock sends a whole wave at once, so a running broadcast never has a measured rate and the
+   * mock has no send limit: only the presence of the object follows the contract.
+   */
+  private progress(broadcast: MailBroadcast): MailBroadcastProgress | null {
+    if (!['scheduled', 'sending', 'paused'].includes(broadcast.status)) return null;
+    return {
+      rate_per_minute: null,
+      rate_window_minutes: 10,
+      estimated_finish_at: null,
+      send_limit_pauses: false,
+      send_limit_resumes_at: null,
+      computed_at: this.timestamp(),
+    };
   }
 
   save(organizationId: number, input: MailBroadcastInput, id?: number): MockBroadcastResult {
@@ -389,5 +409,6 @@ function withCounts(stored: StoredBroadcast): MailBroadcast {
       bounced: 0,
       complained: 0,
     },
+    progress: null,
   };
 }

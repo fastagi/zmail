@@ -2427,6 +2427,69 @@ stored `message_id`, a `failure_code`, the message's `last_event` (see [Delivery
 so `delivered`, `bounced`, or `complained`), and the contact's current `contact_status` (`unsubscribed`
 once the recipient used the link; null once the contact is deleted).
 
+#### Progress And Estimated Finish
+
+`GET /v1/mail-broadcasts/{id}` adds `progress` for a `scheduled`, `sending`, or `paused`
+broadcast; it is null in the listing, in answers to writes, and for any other status. It is
+computed on every request and never cached:
+
+```json
+{
+  "rate_per_minute": 42.5,
+  "rate_window_minutes": 10,
+  "estimated_finish_at": "2026-11-24T08:39:00Z",
+  "send_limit_pauses": true,
+  "send_limit_resumes_at": "2026-11-24T08:00:00Z",
+  "computed_at": "2026-11-23T08:00:00Z"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `rate_per_minute` | Recipients that became `sent`, `failed`, or `skipped` in the last `rate_window_minutes` (10), per minute, counted over the part of that window since `started_at` and at least one minute; two decimals. Null when none finished in the window, and always null unless the broadcast is `sending`. |
+| `estimated_finish_at` | When the last pending recipient should be finished. Null when it cannot be told: a broadcast paused by a person or by the health check, or one without a rate whose pending recipients all fit in the broadcast lane's room. |
+| `send_limit_pauses` | True when the organization's 24-hour broadcast lane limit (`daily_broadcast_limit`, see [Sending](#sending)) holds the broadcast now or will hold it before every pending recipient is sent. |
+| `send_limit_resumes_at` | When the lane has room again for a broadcast the limit holds or will hold; null when `send_limit_pauses` is false. |
+
+The estimate uses only what the API stores: the pending count, the rate, the lane limit that
+applies to the organization now, and the instants of the lane's attempts in the rolling window
+(deleted messages included, exactly as the limit counts them). Sending starts now, at
+`scheduled_at`, or at `resume_at` of a waiting test wave. While the lane has room for every pending
+recipient, the finish is that start plus pending divided by the rate. Otherwise sending pauses once
+the room is used, resumes when the oldest attempt leaves the 24-hour window, and the n-th recipient
+over the room is sent when the n-th oldest attempt leaves it; past the attempts in the window,
+each further day sends one limit's worth. Without a rate, only the limit's waits count. The estimate
+assumes no other broadcast of the organization uses the lane meanwhile, so it is a guide, not a
+promise.
+
+#### Notices
+
+The mail worker tells the person who started a broadcast (who sent or scheduled it) when it:
+
+| Event | `kind` |
+|---|---|
+| Ends `sent` | `mail.broadcast_sent` |
+| Ends `canceled` with `stop_reason` `all_recipients_failed` | `mail.broadcast_failed` |
+| Is paused with `bounce_rate_high` or `complaint_rate_high` | `mail.broadcast_paused` |
+| Starts waiting with `send_limit_reached` | `mail.broadcast_paused` |
+
+A broadcast canceled or paused by a person, or a test wave waiting out its wait, sends no notice.
+Each notice says what happened in counts, what Zmail does next (for the send limit, when sending
+resumes on its own, in UTC), and what the person can do, and links to
+`{MAILBOX_PUBLIC_URL}/console/mail-broadcasts?org={organization_id}&open={broadcast_id}`.
+
+- When the notification starter runs, the notice is an in-app notification of that `kind` for the
+  starter (`in_app` channel only, `action_url` the console path above).
+- When the system mailer (`MAIL_PROVIDER` and `MAIL_FROM`, the mailer of password resets) is configured, it also goes by email to the starter's account
+  address. Email is sent whatever the person's notification preferences say, because it is about
+  mail they sent.
+- Each event is told once. A notice whose email could not be sent is tried again on the next
+  worker round under the same idempotency key; one the mailer refuses for good is not. A
+  broadcast that leaves a state and enters it again (the limit holds it on a later day) is told
+  again. A starter who is no longer a member of the organization is not told. Broadcasts that
+  finished more than seven days ago are not looked at, and those that had ended or paused before
+  this feature was deployed are not told about.
+
 #### Unsubscribe And Suppression
 
 An unsubscribe link is `{MAILBOX_PUBLIC_URL}/unsubscribe/{token}`, a page of the Web console. The

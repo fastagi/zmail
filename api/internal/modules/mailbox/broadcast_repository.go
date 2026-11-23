@@ -280,6 +280,7 @@ func (r *repository) StartBroadcast(ctx context.Context, broadcast *domain.MailB
 			"text_body":    broadcast.TextBody,
 			"scheduled_at": broadcast.ScheduledAt,
 			"started_at":   broadcast.StartedAt,
+			"started_by":   broadcast.StartedBy,
 			"stop_reason":  "",
 			"updated_at":   gorm.Expr("now()"),
 		}).Error
@@ -612,4 +613,91 @@ func (r *repository) SuppressContactForMessage(ctx context.Context, messageID ui
 		JOIN mail_broadcasts b ON b.id = r.broadcast_id
 		WHERE r.message_id = ? AND c.id = r.contact_id AND c.organization_id = b.organization_id
 		  AND c.status <> 'suppressed'`, reason, messageID).Error
+}
+
+func (r *repository) CountRecipientsFinishedSince(ctx context.Context, broadcastID uint, since time.Time) (int64, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Model(&MailBroadcastRecipientPO{}).
+		Where("broadcast_id = ? AND status IN ? AND updated_at >= ?", broadcastID,
+			[]string{string(domain.MailRecipientSent), string(domain.MailRecipientFailed), string(domain.MailRecipientSkipped)}, since).
+		Count(&count).Error
+	return count, err
+}
+
+func (r *repository) NthBroadcastAttemptSince(ctx context.Context, organizationID uint, since time.Time, n int64) (*time.Time, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	if n < 0 {
+		return nil, nil
+	}
+	db := r.conn(ctx)
+	// The same attempts the lane limit counts: live messages and those deleted since.
+	var instants []time.Time
+	err := db.Raw(`SELECT attempted_at FROM ((?) UNION ALL (?)) AS attempts ORDER BY attempted_at ASC OFFSET ? LIMIT 1`,
+		laneAttempts(db, organizationID, domain.SendLaneBroadcast, since).Select("mail_messages.send_attempted_at AS attempted_at"),
+		deletedSends(db, organizationID, domain.SendLaneBroadcast, since).Select("send_attempted_at AS attempted_at"),
+		n).Scan(&instants).Error
+	if err != nil || len(instants) == 0 {
+		return nil, err
+	}
+	at := instants[0].UTC()
+	return &at, nil
+}
+
+// broadcastNoticeState is a broadcast's state in notice terms; keep it in step with the backfill of
+// migration 2026_12_19_090000_add_broadcast_notices.
+const broadcastNoticeState = `CASE
+	WHEN status = 'sent' THEN 'sent'
+	WHEN status = 'canceled' AND stop_reason = 'all_recipients_failed' THEN 'failed'
+	WHEN status = 'paused' AND stop_reason IN ('bounce_rate_high', 'complaint_rate_high') THEN stop_reason
+	WHEN status = 'sending' AND stop_reason = 'send_limit_reached' THEN 'send_limit_reached'
+	ELSE '' END`
+
+func (r *repository) ListBroadcastNoticesDue(ctx context.Context, finishedSince time.Time, limit int) ([]*domain.MailBroadcastNoticeDue, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []struct {
+		MailBroadcastPO
+		State string
+	}
+	err := r.conn(ctx).Model(&MailBroadcastPO{}).
+		Select("id, organization_id, name, mailbox_id, status, stop_reason, scheduled_at, started_at, finished_at, resume_at, "+
+			"started_by, notice_state, notice_count, created_by, created_at, updated_at, "+broadcastNoticeState+" AS state").
+		Where("status IN ?", []string{string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused),
+			string(domain.MailBroadcastSent), string(domain.MailBroadcastCanceled)}).
+		Where("finished_at IS NULL OR finished_at >= ?", finishedSince).
+		Where("notice_state <> " + broadcastNoticeState).
+		Order("id ASC").Limit(limit).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	due := make([]*domain.MailBroadcastNoticeDue, 0, len(rows))
+	broadcasts := make([]*domain.MailBroadcast, 0, len(rows))
+	for i := range rows {
+		broadcast := rows[i].MailBroadcastPO.toDomain()
+		broadcasts = append(broadcasts, broadcast)
+		due = append(due, &domain.MailBroadcastNoticeDue{
+			Broadcast: broadcast, State: rows[i].State,
+			NoticedState: rows[i].NoticeState, NoticeCount: rows[i].NoticeCount,
+		})
+	}
+	if err := fillCounts(r.conn(ctx), broadcasts); err != nil {
+		return nil, err
+	}
+	return due, nil
+}
+
+func (r *repository) MarkBroadcastNoticed(ctx context.Context, id uint, from, state string, count int) (bool, error) {
+	if r.db == nil {
+		return false, domain.ErrServiceUnavailable
+	}
+	// updated_at stays: the notice is not a change of the broadcast.
+	result := r.conn(ctx).Exec(`UPDATE mail_broadcasts SET notice_state = ?, notice_count = ? WHERE id = ? AND notice_state = ?`,
+		state, count, id, from)
+	return result.RowsAffected == 1, result.Error
 }

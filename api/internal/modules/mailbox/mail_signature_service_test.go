@@ -21,7 +21,7 @@ func newSignatureFixture(t *testing.T) *accessFixture {
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
 	svc := NewService(repo, memberships, repo, repo, repo, repo,
-		nil, nil, nil, transport, &fakeNotifier{}, accessSettings(), nil, nil, nil)
+		nil, nil, nil, transport, &fakeNotifier{}, accessSettings(), nil, nil, nil, nil)
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 
