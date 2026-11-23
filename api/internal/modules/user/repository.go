@@ -159,6 +159,13 @@ func (r *repository) DeleteAccount(ctx context.Context, id uint, check func(cont
 		); revokeErr != nil {
 			return revokeErr
 		}
+		// A deleted account's external sign-in links go with it, so the subject can neither revive
+		// the account nor block a new one.
+		if unlinkErr := tx.WithContext(transactionContext).
+			Where("user_id = ?", id).
+			Delete(&UserIdentityPO{}).Error; unlinkErr != nil {
+			return unlinkErr
+		}
 
 		result := tx.WithContext(transactionContext).Delete(&po)
 		if result.Error != nil {

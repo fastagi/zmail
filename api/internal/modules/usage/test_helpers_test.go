@@ -27,6 +27,7 @@ func newUsageTestFixture(t *testing.T) usageTestFixture {
 	db := testplatform.OpenPostgres(t, nil,
 		&user.UserPO{},
 		&user.AuthenticationSessionPO{},
+		&user.UserIdentityPO{},
 		&organization.OrganizationPO{},
 		&UsageCounterPO{},
 		&UsageQuotaPO{},

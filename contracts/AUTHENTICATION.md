@@ -230,6 +230,12 @@ Flow:
    `users.email_verified_at`; otherwise a new account is created with the verified email, a generated
    `user_<hex>` username, the Google name as nickname, and no password. Later sign-ins match the
    subject first, so a changed Google email still reaches the same account.
+   Linking an account whose email was not yet verified is a takeover, because someone else may have
+   registered it in the owner's name: the same transaction clears its password and revokes all of
+   its sessions (revocation reason `identity_linked`), and the request's audit entry records it. The
+   owner can set a password again through forgot-password. An account whose email was already
+   verified links without losing its password or sessions. Deleting an account deletes its
+   `user_identities` rows, so the subject neither revives it nor blocks a new account.
 5. A disabled account answers `401 AUTH.INVALID_CREDENTIALS`, the password login failure. An account
    with two-factor sign-in answers `401 AUTH.TOTP_REQUIRED` and signs in with its password and code;
    Google never replaces the authenticator. With `AUTH_REGISTRATION_ENABLED=false`, a Google account

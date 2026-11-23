@@ -244,6 +244,28 @@ func (f *googleSignInFixture) createPasswordUser(t *testing.T, username, email s
 	return user
 }
 
+func (f *googleSignInFixture) markEmailVerified(t *testing.T, userID uint) {
+	t.Helper()
+	require.NoError(t, f.db.Exec(`UPDATE users SET email_verified_at = now() WHERE id = ?`, userID).Error)
+}
+
+// issueSession signs the account in the ordinary way and returns the session's ID.
+func (f *googleSignInFixture) issueSession(t *testing.T, user *domain.User) string {
+	t.Helper()
+	_, err := f.svc.sessions.Issue(context.Background(), user, domain.SessionAudienceUser)
+	require.NoError(t, err)
+	var row AuthenticationSessionPO
+	require.NoError(t, f.db.Where("user_id = ?", user.ID).Order("created_at DESC").Take(&row).Error)
+	return row.ID
+}
+
+func (f *googleSignInFixture) session(t *testing.T, id string) AuthenticationSessionPO {
+	t.Helper()
+	var row AuthenticationSessionPO
+	require.NoError(t, f.db.Where("id = ?", id).Take(&row).Error)
+	return row
+}
+
 func (f *googleSignInFixture) identities(t *testing.T) []UserIdentityPO {
 	t.Helper()
 	var rows []UserIdentityPO
@@ -299,6 +321,8 @@ func TestGoogleSignInCreatesAccountForNewUser(t *testing.T) {
 func TestGoogleSignInLinksExistingEmailWithoutDuplicating(t *testing.T) {
 	f := newGoogleSignInFixture(t)
 	existing := f.createPasswordUser(t, "alice", "Alice@Example.com", 1)
+	f.markEmailVerified(t, existing.ID)
+	earlier := f.issueSession(t, existing)
 	before := f.userCount(t)
 
 	result, err := f.signIn(t, googleTestIdentity{Subject: "2002", Email: "alice@example.com", EmailVerified: true, Name: "Alice"}, "")
@@ -311,6 +335,7 @@ func TestGoogleSignInLinksExistingEmailWithoutDuplicating(t *testing.T) {
 	require.NoError(t, f.db.First(&stored, existing.ID).Error)
 	assert.NotNil(t, stored.EmailVerifiedAt, "linking proves the email")
 	assert.Equal(t, existing.Password, stored.Password, "the password keeps working")
+	assert.Nil(t, f.session(t, earlier).RevokedAt, "a verified account keeps its sessions")
 	identities := f.identities(t)
 	require.Len(t, identities, 1)
 	assert.Equal(t, existing.ID, identities[0].UserID)
@@ -319,6 +344,50 @@ func TestGoogleSignInLinksExistingEmailWithoutDuplicating(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, existing.ID, again.User.ID)
 	assert.Len(t, f.identities(t), 1, "a second sign-in reuses the link")
+}
+
+// An account whose email was never proven may have been registered by someone else in the owner's
+// name. Linking it to Google hands it to the Google account: the password and every earlier session
+// stop working, and the owner can set a new password through forgot-password.
+func TestGoogleSignInTakesOverAnUnverifiedAccount(t *testing.T) {
+	f := newGoogleSignInFixture(t)
+	squatted := f.createPasswordUser(t, "squatter", "owner@example.com", 1)
+	earlier := f.issueSession(t, squatted)
+
+	result, err := f.signIn(t, googleTestIdentity{Subject: "2112", Email: "owner@example.com", EmailVerified: true}, "")
+	require.NoError(t, err)
+	assert.Equal(t, squatted.ID, result.User.ID)
+
+	var stored UserPO
+	require.NoError(t, f.db.First(&stored, squatted.ID).Error)
+	assert.Empty(t, stored.Password, "the pre-registered password no longer signs in")
+	assert.NotNil(t, stored.EmailVerifiedAt)
+	revoked := f.session(t, earlier)
+	require.NotNil(t, revoked.RevokedAt, "sessions from before the link end")
+	assert.Equal(t, sessionRevocationIdentityLinked, revoked.RevocationReason)
+	_, err = NewSessionService(f.repo, &config.Config{}).Authenticate(context.Background(), result.AccessToken)
+	assert.NoError(t, err, "the Google sign-in's own session works")
+	require.Len(t, f.identities(t), 1)
+
+}
+
+// Deleting an account deletes its Google links, so the subject neither revives the account nor
+// blocks a new one.
+func TestGoogleSignInForgetsTheLinksOfADeletedAccount(t *testing.T) {
+	f := newGoogleSignInFixture(t)
+	first, err := f.signIn(t, googleTestIdentity{Subject: "2323", Email: "gone@example.com", EmailVerified: true}, "")
+	require.NoError(t, err)
+
+	require.NoError(t, f.svc.DeleteAccount(context.Background(), first.User.ID))
+	assert.Empty(t, f.identities(t), "the deleted account's links are gone")
+
+	_, err = f.signIn(t, googleTestIdentity{Subject: "2323", Email: "gone@example.com", EmailVerified: true}, "")
+	assert.ErrorIs(t, err, domain.ErrEmailAlreadyExists, "the deleted account still holds its email")
+	assert.Empty(t, f.identities(t), "the deleted account is not revived")
+
+	again, err := f.signIn(t, googleTestIdentity{Subject: "2323", Email: "new@example.com", EmailVerified: true}, "")
+	require.NoError(t, err, "the subject does not block a new account")
+	assert.NotEqual(t, first.User.ID, again.User.ID)
 }
 
 func TestGoogleSignInMatchesSubjectAfterEmailChange(t *testing.T) {

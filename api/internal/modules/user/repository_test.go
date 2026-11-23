@@ -48,7 +48,7 @@ func TestRepositoryFindAllUsesStableOrderAndPreservesEmptyPageTotal(t *testing.T
 }
 
 func TestRepositoryDeleteAccountRunsPolicyAndSoftDeleteAtomically(t *testing.T) {
-	db := testplatform.OpenPostgres(t, nil, &UserPO{}, &AuthenticationSessionPO{})
+	db := testplatform.OpenPostgres(t, nil, &UserPO{}, &AuthenticationSessionPO{}, &UserIdentityPO{})
 	po := &UserPO{
 		Username: "atomic-delete",
 		Email:    "atomic-delete@example.com",

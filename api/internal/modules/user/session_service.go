@@ -28,6 +28,9 @@ const (
 	sessionRevocationExpired         = "expired"
 	sessionRevocationIdleTimeout     = "idle_timeout"
 	sessionRevocationOperator        = "operator"
+	// sessionRevocationIdentityLinked ends the sessions of an unverified account that a Google
+	// sign-in took over.
+	sessionRevocationIdentityLinked = "identity_linked"
 )
 
 // IssuedAuthenticationSession is the one-time plaintext session response.
@@ -225,7 +228,8 @@ func normalizeSessionRevocationReason(value string) string {
 		sessionRevocationAccountDisabled,
 		sessionRevocationExpired,
 		sessionRevocationIdleTimeout,
-		sessionRevocationOperator:
+		sessionRevocationOperator,
+		sessionRevocationIdentityLinked:
 		return strings.TrimSpace(value)
 	default:
 		return "security_event"

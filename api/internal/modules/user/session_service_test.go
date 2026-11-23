@@ -221,6 +221,7 @@ func newAuthenticationSessionFixture(t *testing.T) (*SessionService, *gorm.DB, *
 		&UserPO{},
 		&PasswordResetTokenPO{},
 		&AuthenticationSessionPO{},
+		&UserIdentityPO{},
 	)
 
 	passwordHash, err := crypto.HashPassword("password123")

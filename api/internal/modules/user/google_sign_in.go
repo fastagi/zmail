@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,6 +19,7 @@ import (
 
 	capcrypto "github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 const (
@@ -156,10 +159,13 @@ func (s *service) resolveGoogleUser(ctx context.Context, claims *googleIDClaims,
 		if allowErr != nil {
 			return nil, allowErr
 		}
-		err = s.googleStore.LinkIdentity(ctx, user.ID, identityProviderGoogle, claims.Subject, email, now)
+		tookOver, linkErr := s.googleStore.LinkIdentity(ctx, user.ID, identityProviderGoogle, claims.Subject, email, now)
+		err = linkErr
 		if err == nil {
-			if user.EmailVerifiedAt == nil {
+			if tookOver {
+				user.Password = ""
 				user.EmailVerifiedAt = &now
+				recordGoogleTakeover(ctx, user.ID)
 			}
 			return user, nil
 		}
@@ -198,6 +204,24 @@ func (s *service) resolveGoogleUser(ctx context.Context, claims *googleIDClaims,
 		s.eventBus.PublishAsync(context.WithoutCancel(ctx), domain.NewUserCreatedEvent(user))
 	}
 	return user, nil
+}
+
+// recordGoogleTakeover audits a link that ended an unverified account's password and sessions.
+func recordGoogleTakeover(ctx context.Context, userID uint) {
+	slog.InfoContext(ctx, "user.google_identity_took_over_unverified_account", "user_id", userID)
+	auditstarter.RecordChange(ctx, auditstarter.Change{
+		TargetType: "user",
+		TargetID:   strconv.FormatUint(uint64(userID), 10),
+		Result:     domain.AuditResultSuccess,
+		Changes: map[string]domain.AuditValueChange{
+			"password": {Before: "[redacted]", After: "[cleared]"},
+		},
+		Metadata: map[string]any{
+			"operation":        "google_identity_link",
+			"email_unverified": true,
+			"sessions_revoked": true,
+		},
+	})
 }
 
 // googleSignInUser loads the account and applies the password login's refusals: a disabled account

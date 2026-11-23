@@ -7,7 +7,7 @@
 | 谁 | 想做什么 | 结果 |
 |---|---|---|
 | 没有 Zmail 账号的人 | 在登录页或注册页点“使用 Google 登录” | 首次登录自动建账号，邮箱取 Google 返回的已验证邮箱，直接进入控制台 |
-| 已用密码注册的人 | 用同一邮箱的 Google 账号登录 | 关联到原账号，不重复建号；原密码继续可用 |
+| 已用密码注册的人 | 用同一邮箱的 Google 账号登录 | 关联到原账号，不重复建号；邮箱已验证的原密码和会话继续可用，未验证的清空密码并撤销全部会话 |
 | 已关联过的人，后来改了 Google 邮箱 | 再次用 Google 登录 | 按 Google `sub` 找到同一个账号 |
 | 只用 Google 登录过的人 | 想要一个密码 | 走现有“忘记密码”设置密码 |
 | 从 `/console/admin/domains` 被踢到登录页的人 | 用 Google 登录 | 回到 `/console/admin/domains` |
@@ -16,7 +16,7 @@
 
 - 授权码流程，带 `state`、`nonce`、PKCE（S256）。ID token 校验签名（Google JWKS，RS256）、`iss`、`aud`、`azp`、`exp`、`iat`、`nonce`。
 - 依赖：`go.mod` 里没有 `golang.org/x/oauth2` 和 `go-oidc`；仓库已有只用标准库的 Google OIDC 校验（Gmail 推送）和授权码换取（Gmail 连接器）。本功能照同样方式用标准库实现，不引入新依赖。
-- 只接受 `email_verified=true`。关联存新表 `user_identities`（`provider, subject` 唯一）。匹配顺序：先 Google `sub`，再已验证邮箱（不区分大小写，同名时精确匹配优先）。按邮箱关联会把账号的 `users.email_verified_at` 标为已验证。
+- 只接受 `email_verified=true`。关联存新表 `user_identities`（`provider, subject` 唯一）。匹配顺序：先 Google `sub`，再已验证邮箱（不区分大小写，同名时精确匹配优先）。按邮箱关联会把账号的 `users.email_verified_at` 标为已验证。若该账号此前邮箱未验证（可能被他人抢注），在同一事务里清空密码、撤销全部会话（原因 `identity_linked`），并写审计；之后只能用 Google 登录，或通过忘记密码重设密码。邮箱已验证的账号照常关联，不撤销任何东西。注销账号时同一事务删除其 `user_identities`，Google `sub` 既不能复活旧账号，也不会挡住新账号。
 - 被禁用的账号返回和密码登录相同的 `401 AUTH.INVALID_CREDENTIALS`。`AUTH_REGISTRATION_ENABLED=false` 时，没有账号的 Google 用户收到 `403 AUTH.GOOGLE_REGISTRATION_CLOSED`；已有或已关联的账号照常登录。
 - `returnUrl` 只接受同源相对路径（单个 `/` 开头，不是 `//`，没有协议），否则回到默认落地页。它在发起时存进服务端的 state 记录，回调只用记录里的值。
 - 环境变量：API 端 `GOOGLE_OAUTH_CLIENT_ID`、`GOOGLE_OAUTH_CLIENT_SECRET`，必须同时设置或同时为空。未配置时按钮隐藏，接口返回 `503 AUTH.GOOGLE_NOT_CONFIGURED`。
@@ -57,6 +57,8 @@ Web BFF：
 
 - [x] 新 Google 用户首次登录建出账号，邮箱为 Google 已验证邮箱，并有 `user_identities` 记录。
 - [x] 同邮箱已有账号时只关联不新建，账号标为邮箱已验证。
+- [x] 关联邮箱未验证的账号时清空密码、撤销旧会话、写审计；已验证账号保留密码和会话。
+- [x] 注销账号删除其 Google 关联，同一 `sub` 不复活旧账号也不挡新账号。
 - [x] 关联后 Google 邮箱变化，仍按 `sub` 登进同一账号，身份记录里的邮箱更新。
 - [x] `email_verified=false` 被拒；错误或重放的 state、nonce 不符、Cookie 与 state 不符都被拒。
 - [x] returnUrl 保留（如 `/console/admin/domains`）；`//evil.com`、`https://evil.com` 回落到默认页。

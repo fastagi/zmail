@@ -61,8 +61,9 @@ type googleIdentityStore interface {
 	// FindUserIDByEmailFold returns the live account with the email, ignoring case and preferring an
 	// exact match, or gorm.ErrRecordNotFound.
 	FindUserIDByEmailFold(ctx context.Context, email string) (uint, error)
-	// LinkIdentity links the subject to the account and marks its email verified.
-	LinkIdentity(ctx context.Context, userID uint, provider, subject, email string, now time.Time) error
+	// LinkIdentity links the subject to the account and marks its email verified. Linking an
+	// unverified account clears its password and revokes its sessions, and reports tookOver.
+	LinkIdentity(ctx context.Context, userID uint, provider, subject, email string, now time.Time) (tookOver bool, err error)
 	// RecordIdentitySignIn stores the current email and the time of a sign-in through the subject.
 	RecordIdentitySignIn(ctx context.Context, provider, subject, email string, now time.Time) error
 	// CreateUserWithIdentity inserts the account and its link in one transaction.
@@ -146,12 +147,27 @@ func (r *repository) FindUserIDByEmailFold(ctx context.Context, email string) (u
 // LinkIdentity inserts the link and proves the account's email in one transaction. A link that a
 // concurrent sign-in already made for the same account is accepted; one to another account is a
 // unique violation.
-func (r *repository) LinkIdentity(ctx context.Context, userID uint, provider, subject, email string, now time.Time) error {
+//
+// An account whose email was not yet verified may have been registered by someone else in the
+// owner's name, so linking it is a takeover: the same transaction clears its password and revokes
+// every session, and tookOver reports it. A verified account keeps both.
+func (r *repository) LinkIdentity(
+	ctx context.Context,
+	userID uint,
+	provider, subject, email string,
+	now time.Time,
+) (tookOver bool, err error) {
 	db, err := r.withContext(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var account UserPO
+		if lockErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "email_verified_at").
+			Take(&account, userID).Error; lockErr != nil {
+			return lockErr
+		}
 		link := &UserIdentityPO{
 			UserID: userID, Provider: provider, Subject: subject, Email: email,
 			LastSignInAt: &now, CreatedAt: now, UpdatedAt: now,
@@ -162,17 +178,28 @@ func (r *repository) LinkIdentity(ctx context.Context, userID uint, provider, su
 		}
 		if result.RowsAffected == 0 {
 			var existing UserIdentityPO
-			if err := tx.Where("provider = ? AND subject = ?", provider, subject).Take(&existing).Error; err != nil {
-				return err
+			if findErr := tx.Where("provider = ? AND subject = ?", provider, subject).Take(&existing).Error; findErr != nil {
+				return findErr
 			}
 			if existing.UserID != userID {
 				return gorm.ErrDuplicatedKey
 			}
 		}
-		return tx.Model(&UserPO{}).
-			Where("id = ? AND email_verified_at IS NULL", userID).
-			UpdateColumn("email_verified_at", now).Error
+		if account.EmailVerifiedAt != nil {
+			return nil
+		}
+		if updateErr := tx.Model(&UserPO{}).Where("id = ?", userID).Updates(map[string]any{
+			"password": "", "email_verified_at": now, "updated_at": now,
+		}).Error; updateErr != nil {
+			return updateErr
+		}
+		tookOver = true
+		return revokeUserSessionsDB(tx, userID, now, sessionRevocationIdentityLinked)
 	})
+	if err != nil {
+		return false, err
+	}
+	return tookOver, nil
 }
 
 // RecordIdentitySignIn keeps the link's email current; the account's own email is not changed.

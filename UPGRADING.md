@@ -29,7 +29,7 @@ either half can ship first. A fork that implements `domain.MailBroadcastReposito
 ### Medium — Migration `2026_12_29_090000_add_user_identities`
 
 It adds the nullable column `users.email_verified_at` and two new tables, `user_identities` (one row
-per linked Google subject, unique on `(provider, subject)`, deleted with its account) and
+per linked Google subject, unique on `(provider, subject)`, deleted when its account is deleted) and
 `oauth_sign_in_states` (pending sign-ins, 10 minutes each). Adding a nullable column without a
 default only changes the catalog, but the `ALTER TABLE` takes a short `ACCESS EXCLUSIVE` lock on
 `users`, which every authenticated request reads; run it off-peak with a `lock_timeout` (for example
@@ -48,6 +48,15 @@ for local development). The consent screen needs only the `openid`, `email`, and
 The self-hosting compose file passes both variables to the API. This client is separate from
 `EXTERNAL_MAIL_GMAIL_CLIENT_*`; reusing one Google client for both works when it lists both
 redirect URIs.
+
+### Medium — Google sign-in takes over unverified accounts with the same email
+
+When a Google sign-in links to an existing account whose email was never verified (accounts created
+before `users.email_verified_at` existed, or by username registration without an email code), the
+password is cleared and every session of that account is revoked with reason `identity_linked`.
+This stops anyone who pre-registered someone else's email from keeping access. Affected people sign
+in with Google or set a new password through forgot-password. Accounts with a verified email keep
+their password and sessions.
 
 ### Medium — New routes and error codes
 
