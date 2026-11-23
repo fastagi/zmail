@@ -48,10 +48,16 @@ func (l *listener) Accept() (net.Conn, error) {
 			recordConnectionRefused()
 			if !l.implicitTLS {
 				// A plain connection can read why; an implicit-TLS one expects a handshake.
-				_ = raw.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				_, _ = raw.Write([]byte("421 4.7.0 " + capitalize(err.Error()) + "\r\n"))
+				// Best effort: the connection is refused and closed either way.
+				if deadlineErr := raw.SetWriteDeadline(time.Now().Add(5 * time.Second)); deadlineErr == nil {
+					if _, writeErr := raw.Write([]byte("421 4.7.0 " + capitalize(err.Error()) + "\r\n")); writeErr != nil {
+						l.server.logger.Debug("smtp_gateway.refusal_write_failed")
+					}
+				}
 			}
-			_ = raw.Close()
+			if closeErr := raw.Close(); closeErr != nil {
+				l.server.logger.Debug("smtp_gateway.refusal_close_failed")
+			}
 			continue
 		}
 		recordConnections(l.server.registry.count())
@@ -102,7 +108,10 @@ func (c *conn) Close() error {
 // closes the connection.
 func (c *conn) expire() {
 	c.expired.Store(true)
-	_ = c.Conn.SetReadDeadline(time.Now())
+	// A connection whose deadline cannot be set is already closing; the flag ends its next read.
+	if err := c.SetReadDeadline(time.Now()); err != nil {
+		return
+	}
 }
 
 // signedIn stops the sign-in clock.
@@ -119,8 +128,10 @@ func trackedConn(c *smtp.Conn) *conn {
 	if tlsConn, ok := raw.(*tls.Conn); ok {
 		raw = tlsConn.NetConn()
 	}
-	tracked, _ := raw.(*conn)
-	return tracked
+	if tracked, ok := raw.(*conn); ok {
+		return tracked
+	}
+	return nil
 }
 
 // registry counts live connections in total and per IP from the accept, and per membership from

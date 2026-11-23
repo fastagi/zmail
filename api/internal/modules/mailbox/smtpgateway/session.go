@@ -190,8 +190,8 @@ func (s *session) Data(r io.Reader) error {
 		}
 		return replyTemporary
 	}
-	if err := s.stillValid(); err != nil {
-		return err
+	if validErr := s.stillValid(); validErr != nil {
+		return validErr
 	}
 	ctx, cancel := s.server.storeContext()
 	defer cancel()

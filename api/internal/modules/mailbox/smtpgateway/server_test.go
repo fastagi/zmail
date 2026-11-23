@@ -231,12 +231,12 @@ func (c *textClient) startTLS() {
 	c.conn, c.r = tlsConn, bufio.NewReader(tlsConn)
 }
 
-func plain(username, password string) string {
-	return base64.StdEncoding.EncodeToString([]byte("\x00" + username + "\x00" + password))
+func plain(password string) string {
+	return base64.StdEncoding.EncodeToString([]byte("\x00" + testUser + "\x00" + password))
 }
 
-func message(from, to string) string {
-	return "From: " + from + "\r\nTo: " + to + "\r\nSubject: " + testSubject + "\r\nMessage-ID: <m1@laptop>\r\n\r\nHello there\r\n"
+func message() string {
+	return "From: " + testUser + "\r\nTo: carol@example.com" + "\r\nSubject: " + testSubject + "\r\nMessage-ID: <m1@laptop>\r\n\r\nHello there\r\n"
 }
 
 func TestImplicitTLSSendsWithStdlibClient(t *testing.T) {
@@ -255,14 +255,14 @@ func TestImplicitTLSSendsWithStdlibClient(t *testing.T) {
 	if ok, size := client.Extension("SIZE"); !ok || size != "8388608" {
 		t.Fatalf("SIZE = %t %q", ok, size)
 	}
-	if err := client.Auth(smtp.PlainAuth("", testUser, testPassword, "smtp.test")); err != nil {
+	if err = client.Auth(smtp.PlainAuth("", testUser, testPassword, "smtp.test")); err != nil {
 		t.Fatalf("auth: %v", err)
 	}
-	if err := client.Mail(testUser); err != nil {
+	if err = client.Mail(testUser); err != nil {
 		t.Fatal(err)
 	}
 	for _, rcpt := range []string{"Carol@Example.com", "carol@example.com", "dan@example.com"} {
-		if err := client.Rcpt(rcpt); err != nil {
+		if err = client.Rcpt(rcpt); err != nil {
 			t.Fatalf("rcpt %s: %v", rcpt, err)
 		}
 	}
@@ -270,7 +270,7 @@ func TestImplicitTLSSendsWithStdlibClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.Write([]byte(message(testUser, "carol@example.com"))); err != nil {
+	if _, err := w.Write([]byte(message())); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {
@@ -296,7 +296,7 @@ func TestSubmissionPortRequiresSTARTTLSAndLogin(t *testing.T) {
 	if strings.Contains(ehlo, "AUTH") || !strings.Contains(ehlo, "STARTTLS") {
 		t.Fatalf("EHLO before TLS = %q", ehlo)
 	}
-	c.must("AUTH PLAIN "+plain(testUser, testPassword), "523 5.7.10")
+	c.must("AUTH PLAIN "+plain(testPassword), "523 5.7.10")
 	c.must("MAIL FROM:<"+testUser+">", "530 5.7.0")
 	c.startTLS()
 	if ehlo := c.must("EHLO laptop", "250"); !strings.Contains(ehlo, "AUTH PLAIN LOGIN") || strings.Contains(ehlo, "STARTTLS") {
@@ -319,7 +319,7 @@ func TestSubmissionPortRequiresSTARTTLSAndLogin(t *testing.T) {
 	c.must("MAIL FROM:<"+testUser+">", "250")
 	c.must("RCPT TO:<carol@example.com>", "250")
 	c.must("DATA", "354")
-	c.must(message(testUser, "carol@example.com")+".", "250 2.0.0 Ok")
+	c.must(message()+".", "250 2.0.0 Ok")
 	c.must("QUIT", "221")
 	assertNoSecrets(t, g.logs.String())
 }
@@ -337,11 +337,11 @@ func TestWrongPasswordsLockTheUsername(t *testing.T) {
 	for i := range 10 {
 		c := dialText(t, g.implicit, true)
 		c.must("EHLO laptop", "250")
-		c.must("AUTH PLAIN "+plain(testUser, fmt.Sprintf("wrong %d", i)), "535 5.7.8")
+		c.must("AUTH PLAIN "+plain(fmt.Sprintf("wrong %d", i)), "535 5.7.8")
 	}
 	c := dialText(t, g.implicit, true)
 	c.must("EHLO laptop", "250")
-	c.must("AUTH PLAIN "+plain(testUser, testPassword), "454 4.7.0")
+	c.must("AUTH PLAIN "+plain(testPassword), "454 4.7.0")
 	// Another identity than the username is refused like a wrong password.
 	other := startGateway(t, Config{})
 	d := dialText(t, other.implicit, true)
@@ -355,7 +355,7 @@ func TestStoreFailureIsTemporary(t *testing.T) {
 	g.store.set(func(f *fakeStore) { f.authErr = errors.New("connection refused to 10.0.0.1 for " + testUser) })
 	c := dialText(t, g.implicit, true)
 	c.must("EHLO laptop", "250")
-	c.must("AUTH PLAIN "+plain(testUser, testPassword), "454 4.7.0")
+	c.must("AUTH PLAIN "+plain(testPassword), "454 4.7.0")
 	assertNoSecrets(t, g.logs.String())
 }
 
@@ -363,12 +363,12 @@ func TestRevokedPasswordEndsTheConnectionAtData(t *testing.T) {
 	g := startGateway(t, Config{})
 	c := dialText(t, g.implicit, true)
 	c.must("EHLO laptop", "250")
-	c.must("AUTH PLAIN "+plain(testUser, testPassword), "235")
+	c.must("AUTH PLAIN "+plain(testPassword), "235")
 	c.must("MAIL FROM:<"+testUser+">", "250")
 	c.must("RCPT TO:<carol@example.com>", "250")
 	g.store.set(func(f *fakeStore) { f.valid = false })
 	c.must("DATA", "354")
-	c.must(message(testUser, "carol@example.com")+".", "421 4.7.0")
+	c.must(message()+".", "421 4.7.0")
 	if got := c.reply(); !strings.HasPrefix(got, "421") && got != "EOF" {
 		t.Fatalf("after revocation = %q; want the connection closed", got)
 	}
@@ -384,11 +384,11 @@ func TestSubmitRefusalsMapToReplies(t *testing.T) {
 	})
 	c := dialText(t, g.implicit, true)
 	c.must("EHLO laptop", "250")
-	c.must("AUTH PLAIN "+plain(testUser, testPassword), "235")
+	c.must("AUTH PLAIN "+plain(testPassword), "235")
 	c.must("MAIL FROM:<"+testUser+">", "250")
 	c.must("RCPT TO:<carol@example.com>", "250")
 	c.must("DATA", "354")
-	c.must(message(testUser, "carol@example.com")+".", "452 4.3.1")
+	c.must(message()+".", "452 4.3.1")
 }
 
 func TestReplyFor(t *testing.T) {
@@ -432,7 +432,7 @@ func TestConnectionsWithoutSignInTimeOut(t *testing.T) {
 	// Signing in in time stops the clock.
 	d := dialText(t, g.implicit, true)
 	d.must("EHLO laptop", "250")
-	d.must("AUTH PLAIN "+plain(testUser, testPassword), "235")
+	d.must("AUTH PLAIN "+plain(testPassword), "235")
 	time.Sleep(500 * time.Millisecond)
 	d.must("NOOP", "250")
 }
@@ -452,11 +452,11 @@ func TestConnectionCaps(t *testing.T) {
 		t.Fatalf("third connection from one address = %q", line)
 	}
 	second.must("EHLO laptop", "250")
-	second.must("AUTH PLAIN "+plain(testUser, testPassword), "235")
+	second.must("AUTH PLAIN "+plain(testPassword), "235")
 	first.must("EHLO laptop", "250")
 	first.startTLS()
 	first.must("EHLO laptop", "250")
-	first.must("AUTH PLAIN "+plain(testUser, testPassword), "454 4.7.0")
+	first.must("AUTH PLAIN "+plain(testPassword), "454 4.7.0")
 	if g.server.Connections() != 2 {
 		t.Fatalf("connections = %d", g.server.Connections())
 	}

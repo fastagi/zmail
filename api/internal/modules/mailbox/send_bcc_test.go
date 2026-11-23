@@ -113,9 +113,9 @@ func TestQueuedSendKeepsBccAndInline(t *testing.T) {
 	}
 	// Everyone else with access to the mailbox never sees them.
 	for name, viewer := range map[string]domain.OrganizationContext{"member with view": f.c} {
-		other, err := f.service.GetMessage(context.Background(), viewer, f.team.ID, message.ID)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
+		other, getErr := f.service.GetMessage(context.Background(), viewer, f.team.ID, message.ID)
+		if getErr != nil {
+			t.Fatalf("%s: %v", name, getErr)
 		}
 		if len(other.Bcc) != 0 {
 			t.Fatalf("%s sees bcc %v", name, other.Bcc)

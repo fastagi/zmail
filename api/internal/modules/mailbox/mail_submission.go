@@ -89,8 +89,8 @@ func (s *service) SubmitClientMessage(ctx context.Context, p *domain.MailClientP
 	if parsed.FromAddress == "" {
 		return nil, senderRefused
 	}
-	if _, err := s.clientSender(ctx, p, submission.EnvelopeFrom); err != nil {
-		return nil, classifySubmitError(err)
+	if _, senderErr := s.clientSender(ctx, p, submission.EnvelopeFrom); senderErr != nil {
+		return nil, classifySubmitError(senderErr)
 	}
 	mailbox, err := s.clientSender(ctx, p, parsed.FromAddress)
 	if err != nil {
@@ -134,8 +134,8 @@ func (s *service) SubmitClientMessage(ctx context.Context, p *domain.MailClientP
 			Inline:      attachment.Inline,
 		})
 	}
-	if err := s.releaseFailedSubmission(ctx, mailbox, input); err != nil {
-		return nil, err
+	if releaseErr := s.releaseFailedSubmission(ctx, mailbox, input); releaseErr != nil {
+		return nil, releaseErr
 	}
 
 	message, _, err := s.send(ctx, mailbox, input, true)
@@ -167,10 +167,10 @@ func (s *service) releaseFailedSubmission(ctx context.Context, mailbox *domain.M
 	if existing.Status != domain.MailStatusFailed || existing.QueuedReason != "" {
 		return nil
 	}
-	built, err := s.buildOutbound(mailbox, input)
-	if err != nil || built.IdempotencyFingerprint != existing.IdempotencyFingerprint {
-		// send refuses it the same way.
-		return nil
+	// A message send would refuse, or a different one under the same key, keeps the key: send
+	// answers it the same way.
+	if built, buildErr := s.buildOutbound(mailbox, input); buildErr != nil || built.IdempotencyFingerprint != existing.IdempotencyFingerprint {
+		return nil //nolint:nilerr // send reports the refusal itself
 	}
 	return releaser.ReleaseFailedIdempotencyKey(ctx, existing.ID)
 }
