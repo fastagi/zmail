@@ -598,6 +598,18 @@ const messages = {
     connectedDisabled: '此服务暂未开放自有域名，团队邮箱地址使用下方的共享域名。',
     connectedEmpty: '还没有连接域名。',
     connectTitle: '连接你的域名',
+    connectAnotherTitle: '再连接一个域名',
+    connectAnotherHint: '每个组织最多可以连接 {max} 个域名，每个域名上都能创建邮箱。',
+    domainCount: '已连接 {count} / {max} 个域名',
+    addDomainAction: '添加域名',
+    domainLimitReached: '每个组织最多连接 {max} 个域名。移除一个后才能再添加。',
+    mailboxCount: '{count, plural, =0 {还没有邮箱} other {# 个邮箱}}',
+    showRecords: '查看 DNS 记录',
+    hideRecords: '收起 DNS 记录',
+    defaultBadge: '默认',
+    defaultHint: '新建邮箱时默认使用这个域名，也可以另选。',
+    makeDefaultAction: '设为默认',
+    defaultSet: '新邮箱将默认使用 @{domain}',
     connectWhen:
       '适合大多数域名，无需任何 Token。如果域名的 DNS 还不在 Cloudflare，Zmail 会给出两条 DNS 服务器地址，你到域名注册商处改一次即可。',
     connectProviderFailed:

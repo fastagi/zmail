@@ -17,7 +17,7 @@ import (
 type MailDomainPO struct {
 	CloudflareConnectionID *string `gorm:"type:uuid"`
 	ID                     uint    `gorm:"primaryKey"`
-	OrganizationID         uint    `gorm:"not null;index:idx_mail_domains_organization"`
+	OrganizationID         uint    `gorm:"not null;index:idx_mail_domains_organization;uniqueIndex:idx_mail_domains_default,where:is_default"`
 	Name                   string  `gorm:"size:253;not null;uniqueIndex:idx_mail_domains_name"`
 	ZoneID                 string  `gorm:"size:64;not null"`
 	ZoneName               string  `gorm:"size:253;not null"`
@@ -28,6 +28,7 @@ type MailDomainPO struct {
 	Records                string  `gorm:"type:jsonb;not null;default:'[]'"`
 	LastError              string  `gorm:"size:500;not null;default:''"`
 	LastErrorCode          string  `gorm:"size:64;not null;default:''"`
+	IsDefault              bool    `gorm:"not null;default:false"`
 	CheckedAt              *time.Time
 	VerifiedAt             *time.Time
 	CreatedBy              uint `gorm:"not null"`
@@ -53,6 +54,7 @@ func (po *MailDomainPO) toDomain() *domain.MailDomain {
 		Status:                 domain.MailDomainStatus(po.Status),
 		LastError:              po.LastError,
 		LastErrorCode:          po.LastErrorCode,
+		MarkedDefault:          po.IsDefault,
 		CheckedAt:              po.CheckedAt,
 		VerifiedAt:             po.VerifiedAt,
 		CreatedBy:              po.CreatedBy,
@@ -102,6 +104,7 @@ func mailDomainPO(mailDomain *domain.MailDomain) (*MailDomainPO, error) {
 		Records:                string(encoded),
 		LastError:              truncateRunes(mailDomain.LastError, 500),
 		LastErrorCode:          mailDomain.LastErrorCode,
+		IsDefault:              mailDomain.MarkedDefault,
 		CheckedAt:              mailDomain.CheckedAt,
 		VerifiedAt:             mailDomain.VerifiedAt,
 		CreatedBy:              mailDomain.CreatedBy,
@@ -280,6 +283,64 @@ func (r *repository) SetDomainCapability(ctx context.Context, organizationID, id
 		return ErrMailDomainNotFound
 	}
 	return nil
+}
+
+// SetDefaultDomain takes the organization's domain lock, the one CreateDomain takes, so two
+// choices at once cannot both pass the unique index on the chosen domain. A pending domain is
+// refused, and the mark moves in one transaction.
+func (r *repository) SetDefaultDomain(ctx context.Context, organizationID, id uint) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('mail_domain_owner'), ?)`, int32(organizationID)).Error; err != nil { //nolint:gosec // lock key only needs to be stable per organization
+			return err
+		}
+		var po MailDomainPO
+		if err := tx.Where("id = ? AND organization_id = ?", id, organizationID).First(&po).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrMailDomainNotFound
+			}
+			return err
+		}
+		if po.Status != string(domain.MailDomainStatusVerified) {
+			return ErrMailDomainNotVerified
+		}
+		if po.IsDefault {
+			return nil
+		}
+		now := time.Now()
+		if err := tx.Model(&MailDomainPO{}).
+			Where("organization_id = ? AND is_default AND id <> ?", organizationID, id).
+			Updates(map[string]any{"is_default": false, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&MailDomainPO{}).Where("id = ?", id).
+			Updates(map[string]any{"is_default": true, "updated_at": now}).Error
+	})
+}
+
+// CountMailboxesByDomain counts live Zmail mailboxes only, as DeleteDomain does: a deleted mailbox
+// keeps its address but no longer holds the domain, and a connected mailbox is an outside account.
+func (r *repository) CountMailboxesByDomain(ctx context.Context, organizationID uint) (map[string]int, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []struct {
+		Domain string
+		Total  int
+	}
+	if err := r.conn(ctx).Model(&MailboxPO{}).
+		Select("lower(split_part(address, '@', 2)) AS domain, count(*) AS total").
+		Where("organization_id = ? AND origin = ?", organizationID, string(domain.MailboxOriginZmail)).
+		Group("lower(split_part(address, '@', 2))").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[row.Domain] = row.Total
+	}
+	return counts, nil
 }
 
 // ListMailboxesWithoutRoutingRule returns live Zmail mailboxes only; a deleted mailbox keeps its

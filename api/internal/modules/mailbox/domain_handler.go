@@ -33,7 +33,8 @@ type MailDomainRecordResponse struct {
 // MailDomainResponse is the public shape of a connected domain. Zone is the managed zone the
 // domain lives in, null for a zone the operator manages. ZoneCheckLimited is true when the
 // provider refused this check's request to look for the zone's name servers now because one ran
-// too recently.
+// too recently. Default marks the domain new mailboxes use unless another is picked, and
+// MailboxCount counts the live mailboxes on it.
 type MailDomainResponse struct {
 	ID               uint                       `json:"id"`
 	Name             string                     `json:"name"`
@@ -46,6 +47,8 @@ type MailDomainResponse struct {
 	LastErrorCode    string                     `json:"last_error_code,omitempty"`
 	SettingUp        bool                       `json:"setting_up"`
 	ZoneCheckLimited bool                       `json:"zone_check_limited"`
+	Default          bool                       `json:"default"`
+	MailboxCount     int                        `json:"mailbox_count"`
 	CheckedAt        *time.Time                 `json:"checked_at"`
 	VerifiedAt       *time.Time                 `json:"verified_at"`
 	CreatedAt        time.Time                  `json:"created_at"`
@@ -76,6 +79,8 @@ func toMailDomainResponse(mailDomain *domain.MailDomain) MailDomainResponse {
 		LastErrorCode:    mailDomain.LastErrorCode,
 		SettingUp:        mailDomain.SettingUp,
 		ZoneCheckLimited: mailDomain.ZoneCheckLimited,
+		Default:          mailDomain.Default,
+		MailboxCount:     mailDomain.MailboxCount,
 		CheckedAt:        mailDomain.CheckedAt,
 		VerifiedAt:       mailDomain.VerifiedAt,
 		CreatedAt:        mailDomain.CreatedAt,
@@ -170,6 +175,12 @@ func (h *Handler) runDomainAction(
 	}
 	privateResponse(c)
 	response.Success(c, toMailDomainResponse(mailDomain))
+}
+
+// SetDefaultMailDomain makes a verified domain the organization's default. Only owners and
+// admins may.
+func (h *Handler) SetDefaultMailDomain(c *gin.Context) {
+	h.runDomainAction(c, "Failed to set the default mail domain", h.service.SetDefaultMailDomain)
 }
 
 // DeleteMailDomain forgets a domain no mailbox uses; Cloudflare is left as it is.

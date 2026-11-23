@@ -154,6 +154,9 @@ type Service interface {
 	SetUpMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	DeleteMailDomain(ctx context.Context, organizationID, id uint) error
+	// SetDefaultMailDomain makes a verified domain the one new mailboxes use unless another is
+	// picked. Only owners and admins may.
+	SetDefaultMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	// EnableMailDomainReceiving turns a send-only domain into one that also receives and sets it
 	// up again.
 	EnableMailDomainReceiving(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)

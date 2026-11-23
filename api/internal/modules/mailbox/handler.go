@@ -78,6 +78,7 @@ func (h *Handler) ListDomains(c *gin.Context) {
 		items = append(items, MailboxDomainResponse{
 			Domain:                  mailboxDomain.Name,
 			Kind:                    kind,
+			Default:                 mailboxDomain.Default,
 			MaxMailboxes:            h.service.MaxMailboxes(),
 			Provider:                h.service.Provider(),
 			InboundEnabled:          h.service.InboundEnabled(),

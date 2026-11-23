@@ -48,7 +48,8 @@ export type MockDomainResult =
         | 'zone_not_found'
         | 'not_found'
         | 'zone_pending'
-        | 'zone_limit';
+        | 'zone_limit'
+        | 'not_verified';
     };
 
 export type MockDomainRemoveResult = { ok: true } | { ok: false; error: 'not_found' | 'in_use' };
@@ -63,17 +64,21 @@ interface MockDomainStoreDependencies {
   now: () => Date;
   /** Whether any live mailbox has an address on the domain. */
   inUse: (name: string) => boolean;
+  /** The organization's live mailboxes on the domain. */
+  mailboxCount: (organizationId: number, name: string) => number;
   zones: MockZoneStore;
 }
 
 /** The domain without its zone, which is read from the zone store whenever it is shown. */
-type StoredDomain = Omit<MailDomain, 'zone'>;
+type StoredDomain = Omit<MailDomain, 'zone' | 'default' | 'mailbox_count'>;
 
 interface DomainState {
   organizationId: number;
   /** The managed zone; null in the operator's zone. */
   zoneId: number | null;
   domain: StoredDomain;
+  /** Chosen as the organization's default by an owner or admin. */
+  marked: boolean;
 }
 
 export class MockDomainStore {
@@ -94,6 +99,35 @@ export class MockDomainStore {
     return this.list(organizationId)
       .filter(domain => domain.status === 'verified')
       .map(domain => domain.name);
+  }
+
+  /**
+   * The domain new mailboxes use unless another is picked: the chosen one while verified, else the
+   * verified domain connected first. Null while none is verified.
+   */
+  defaultName(organizationId: number): string | null {
+    const verified = [...this.domains.values()].filter(
+      state => state.organizationId === organizationId && state.domain.status === 'verified'
+    );
+    const chosen = verified.find(state => state.marked);
+    if (chosen) return chosen.domain.name;
+    const [oldest] = verified.sort(
+      (left, right) =>
+        left.domain.created_at.localeCompare(right.domain.created_at) ||
+        left.domain.id - right.domain.id
+    );
+    return oldest ? oldest.domain.name : null;
+  }
+
+  /** Moves the default mark to a verified domain of the organization. */
+  setDefault(organizationId: number, id: number): MockDomainResult {
+    const state = this.state(organizationId, id);
+    if (!state) return { ok: false, error: 'not_found' };
+    if (state.domain.status !== 'verified') return { ok: false, error: 'not_verified' };
+    for (const other of this.domains.values()) {
+      if (other.organizationId === organizationId) other.marked = other === state;
+    }
+    return { ok: true, domain: this.view(state) };
   }
 
   get(organizationId: number, id: number): MailDomain | null {
@@ -170,7 +204,7 @@ export class MockDomainStore {
       verified_at: null,
       created_at: now,
     };
-    const state: DomainState = { organizationId, zoneId, domain };
+    const state: DomainState = { organizationId, zoneId, domain, marked: false };
     this.domains.set(domain.id, state);
     return { ok: true, domain: this.view(state) };
   }
@@ -248,7 +282,12 @@ export class MockDomainStore {
       state.zoneId === null
         ? null
         : this.dependencies.zones.get(state.organizationId, state.zoneId);
-    return { ...state.domain, zone };
+    return {
+      ...state.domain,
+      zone,
+      default: this.defaultName(state.organizationId) === state.domain.name,
+      mailbox_count: this.dependencies.mailboxCount(state.organizationId, state.domain.name),
+    };
   }
 
   private state(organizationId: number, id: number): DomainState | undefined {
@@ -264,6 +303,7 @@ export class MockDomainStore {
 export const mockDomainStore = new MockDomainStore({
   now: () => new Date(),
   inUse: name => mockMailboxStore.usesDomain(name),
+  mailboxCount: (organizationId, name) => mockMailboxStore.countOnDomain(organizationId, name),
   zones: mockZoneStore,
 });
 

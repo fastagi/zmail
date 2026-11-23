@@ -129,3 +129,83 @@ func TestRepositoryListsMailboxesWithoutARoutingRule(t *testing.T) {
 		t.Fatalf("other organization = %+v, %v", other, err)
 	}
 }
+
+func TestRepositoryMovesTheDefaultDomainWithinAnOrganization(t *testing.T) {
+	repo := openDomainRepository(t)
+	ctx := context.Background()
+	create := func(organizationID uint, name string, status domain.MailDomainStatus) *domain.MailDomain {
+		t.Helper()
+		mailDomain := &domain.MailDomain{OrganizationID: organizationID, Name: name, ZoneID: "z", ZoneName: "example.com", CreatedBy: organizationID}
+		if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
+			t.Fatalf("CreateDomain(%s): %v", name, err)
+		}
+		mailDomain.Status = status
+		if err := repo.UpdateDomain(ctx, mailDomain); err != nil {
+			t.Fatalf("UpdateDomain(%s): %v", name, err)
+		}
+		return mailDomain
+	}
+	first := create(1, "a.example.com", domain.MailDomainStatusVerified)
+	second := create(1, "b.example.com", domain.MailDomainStatusVerified)
+	pending := create(1, "c.example.com", domain.MailDomainStatusPending)
+	other := create(2, "d.example.com", domain.MailDomainStatusVerified)
+
+	marked := func(organizationID uint) []string {
+		t.Helper()
+		listed, err := repo.ListDomains(ctx, organizationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, mailDomain := range listed {
+			if mailDomain.MarkedDefault {
+				names = append(names, mailDomain.Name)
+			}
+		}
+		return names
+	}
+	for _, id := range []uint{first.ID, second.ID, second.ID} {
+		if err := repo.SetDefaultDomain(ctx, 1, id); err != nil {
+			t.Fatalf("SetDefaultDomain(%d): %v", id, err)
+		}
+	}
+	if err := repo.SetDefaultDomain(ctx, 2, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := marked(1); len(got) != 1 || got[0] != second.Name {
+		t.Fatalf("organization 1 marked = %v", got)
+	}
+	if got := marked(2); len(got) != 1 || got[0] != other.Name {
+		t.Fatalf("organization 2 marked = %v", got)
+	}
+	if err := repo.SetDefaultDomain(ctx, 1, pending.ID); !errors.Is(err, ErrMailDomainNotVerified) {
+		t.Fatalf("pending domain = %v", err)
+	}
+	if err := repo.SetDefaultDomain(ctx, 2, first.ID); !errors.Is(err, ErrMailDomainNotFound) {
+		t.Fatalf("another organization's domain = %v", err)
+	}
+	if got := marked(1); len(got) != 1 || got[0] != second.Name {
+		t.Fatalf("a refused choice changed the mark: %v", got)
+	}
+}
+
+func TestRepositoryCountsLiveMailboxesPerDomain(t *testing.T) {
+	repo := openDomainRepository(t)
+	ctx := context.Background()
+	createMailbox(t, repo, "sales@a.example.com")
+	gone := createMailbox(t, repo, "old@a.example.com")
+	createMailbox(t, repo, "help@B.example.com")
+	if err := repo.DeleteMailbox(ctx, 1, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := repo.CountMailboxesByDomain(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["a.example.com"] != 1 || counts["b.example.com"] != 1 || len(counts) != 2 {
+		t.Fatalf("counts = %v", counts)
+	}
+	if others, err := repo.CountMailboxesByDomain(ctx, 2); err != nil || len(others) != 0 {
+		t.Fatalf("another organization's counts = %v, %v", others, err)
+	}
+}

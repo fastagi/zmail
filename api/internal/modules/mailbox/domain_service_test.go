@@ -317,6 +317,36 @@ func (d *fakeDomains) SetDomainCapability(_ context.Context, organizationID, id 
 	return nil
 }
 
+// SetDefaultDomain moves the mark to a verified domain, as the repository does.
+func (d *fakeDomains) SetDefaultDomain(_ context.Context, organizationID, id uint) error {
+	existing, ok := d.domains[id]
+	if !ok || existing.OrganizationID != organizationID {
+		return ErrMailDomainNotFound
+	}
+	if existing.Status != domain.MailDomainStatusVerified {
+		return ErrMailDomainNotVerified
+	}
+	for _, other := range d.domains {
+		if other.OrganizationID == organizationID {
+			other.MarkedDefault = other.ID == id
+		}
+	}
+	return nil
+}
+
+func (d *fakeDomains) CountMailboxesByDomain(_ context.Context, organizationID uint) (map[string]int, error) {
+	counts := map[string]int{}
+	for _, mailbox := range d.mailbox.mailboxes {
+		if mailbox.OrganizationID != organizationID || mailbox.Origin == domain.MailboxOriginConnected {
+			continue
+		}
+		if at := strings.LastIndex(mailbox.Address, "@"); at >= 0 {
+			counts[strings.ToLower(mailbox.Address[at+1:])]++
+		}
+	}
+	return counts, nil
+}
+
 func (d *fakeDomains) SetMailboxRoutingRule(_ context.Context, mailboxID uint, ruleID string) error {
 	if mailbox, ok := d.mailbox.mailboxes[mailboxID]; ok {
 		mailbox.RoutingRuleID = ruleID
