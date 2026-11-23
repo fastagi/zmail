@@ -6149,6 +6149,103 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/member-welcome-mail-setting:
+    get:
+      operationId: getMemberWelcomeMailSetting
+      summary: Read the organization's member welcome mail setting
+      description: Needs the `owner` or `admin` organization role. An organization that never saved the setting
+        has welcome mails on, in zh-Hans, with the standard text.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The setting.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberWelcomeMailSettingResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMemberWelcomeMailSetting
+      summary: Replace the organization's member welcome mail setting
+      description: Needs the `owner` or `admin` organization role. The subject and body may use only the listed
+        variables; the fixed mail app section is always added after the body.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemberWelcomeMailSettingRequest'
+      responses:
+        '200':
+          description: The setting after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberWelcomeMailSettingResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/member-welcome-mail-previews:
+    post:
+      operationId: previewMemberWelcomeMail
+      summary: Render a member welcome mail with sample values
+      description: Needs the `owner` or `admin` organization role. Stores and sends nothing.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberWelcomeMailPreviewRequest'
+      responses:
+        '200':
+          description: The rendered mail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberWelcomeMailPreviewResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /v1/mailbox-exports:
     get:
       operationId: exportMailboxes
@@ -16583,6 +16680,8 @@ components:
         - mailbox_id
         - invitation_id
         - email_send_status
+        - welcome_mail_status
+        - welcome_mail_error_code
       properties:
         row:
           type: integer
@@ -16628,6 +16727,29 @@ components:
                 - failed
                 - not_configured
             - type: 'null'
+        welcome_mail_status:
+          description: The welcome mail outcome of a row whose mailbox is provisioned (`invited`, `created`,
+            or skipped as `already_invited`) outside a dry run; null otherwise. It never changes `status`.
+          oneOf:
+            - $ref: '#/components/schemas/MemberWelcomeMailStatus'
+            - type: 'null'
+        welcome_mail_error_code:
+          description: Why the welcome mail failed; null unless `welcome_mail_status` is `failed`.
+          oneOf:
+            - $ref: '#/components/schemas/ErrorCode'
+            - type: 'null'
+    MemberWelcomeMailStatus:
+      type: string
+      description: '`queued` stored it for sending (see the transactional send log), `suppressed` stored it as
+        suppressed, `already_sent` found the mailbox welcomed before, `disabled` means the organization turned
+        welcome mails off, `not_configured` means the instance cannot send them, and `failed` stored nothing.'
+      enum:
+        - queued
+        - suppressed
+        - already_sent
+        - disabled
+        - not_configured
+        - failed
     MemberImportResult:
       type: object
       additionalProperties: false
@@ -16639,6 +16761,8 @@ components:
         - created
         - skipped
         - failed
+        - welcome_mails_queued
+        - welcome_mails_failed
         - rows
       properties:
         dry_run:
@@ -16661,11 +16785,171 @@ components:
         failed:
           type: integer
           minimum: 0
+        welcome_mails_queued:
+          description: Rows whose welcome mail this request queued.
+          type: integer
+          minimum: 0
+        welcome_mails_failed:
+          description: Rows whose welcome mail failed or was suppressed.
+          type: integer
+          minimum: 0
         rows:
           type: array
           maxItems: 500
           items:
             $ref: '#/components/schemas/MemberImportRowResult'
+    MemberWelcomeLanguage:
+      type: string
+      enum:
+        - en-US
+        - zh-Hans
+    MemberWelcomeCopy:
+      type: object
+      additionalProperties: false
+      required:
+        - subject
+        - body
+      properties:
+        subject:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 5000
+    MemberWelcomeMailSetting:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - language
+        - subject
+        - body
+        - customized
+        - variables
+        - defaults
+        - updated_at
+      properties:
+        enabled:
+          type: boolean
+        language:
+          $ref: '#/components/schemas/MemberWelcomeLanguage'
+        subject:
+          description: The subject in use, saved or the standard text of `language`.
+          type: string
+          maxLength: 200
+        body:
+          description: The plain-text body in use, saved or the standard text of `language`.
+          type: string
+          maxLength: 5000
+        customized:
+          description: Whether the organization saved its own subject or body.
+          type: boolean
+        variables:
+          description: The only variables the subject and body may use.
+          type: array
+          maxItems: 4
+          items:
+            type: string
+            enum:
+              - member_name
+              - mailbox_address
+              - organization_name
+              - sign_in_url
+        defaults:
+          description: The standard text of each language.
+          type: object
+          additionalProperties: false
+          required:
+            - en-US
+            - zh-Hans
+          properties:
+            en-US:
+              $ref: '#/components/schemas/MemberWelcomeCopy'
+            zh-Hans:
+              $ref: '#/components/schemas/MemberWelcomeCopy'
+        updated_at:
+          description: Null until an owner or admin saves the setting.
+          type:
+            - string
+            - 'null'
+          format: date-time
+    MemberWelcomeMailSettingResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MemberWelcomeMailSetting'
+    UpdateMemberWelcomeMailSettingRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - language
+      properties:
+        enabled:
+          type: boolean
+        language:
+          $ref: '#/components/schemas/MemberWelcomeLanguage'
+        subject:
+          description: One line; empty, or equal to the standard text, means the standard text.
+          type: string
+          maxLength: 200
+        body:
+          description: Plain text; empty, or equal to the standard text, means the standard text.
+          type: string
+          maxLength: 5000
+    MemberWelcomeMailPreviewRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - language
+      properties:
+        language:
+          $ref: '#/components/schemas/MemberWelcomeLanguage'
+        subject:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 5000
+    MemberWelcomeMailPreview:
+      type: object
+      additionalProperties: false
+      required:
+        - subject
+        - text
+        - html
+      properties:
+        subject:
+          type: string
+        text:
+          description: The whole mail as plain text, the fixed mail app section included.
+          type: string
+        html:
+          description: The same text escaped into paragraphs, with the known links clickable.
+          type: string
+    MemberWelcomeMailPreviewResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MemberWelcomeMailPreview'
     MemberImportResultResponse:
       type: object
       additionalProperties: false

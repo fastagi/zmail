@@ -2554,6 +2554,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/member-welcome-mail-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render a member welcome mail with sample values
+         * @description Needs the `owner` or `admin` organization role. Stores and sends nothing.
+         */
+        post: operations["previewMemberWelcomeMail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/member-welcome-mail-setting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the organization's member welcome mail setting
+         * @description Needs the `owner` or `admin` organization role. An organization that never saved the setting has welcome mails on, in zh-Hans, with the standard text.
+         */
+        get: operations["getMemberWelcomeMailSetting"];
+        /**
+         * Replace the organization's member welcome mail setting
+         * @description Needs the `owner` or `admin` organization role. The subject and body may use only the listed variables; the fixed mail app section is always added after the body.
+         */
+        put: operations["updateMemberWelcomeMailSetting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/notification-preferences": {
         parameters: {
             query?: never;
@@ -6606,6 +6650,10 @@ export interface components {
             skipped: number;
             total: number;
             valid: number;
+            /** @description Rows whose welcome mail failed or was suppressed. */
+            welcome_mails_failed: number;
+            /** @description Rows whose welcome mail this request queued. */
+            welcome_mails_queued: number;
         };
         MemberImportResultResponse: {
             /** @constant */
@@ -6641,11 +6689,72 @@ export interface components {
             /** @description Why nothing changed; null unless `status` is `skipped`. */
             skip_reason: components["schemas"]["MemberImportSkipReason"] | null;
             status: components["schemas"]["MemberImportRowStatus"];
+            /** @description Why the welcome mail failed; null unless `welcome_mail_status` is `failed`. */
+            welcome_mail_error_code: components["schemas"]["ErrorCode"] | null;
+            /** @description The welcome mail outcome of a row whose mailbox is provisioned (`invited`, `created`, or skipped as `already_invited`) outside a dry run; null otherwise. It never changes `status`. */
+            welcome_mail_status: components["schemas"]["MemberWelcomeMailStatus"] | null;
         };
         /** @enum {string} */
         MemberImportRowStatus: "valid" | "invited" | "created" | "skipped" | "failed";
         /** @enum {string} */
         MemberImportSkipReason: "already_member" | "already_invited" | "mailbox_taken";
+        MemberWelcomeCopy: {
+            body: string;
+            subject: string;
+        };
+        /** @enum {string} */
+        MemberWelcomeLanguage: "en-US" | "zh-Hans";
+        MemberWelcomeMailPreview: {
+            /** @description The same text escaped into paragraphs, with the known links clickable. */
+            html: string;
+            subject: string;
+            /** @description The whole mail as plain text, the fixed mail app section included. */
+            text: string;
+        };
+        MemberWelcomeMailPreviewRequest: {
+            body?: string;
+            language: components["schemas"]["MemberWelcomeLanguage"];
+            subject?: string;
+        };
+        MemberWelcomeMailPreviewResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MemberWelcomeMailPreview"];
+            message: string;
+        };
+        MemberWelcomeMailSetting: {
+            /** @description The plain-text body in use, saved or the standard text of `language`. */
+            body: string;
+            /** @description Whether the organization saved its own subject or body. */
+            customized: boolean;
+            /** @description The standard text of each language. */
+            defaults: {
+                "en-US": components["schemas"]["MemberWelcomeCopy"];
+                "zh-Hans": components["schemas"]["MemberWelcomeCopy"];
+            };
+            enabled: boolean;
+            language: components["schemas"]["MemberWelcomeLanguage"];
+            /** @description The subject in use, saved or the standard text of `language`. */
+            subject: string;
+            /**
+             * Format: date-time
+             * @description Null until an owner or admin saves the setting.
+             */
+            updated_at: string | null;
+            /** @description The only variables the subject and body may use. */
+            variables: ("member_name" | "mailbox_address" | "organization_name" | "sign_in_url")[];
+        };
+        MemberWelcomeMailSettingResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MemberWelcomeMailSetting"];
+            message: string;
+        };
+        /**
+         * @description `queued` stored it for sending (see the transactional send log), `suppressed` stored it as suppressed, `already_sent` found the mailbox welcomed before, `disabled` means the organization turned welcome mails off, `not_configured` means the instance cannot send them, and `failed` stored nothing.
+         * @enum {string}
+         */
+        MemberWelcomeMailStatus: "queued" | "suppressed" | "already_sent" | "disabled" | "not_configured" | "failed";
         Notification: {
             /** @description Same-origin relative path; absent when the notification has no action. */
             action_url?: string;
@@ -7673,6 +7782,14 @@ export interface components {
             daily_message_cap: number;
             draft_enabled: boolean;
             enabled: boolean;
+        };
+        UpdateMemberWelcomeMailSettingRequest: {
+            /** @description Plain text; empty, or equal to the standard text, means the standard text. */
+            body?: string;
+            enabled: boolean;
+            language: components["schemas"]["MemberWelcomeLanguage"];
+            /** @description One line; empty, or equal to the standard text, means the standard text. */
+            subject?: string;
         };
         /** @enum {string} */
         UsagePeriod: "day" | "month";
@@ -15542,6 +15659,98 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    previewMemberWelcomeMail: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberWelcomeMailPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The rendered mail. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberWelcomeMailPreviewResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getMemberWelcomeMailSetting: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The setting. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberWelcomeMailSettingResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMemberWelcomeMailSetting: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMemberWelcomeMailSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description The setting after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberWelcomeMailSettingResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             413: components["responses"]["RequestTooLarge"];
             422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];

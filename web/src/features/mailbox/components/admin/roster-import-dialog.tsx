@@ -482,6 +482,15 @@ function RosterImportSteps({
                     attention: summary.attention,
                   })}
             </p>
+            {step.kind === 'done' &&
+            (step.result.welcome_mails_queued > 0 || step.result.welcome_mails_failed > 0) ? (
+              <p className="text-sm text-muted-foreground">
+                {t('admin.rosterImport.welcomeSummary', {
+                  queued: step.result.welcome_mails_queued,
+                  failed: step.result.welcome_mails_failed,
+                })}
+              </p>
+            ) : null}
             <RosterResultTable
               rows={step.result.rows}
               inputs={step.rows}
@@ -642,6 +651,7 @@ function RosterResultTable({
                     ) : null}
                     {statusBadge(row)}
                     <p className={cn('text-xs', noteTone(row))}>{rowNote(t, row)}</p>
+                    <WelcomeNote row={row} className="text-xs" />
                   </div>
                   {canEditPrefix(row) ? (
                     <Input
@@ -673,6 +683,7 @@ function RosterResultTable({
                   )}
                 >
                   {rowNote(t, row)}
+                  <WelcomeNote row={row} className="mt-1" />
                 </TableCell>
               </TableRow>
             );
@@ -705,9 +716,23 @@ function isTaken(row: MemberImportRowResult) {
   return row.status === 'skipped' && row.skip_reason === 'mailbox_taken';
 }
 
-/** Rows the admin must act on: refused rows and taken addresses. Other skips are no-ops. */
+/**
+ * Rows the admin must act on: refused rows, taken addresses, and rows whose welcome email failed,
+ * which a retry sends. Other skips are no-ops.
+ */
 export function needsAttention(row: MemberImportRowResult) {
-  return row.status === 'failed' || isTaken(row);
+  return row.status === 'failed' || isTaken(row) || row.welcome_mail_status === 'failed';
+}
+
+/** Why a provisioned row's welcome email did not go out; nothing when it did or was off. */
+function WelcomeNote({ row, className }: { row: MemberImportRowResult; className?: string }) {
+  const t = useT('mailbox');
+  if (row.welcome_mail_status !== 'failed' && row.welcome_mail_status !== 'suppressed') return null;
+  return (
+    <p className={cn('text-warning', className)}>
+      {t(`admin.rosterImport.welcomeNotes.${row.welcome_mail_status}`)}
+    </p>
+  );
 }
 
 function noteTone(row: MemberImportRowResult) {
@@ -794,6 +819,8 @@ export function mergeRetry(
   });
   const count = (status: MemberImportRowResult['status']) =>
     rows.filter(row => row.status === status).length;
+  const welcome = (...statuses: MemberImportRowResult['welcome_mail_status'][]) =>
+    rows.filter(row => statuses.includes(row.welcome_mail_status)).length;
   return {
     dry_run: false,
     total: rows.length,
@@ -802,6 +829,8 @@ export function mergeRetry(
     created: count('created'),
     skipped: count('skipped'),
     failed: count('failed'),
+    welcome_mails_queued: welcome('queued'),
+    welcome_mails_failed: welcome('failed', 'suppressed'),
     rows,
   };
 }

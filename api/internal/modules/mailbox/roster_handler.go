@@ -64,6 +64,10 @@ type MemberImportRowResultResponse struct {
 	MailboxID       *uint   `json:"mailbox_id"`
 	InvitationID    *uint   `json:"invitation_id"`
 	EmailSendStatus *string `json:"email_send_status"`
+	// WelcomeMailStatus is null when the row provisioned no mailbox; WelcomeMailErrorCode is set
+	// only when it is failed.
+	WelcomeMailStatus    *string `json:"welcome_mail_status"`
+	WelcomeMailErrorCode *string `json:"welcome_mail_error_code"`
 }
 
 // MemberImportResultResponse is the result of a roster import.
@@ -75,6 +79,9 @@ type MemberImportResultResponse struct {
 	Created int  `json:"created"`
 	Skipped int  `json:"skipped"`
 	Failed  int  `json:"failed"`
+	// WelcomeMailsQueued and WelcomeMailsFailed count rows by welcome mail outcome.
+	WelcomeMailsQueued int `json:"welcome_mails_queued"`
+	WelcomeMailsFailed int `json:"welcome_mails_failed"`
 	// fastbuild:bounded-list max=500 reason=one result per request row, bounded by the request
 	Rows []MemberImportRowResultResponse `json:"rows"`
 }
@@ -93,12 +100,14 @@ func toMemberImportResultResponse(result *MemberImportResult) MemberImportResult
 			Row: row.Row, Email: row.Email, Address: row.Address, Status: string(row.Status),
 			SkipReason: optionalText(string(row.SkipReason)), ErrorCode: optionalText(row.ErrorCode),
 			MailboxID: optionalUint(row.MailboxID), InvitationID: optionalUint(row.InvitationID),
-			EmailSendStatus: optionalText(row.EmailSendStatus),
+			EmailSendStatus:   optionalText(row.EmailSendStatus),
+			WelcomeMailStatus: optionalText(string(row.WelcomeStatus)), WelcomeMailErrorCode: optionalText(row.WelcomeErrorCode),
 		})
 	}
 	return MemberImportResultResponse{
 		DryRun: result.DryRun, Total: result.Total, Valid: result.Valid, Invited: result.Invited,
-		Created: result.Created, Skipped: result.Skipped, Failed: result.Failed, Rows: rows,
+		Created: result.Created, Skipped: result.Skipped, Failed: result.Failed,
+		WelcomeMailsQueued: result.WelcomeQueued, WelcomeMailsFailed: result.WelcomeFailed, Rows: rows,
 	}
 }
 

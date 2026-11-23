@@ -1,4 +1,5 @@
 import {
+  _default,
   array,
   boolean,
   int,
@@ -1250,6 +1251,21 @@ export const memberImportRowResultSchema = strictObject({
   email_send_status: nullable(
     union([literal('accepted_by_provider'), literal('failed'), literal('not_configured')])
   ),
+  // An API from before the welcome mail does not report these; read them as "no welcome".
+  welcome_mail_status: _default(
+    nullable(
+      union([
+        literal('queued'),
+        literal('suppressed'),
+        literal('already_sent'),
+        literal('disabled'),
+        literal('not_configured'),
+        literal('failed'),
+      ])
+    ),
+    null
+  ),
+  welcome_mail_error_code: _default(nullable(string()), null),
 });
 
 export const memberImportResultSchema = strictObject({
@@ -1260,6 +1276,8 @@ export const memberImportResultSchema = strictObject({
   created: nonnegativeIntegerSchema,
   skipped: nonnegativeIntegerSchema,
   failed: nonnegativeIntegerSchema,
+  welcome_mails_queued: _default(nonnegativeIntegerSchema, 0),
+  welcome_mails_failed: _default(nonnegativeIntegerSchema, 0),
   rows: array(memberImportRowResultSchema),
 });
 

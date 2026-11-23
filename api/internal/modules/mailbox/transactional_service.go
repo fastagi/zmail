@@ -550,16 +550,7 @@ func (s *service) sendTransactional(ctx context.Context, send *transactionalSend
 		// Final at acceptance: counted here, once; a replay returns before this point.
 		metrics.RecordTransactionalMessage(string(message.Mode), string(message.Status))
 	}
-	if message.Status == domain.TransactionalStatusQueued && message.QueuedReason == nil {
-		id := message.ID
-		dispatchCtx := context.WithoutCancel(ctx)
-		s.background(func() {
-			if dispatchErr := s.DispatchTransactionalMessage(dispatchCtx, id); dispatchErr != nil {
-				slog.WarnContext(dispatchCtx, "transactional_message.dispatch_deferred",
-					slog.Uint64("message_id", uint64(id)))
-			}
-		})
-	}
+	s.dispatchTransactionalSoon(ctx, message)
 	return message, true, nil
 }
 

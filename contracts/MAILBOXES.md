@@ -62,6 +62,9 @@ recorded but has no special rights to it. A removed member loses access on their
 | Import mailboxes | `POST /api/mailbox-imports` | `POST /v1/mailbox-imports` | `200` envelope, at most 500 rows |
 | Export mailboxes | `GET /api/mailbox-exports` | `GET /v1/mailbox-exports` | `200` CSV file |
 | Import a roster | `POST /api/member-imports` | `POST /v1/member-imports` | `200` envelope, at most 500 rows |
+| Read the welcome mail setting | `GET /api/member-welcome-mail-setting` | `GET /v1/member-welcome-mail-setting` | `200` envelope |
+| Replace the welcome mail setting | `PUT /api/member-welcome-mail-setting` | `PUT /v1/member-welcome-mail-setting` | `200` envelope |
+| Preview a welcome mail | `POST /api/member-welcome-mail-previews` | `POST /v1/member-welcome-mail-previews` | `200` envelope |
 | List members | `GET /api/mailboxes/:id/members` | `GET /v1/mailboxes/:mailbox_id/members` | `200` envelope, at most 100 items |
 | Set a member | `PUT /api/mailboxes/:id/members/:userId` | `PUT /v1/mailboxes/:mailbox_id/members/:user_id` | `200` envelope |
 | Remove a member | `DELETE /api/mailboxes/:id/members/:userId` | `DELETE /v1/mailboxes/:mailbox_id/members/:user_id` | `204` |
@@ -401,10 +404,11 @@ fails after its mailbox was reserved keeps the reservation, and sending that row
   "message": "success",
   "data": {
     "dry_run": false, "total": 3, "valid": 0, "invited": 1, "created": 0, "skipped": 1, "failed": 1,
+    "welcome_mails_queued": 1, "welcome_mails_failed": 0,
     "rows": [
-      { "row": 1, "email": "alice@gmail.com", "address": "alice@company.com", "status": "invited", "skip_reason": null, "error_code": null, "mailbox_id": 51, "invitation_id": 12, "email_send_status": "accepted_by_provider" },
-      { "row": 2, "email": "sam@gmail.com", "address": "sales@company.com", "status": "skipped", "skip_reason": "mailbox_taken", "error_code": null, "mailbox_id": null, "invitation_id": null, "email_send_status": null },
-      { "row": 3, "email": "not-an-email", "address": "", "status": "failed", "skip_reason": null, "error_code": "MAILBOX.IMPORT_EMAIL_INVALID", "mailbox_id": null, "invitation_id": null, "email_send_status": null }
+      { "row": 1, "email": "alice@gmail.com", "address": "alice@company.com", "status": "invited", "skip_reason": null, "error_code": null, "mailbox_id": 51, "invitation_id": 12, "email_send_status": "accepted_by_provider", "welcome_mail_status": "queued", "welcome_mail_error_code": null },
+      { "row": 2, "email": "sam@gmail.com", "address": "sales@company.com", "status": "skipped", "skip_reason": "mailbox_taken", "error_code": null, "mailbox_id": null, "invitation_id": null, "email_send_status": null, "welcome_mail_status": null, "welcome_mail_error_code": null },
+      { "row": 3, "email": "not-an-email", "address": "", "status": "failed", "skip_reason": null, "error_code": "MAILBOX.IMPORT_EMAIL_INVALID", "mailbox_id": null, "invitation_id": null, "email_send_status": null, "welcome_mail_status": null, "welcome_mail_error_code": null }
     ]
   }
 }
@@ -414,7 +418,12 @@ fails after its mailbox was reserved keeps the reservation, and sending that row
 `already_member`, `already_invited`, or `mailbox_taken`), or `failed` (with `error_code`).
 `email_send_status` is the invitation email outcome (`accepted_by_provider`, `failed`, or
 `not_configured`) when the row sent one. The invitation link is never returned here; a manager
-shares one through a resend. Row error codes:
+shares one through a resend. `welcome_mail_status` is the row's [welcome mail](#member-welcome-mail)
+outcome, set only outside a dry run on a row that is `invited`, `created`, or skipped as
+`already_invited` (finishing a welcome an earlier upload could not send); otherwise null.
+`welcome_mail_error_code` is set only when it is `failed`. A welcome mail never changes a row's
+`status` or its counts: `welcome_mails_queued` counts rows whose welcome was queued by this
+request and `welcome_mails_failed` rows whose welcome is `failed` or `suppressed`. Row error codes:
 
 | `error_code` | Meaning |
 |---|---|
@@ -442,6 +451,88 @@ surface that carries member email addresses.
   `created_at` is RFC 3339 in UTC.
 - A cell starting with `=`, `+`, `-`, or `@` gets a leading `'` so spreadsheets do not run it as a
   formula; importing the file removes it again.
+
+### Member Welcome Mail
+
+When a member's personal mailbox is provisioned on a verified organization domain, Zmail sends that
+person one welcome mail: how to sign in and how to set up a mail app, with the public mail app
+server (`MAIL_GATEWAY_PUBLIC_IMAP_HOST`/`PORT`, `MAIL_GATEWAY_PUBLIC_SMTP_HOST`/`PORT`, and
+`MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT`) and a link to the console's mail app settings. It never
+contains a password, a mail app password, an invitation token, or any other secret.
+
+| Provisioned by | Recipient |
+|---|---|
+| A roster import row that is `invited`, `created`, or skipped as `already_invited` | The row's `email`: the invitation address the person reads until they first sign in |
+| An owner or admin creating a personal mailbox for another member (`POST /v1/mailboxes`) | That member's account email |
+
+The new mailbox itself is never the recipient: the person cannot read it before signing in. A
+manager creating a mailbox for themselves, a mailbox on the shared domain, and a connected mailbox
+send no welcome mail.
+
+Each mailbox is welcomed at most once, ever: the welcome is recorded with the mailbox in the same
+transaction that stores the message, so uploading a roster again or retrying a row answers
+`already_sent` and sends nothing. Welcome mails are [transactional messages](#transactional-mail)
+created by Zmail itself (no API key, `mode` `live`), sent from `no-reply@<mailbox domain>` under the
+organization's name: they are stored first and sent off the request path with the usual retries,
+count in the transactional lane, honor the suppression list and the simulator domain, and appear in
+the [send log](#send-log) with `template` `member-welcome` and `idempotency_key`
+`member-welcome:<mailbox id>`. The `MAILBOX_TRANSACTIONAL_ENABLED` switch governs only API sends;
+welcome mails need `MAILBOX_SECRET_ENCRYPTION_KEY` and `MAILBOX_PUBLIC_URL`, and without either the
+outcome is `not_configured`.
+
+| Outcome (`welcome_mail_status`) | Meaning |
+|---|---|
+| `queued` | Stored and sent, or waiting for the lane; see the send log for delivery |
+| `suppressed` | Stored as `suppressed`: the recipient is on the suppression list |
+| `already_sent` | This mailbox was welcomed before; nothing new was stored |
+| `disabled` | The organization turned welcome mails off |
+| `not_configured` | This instance cannot send welcome mails |
+| `failed` | Nothing was stored; `welcome_mail_error_code` says why (for example `MAILBOX.DOMAIN_NOT_VERIFIED`, `MAILBOX.SEND_LIMIT_REACHED`, `COMMON.SERVICE_UNAVAILABLE`), and a later upload of the row tries again |
+
+#### Welcome Mail Setting
+
+Only owners and admins read and change the setting (`403 PERMISSION.DENIED` otherwise).
+`GET /v1/member-welcome-mail-setting` answers:
+
+```json
+{
+  "enabled": true,
+  "language": "en-US",
+  "subject": "Welcome to {{organization_name}} on Zmail",
+  "body": "Hi {{member_name}},\n\n…",
+  "customized": false,
+  "variables": ["member_name", "mailbox_address", "organization_name", "sign_in_url"],
+  "defaults": {
+    "en-US": { "subject": "Welcome to {{organization_name}} on Zmail", "body": "Hi {{member_name}},\n\n…" },
+    "zh-Hans": { "subject": "…", "body": "…" }
+  },
+  "updated_at": null
+}
+```
+
+An organization that never saved the setting has welcome mails on, in `zh-Hans`, with the standard
+text. `subject` and `body` are the copy in use: the saved copy, or the standard text of `language`
+where none was saved (`customized` says whether any was). `defaults` is the standard text of each
+language. `PUT` takes `{ "enabled", "language", "subject", "body" }`:
+
+- `enabled` (boolean) and `language` (`en-US` or `zh-Hans`) are required.
+- `subject` is one line of at most 200 characters, `body` plain text of at most 5000; both are
+  trimmed, and an empty one, or one equal to the standard text of `language`, means the standard
+  text, so it follows a later language change.
+- Both may use `{{variable}}` and `{{variable|fallback}}` with only the variables listed:
+  `member_name` (the roster name or mailbox display name, else the mailbox address),
+  `mailbox_address`, `organization_name`, and `sign_in_url` (`<MAILBOX_PUBLIC_URL>/login`).
+  An unknown variable, a malformed placeholder, or a value over a limit is
+  `422 COMMON.VALIDATION_FAILED` with `errors.subject` or `errors.body`.
+
+Every welcome mail ends with a fixed mail app section in `language`, after the editable body; it
+cannot be removed, so the server names are always right. The HTML part is the plain text escaped,
+with `sign_in_url` and the settings link made clickable. Saving is audited as
+`member_welcome_settings.update` with `enabled`, `language`, and `customized`.
+
+`POST /v1/member-welcome-mail-previews` takes `{ "language", "subject", "body" }` with the same rules
+and answers `{ "subject", "text", "html" }`: the whole mail, fixed section included, rendered with
+sample values and the organization's name. It stores and sends nothing.
 
 ## Access
 
@@ -3347,7 +3438,8 @@ person replies through [Send](#send).
 
 A transactional message is one message to one recipient, rendered from a
 [transactional template](#transactional-templates) and sent by a backend service with an API key:
-sign-up codes, password resets, receipts. It is a separate resource from mailbox messages: it has
+sign-up codes, password resets, receipts. Zmail itself also sends [member welcome mails](#member-welcome-mail) as
+transactional messages, with no template row (`template` `member-welcome`). It is a separate resource from mailbox messages: it has
 no mailbox, never appears in a mailbox, the mail log, or the statistics, and counts only in the
 transactional lane (see [Send](#send)).
 

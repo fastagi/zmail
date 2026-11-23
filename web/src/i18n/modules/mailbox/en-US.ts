@@ -1770,6 +1770,36 @@ const messages = {
         unreadable: 'The file could not be read.',
       },
     },
+    memberWelcome: {
+      title: 'Welcome email',
+      description:
+        'When someone gets a mailbox through a roster import or from an admin, Zmail sends them one email on how to sign in and set up a mail app. It goes to the address they were invited with, which they can already read.',
+      enabled: 'Send a welcome email to new members',
+      language: 'Language',
+      languages: { 'zh-Hans': 'Simplified Chinese', 'en-US': 'English' },
+      subject: 'Subject',
+      body: 'Message',
+      bodyHint:
+        'Steps for setting up a mail app, with server names and ports, are always added after your message. Passwords are never included.',
+      placeholders: 'Insert a detail',
+      placeholdersHint: 'Each detail is filled in for every person.',
+      variables: {
+        member_name: 'Member name',
+        mailbox_address: 'Mailbox address',
+        organization_name: 'Organization name',
+        sign_in_url: 'Sign-in link',
+      },
+      preview: 'Preview',
+      previewTitle: 'Preview with sample details',
+      previewSubject: 'Subject',
+      save: 'Save',
+      saved: 'Welcome email settings saved',
+      reset: 'Use standard text',
+      loadFailed: 'Could not load the welcome email settings.',
+      retry: 'Retry',
+      invalid: 'Fix the highlighted text. Only the details offered above can be inserted.',
+      fieldInvalid: 'Use only the details offered above, and keep it within the length limit.',
+    },
     rosterImport: {
       open: 'Import roster',
       title: 'Import a roster',
@@ -1843,6 +1873,13 @@ const messages = {
         invitedNoEmail:
           'Invitation created, but no email went out. Resend it from the Invitations tab.',
         created: 'Existing member; their personal mailbox is ready.',
+      },
+      welcomeSummary: 'Welcome emails: {queued} sent to new members, {failed} could not be sent.',
+      welcomeNotes: {
+        failed:
+          'The welcome email could not be sent. The mailbox is ready. For an invited person, retrying this row sends it again.',
+        suppressed:
+          'No welcome email: this address bounced or reported spam before. Remove it from the suppression list first.',
       },
       rowErrors: {
         emailInvalid: 'Enter a valid email of up to 100 characters.',

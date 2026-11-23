@@ -61,6 +61,11 @@ const RosterImportButton = lazy(async () => {
   return { default: feature.RosterImportButton };
 });
 
+const MemberWelcomePanel = lazy(async () => {
+  const feature = await import('@/features/mailbox/components/admin/member-welcome-panel');
+  return { default: feature.MemberWelcomePanel };
+});
+
 const WebhookManagement = lazy(async () => {
   const feature = await import('@/features/webhook/components/webhook-management');
   return { default: feature.WebhookManagement };
@@ -284,6 +289,11 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
         {canManageOrganization ? (
           <TabsContent value="invitations">
             <OrganizationInvitations organizationId={context.organization_id} />
+            {mailboxEnabled ? (
+              <Suspense fallback={null}>
+                <MemberWelcomePanel organizationId={context.organization_id} />
+              </Suspense>
+            ) : null}
           </TabsContent>
         ) : null}
 
