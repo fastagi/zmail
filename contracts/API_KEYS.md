@@ -37,11 +37,19 @@ Request:
   removed. The result must be non-empty and every value must be one of Zmail's scopes
   (`mail:send`, `mail:read`, `mail:transactional`, `mail:agent`, `templates:create`, see
   [Authentication And Scopes](#authentication-and-scopes)) or the explicit `*` wildcard. An empty
-  list, or any other value, is `422 COMMON.INVALID_INPUT` (a list over 32 values or a value over 65
+  list, or any other value, is `400 COMMON.INVALID_INPUT` (a list over 32 values or a value over 65
   characters is `422 COMMON.VALIDATION_FAILED`), so a key that could reach nothing is never issued.
 - `expires_at` is optional and must be in the future.
 - `mode` is optional, `live` (the default) or `test`; anything else is `422 COMMON.VALIDATION_FAILED`.
   See [Modes](#modes).
+- `organization_id` is optional. When present the caller must be a member of that organization
+  (`404 ORGANIZATION.NOT_FOUND` otherwise) and the key is bound to it. See
+  [Restrictions](#restrictions).
+- `sending_domains` is optional and allowed only with `organization_id`. It holds 1 to 50 domain
+  names; each is trimmed, lowercased, stripped of a trailing dot, and deduplicated, and each must
+  be a domain the organization may send from: the instance's shared domain or one of the
+  organization's verified domains. A list without `organization_id`, an empty list, or any other
+  domain is `400 COMMON.INVALID_INPUT`.
 
 The response returns metadata plus `plaintext_key`. The plaintext appears only in this successful
 create response:
@@ -58,6 +66,8 @@ create response:
       "key_prefix": "zmail_ab12cd34",
       "mode": "live",
       "scopes": ["mail:read", "mail:send"],
+      "organization_id": 5,
+      "sending_domains": ["acme.example"],
       "created_at": "2026-07-15T12:00:00Z",
       "updated_at": "2026-07-15T12:00:00Z"
     },
@@ -89,6 +99,22 @@ support refuses test keys. Today only `POST /v1/transactional-messages` and
 [`MAILBOXES.md`](MAILBOXES.md#transactional-mail)). A test key and a live key of one owner see
 disjoint data on those routes.
 
+## Restrictions
+
+A key may be bound, at creation and for good, to one organization and optionally to some of that
+organization's sending domains, so a leaked key cannot act elsewhere. Existing keys and keys
+created without these fields stay unrestricted: their responses omit both fields, and the database
+stores `NULL` for both.
+
+| Field on the key | Effect on API key routes |
+|---|---|
+| `organization_id` | The key acts in that organization. `Organization-Id` becomes optional: when absent the bound organization is used; a different value is `403 API_KEY.ORGANIZATION_MISMATCH`. The owner's current membership and feature grants still apply exactly as for an unrestricted key. |
+| `sending_domains` | Every send checks the domain of the from address (for `POST /v1/outbound-mail-messages` the `from` field, for `POST /v1/transactional-messages` the template's `from_address`). Matching is exact and ignores case; a subdomain is a different domain. Any other domain is `403 API_KEY.DOMAIN_NOT_ALLOWED` and nothing is stored or sent. |
+
+A restriction never widens a key: a domain later removed from the organization stays listed on the
+key but no longer sends, because the mailbox rules refuse it. Mail clients signing in with mail
+client passwords over SMTP are not API keys and are unaffected.
+
 ## List And Revoke
 
 List metadata may contain `last_used_at`, `expires_at`, and `revoked_at`. New scope storage uses a
@@ -104,7 +130,7 @@ last-used update cannot clear revocation.
 
 API clients send the plaintext key in `X-API-Key` to routes using the starter-owned `api_key`
 middleware. Validation rejects missing, unknown, expired, and revoked keys. Successful validation
-adds the key owner, scopes, and mode to request context.
+adds the key owner, scopes, mode, and restriction to request context.
 
 Scopes attenuate what a key may do; they never elevate the key beyond its owning user. Scope checks
 are exact, except that `*` matches every required scope. A route that needs scopes applies
@@ -128,15 +154,18 @@ atomic, and throttled to at most once per minute per active key.
 
 | HTTP status | `error_code` | Meaning |
 |---|---|---|
+| 400 | `COMMON.INVALID_INPUT` | Direct API input fails semantic scope, expiry, or restriction validation |
 | 401 | `AUTH.UNAUTHORIZED` | Browser management session or `X-API-Key` header is missing |
 | 401 | `API_KEY.INVALID` | Client key is unknown or malformed |
 | 401 | `API_KEY.EXPIRED` | Client key has expired |
 | 401 | `API_KEY.REVOKED` | Client key was revoked |
 | 403 | `PERMISSION.DENIED` | Authenticated key lacks a required scope, or is a test key on a route without test support |
+| 403 | `API_KEY.ORGANIZATION_MISMATCH` | An organization-bound key sent `Organization-Id` naming another organization |
+| 403 | `API_KEY.DOMAIN_NOT_ALLOWED` | A domain-restricted key tried to send from an address on another domain |
+| 404 | `ORGANIZATION.NOT_FOUND` | Create named an `organization_id` the caller is not a member of |
 | 404 | `API_KEY.NOT_FOUND` | Owned management resource was not found |
 | 413 | `COMMON.REQUEST_TOO_LARGE` | Browser create body exceeds its limit |
 | 422 | `COMMON.VALIDATION_FAILED` | Request fields fail schema validation |
-| 422 | `COMMON.INVALID_INPUT` | Direct API input fails semantic scope or expiry validation |
 | 503 | `COMMON.SERVICE_UNAVAILABLE` | Adapter, mock backend, or persistence is unavailable |
 
 ## Deliberate Deferrals
@@ -144,6 +173,8 @@ atomic, and throttled to at most once per minute per active key.
 - Rotation is create-new, migrate callers, then revoke-old; there is no rotate endpoint.
 - Zmail's mail scopes are the whole catalog a new key may use. Stored keys keep whatever scopes they
   were issued with; a route checks scopes with the `namespace:action` grammar.
-- Usage metering, quotas, billing, key-level rate plans, and organization-owned keys remain separate
-  starter decisions.
+- Usage metering, quotas, billing, and key-level rate plans remain separate starter decisions. A
+  key bound to an organization is still owned by its user, not by the organization.
+- A restriction cannot be edited; create a new key with the restriction you need and revoke the old
+  one.
 - Organization roles (`owner`, `admin`, `member`) are not API key scopes or generalized RBAC roles.

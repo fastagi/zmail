@@ -161,6 +161,24 @@ const messages = {
       custom: 'Custom date',
       date: 'Expiry date',
     },
+    restriction: {
+      title: 'Limits (optional)',
+      organization: 'Use only in one organization',
+      organizationHint:
+        'A limited key works only in the organization you pick, and your code no longer has to send the Organization-Id header.',
+      anyOrganization: 'Any organization I belong to',
+      organizationsLoading: 'Loading your organizations...',
+      organizationsError: 'Your organizations could not be loaded, so this key cannot be limited right now.',
+      domains: 'Send only from these domains',
+      domainsHint:
+        'Leave all unchecked to send from any domain of this organization. Email from any other domain is refused.',
+      domainsLoading: 'Loading domains...',
+      domainsError: 'Domains could not be loaded. You can still limit the key to the organization.',
+      domainsEmpty: 'This organization has no domains to send from yet.',
+      onlyOrganization: 'Only in {organization}',
+      unknownOrganization: 'organization #{id}',
+      onlyDomains: 'Sends only from {domains}',
+    },
     errors: {
       nameRequired: 'Enter a name of up to 100 characters.',
       scopeRequired: 'Choose at least one permission.',
@@ -198,6 +216,10 @@ const messages = {
       fromHint: '"from" must be a mailbox you may send from: {from}.',
       organizationHeader:
         'says which organization the key acts in ({organization}). A key belongs to you, so one key works in every organization you are a member of.',
+      boundOrganization:
+        'This key only works in {organization}, so the example sends no Organization-Id header.',
+      noAllowedSender:
+        'This key only sends from {domains}, and you have no mailbox there yet. Change "from" to an address on one of those domains before running it.',
       recipientHint: 'The example sends to you. Every message it sends shows up in',
       emailLog: 'Emails',
       language: 'Language',

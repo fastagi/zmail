@@ -29,6 +29,8 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailAgentEventPruner), new(*service)),
 	wire.Bind(new(domain.MailClientStore), new(*service)),
 	wire.Bind(new(domain.MailSubmissionStore), new(*service)),
+	// API keys may be restricted to the domains an organization sends from.
+	wire.Bind(new(domain.SendingDomainDirectory), new(*service)),
 	// Owners and members are validated against the organization starter's memberships.
 	NewMembershipDirectory,
 	// Console test sends go to the caller's account address, read through the user starter.
@@ -152,7 +154,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_24_100000_add_mail_imap_uids",
 			"2026_12_24_120000_add_mail_app_passwords",
 			"2026_12_25_090000_add_mail_submission_fields",
-			"2026_12_26_090000_add_member_welcome_mail",
+			"2026_12_26_100000_add_member_welcome_mail",
 		),
 	)
 }

@@ -26,6 +26,10 @@ type APIKeyPO struct {
 	LastUsedAt *time.Time
 	ExpiresAt  *time.Time
 	RevokedAt  *time.Time
+	// OrganizationID binds the key to one organization; NULL leaves it unrestricted.
+	OrganizationID *uint
+	// SendingDomains is a JSON array of the domains the key may send from; NULL allows every one.
+	SendingDomains *string `gorm:"type:text"`
 }
 
 // TableName specifies the database table name.
@@ -42,19 +46,26 @@ func (po *APIKeyPO) toDomain() (*domain.APIKey, error) {
 		return nil, fmt.Errorf("decode api key scopes: %w", err)
 	}
 
+	sendingDomains, err := decodeSendingDomains(po.SendingDomains)
+	if err != nil {
+		return nil, fmt.Errorf("decode api key sending domains: %w", err)
+	}
+
 	return &domain.APIKey{
-		ID:         po.ID,
-		UserID:     po.UserID,
-		Name:       po.Name,
-		KeyPrefix:  po.KeyPrefix,
-		KeyHash:    po.KeyHash,
-		Scopes:     scopes,
-		Mode:       storedMode(po.Mode),
-		LastUsedAt: po.LastUsedAt,
-		ExpiresAt:  po.ExpiresAt,
-		RevokedAt:  po.RevokedAt,
-		CreatedAt:  po.CreatedAt,
-		UpdatedAt:  po.UpdatedAt,
+		ID:             po.ID,
+		UserID:         po.UserID,
+		Name:           po.Name,
+		KeyPrefix:      po.KeyPrefix,
+		KeyHash:        po.KeyHash,
+		Scopes:         scopes,
+		Mode:           storedMode(po.Mode),
+		LastUsedAt:     po.LastUsedAt,
+		ExpiresAt:      po.ExpiresAt,
+		RevokedAt:      po.RevokedAt,
+		CreatedAt:      po.CreatedAt,
+		UpdatedAt:      po.UpdatedAt,
+		OrganizationID: po.OrganizationID,
+		SendingDomains: sendingDomains,
 	}, nil
 }
 
@@ -67,19 +78,26 @@ func newAPIKeyPO(key *domain.APIKey) (*APIKeyPO, error) {
 		return nil, fmt.Errorf("encode api key scopes: %w", err)
 	}
 
+	encodedDomains, err := encodeSendingDomains(key.SendingDomains)
+	if err != nil {
+		return nil, fmt.Errorf("encode api key sending domains: %w", err)
+	}
+
 	return &APIKeyPO{
-		ID:         key.ID,
-		CreatedAt:  key.CreatedAt,
-		UpdatedAt:  key.UpdatedAt,
-		UserID:     key.UserID,
-		Name:       key.Name,
-		KeyPrefix:  key.KeyPrefix,
-		KeyHash:    key.KeyHash,
-		Scopes:     encodedScopes,
-		Mode:       string(storedMode(string(key.Mode))),
-		LastUsedAt: key.LastUsedAt,
-		ExpiresAt:  key.ExpiresAt,
-		RevokedAt:  key.RevokedAt,
+		ID:             key.ID,
+		CreatedAt:      key.CreatedAt,
+		UpdatedAt:      key.UpdatedAt,
+		UserID:         key.UserID,
+		Name:           key.Name,
+		KeyPrefix:      key.KeyPrefix,
+		KeyHash:        key.KeyHash,
+		Scopes:         encodedScopes,
+		Mode:           string(storedMode(string(key.Mode))),
+		LastUsedAt:     key.LastUsedAt,
+		ExpiresAt:      key.ExpiresAt,
+		RevokedAt:      key.RevokedAt,
+		OrganizationID: key.OrganizationID,
+		SendingDomains: encodedDomains,
 	}, nil
 }
 
@@ -141,4 +159,32 @@ func encodeScopes(scopes []string) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// decodeSendingDomains reads the stored domain list; NULL means every domain.
+func decodeSendingDomains(value *string) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	domains := []string{}
+	if err := json.Unmarshal([]byte(*value), &domains); err != nil {
+		return nil, err
+	}
+	if domains == nil {
+		domains = []string{}
+	}
+	return domains, nil
+}
+
+// encodeSendingDomains stores nil as NULL so an unrestricted key never reads back as restricted.
+func encodeSendingDomains(domains []string) (*string, error) {
+	if domains == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(domains)
+	if err != nil {
+		return nil, err
+	}
+	value := string(encoded)
+	return &value, nil
 }

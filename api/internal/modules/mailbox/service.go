@@ -1013,6 +1013,9 @@ func (s *service) SendFromAddress(ctx context.Context, viewer domain.Organizatio
 	if !ok {
 		return nil, false, fmt.Errorf("%w: from", ErrMailMessageInvalid)
 	}
+	if err := requireAPIKeySendingDomain(ctx, address); err != nil {
+		return nil, false, err
+	}
 	mailbox, err := s.repo.FindMailboxByAddress(ctx, address)
 	if err != nil {
 		return nil, false, err

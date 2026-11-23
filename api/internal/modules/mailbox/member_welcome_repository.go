@@ -12,7 +12,7 @@ import (
 )
 
 // MemberWelcomeSettingPO is an organization's welcome mail setting; a missing row is on, in
-// Chinese, with the standard text. The schema is owned by 2026_12_26_090000_add_member_welcome_mail.
+// Chinese, with the standard text. The schema is owned by 2026_12_26_100000_add_member_welcome_mail.
 type MemberWelcomeSettingPO struct {
 	OrganizationID uint   `gorm:"primaryKey;autoIncrement:false"`
 	Enabled        bool   `gorm:"not null"` // no default tag: GORM would drop an explicit false

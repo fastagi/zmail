@@ -37,12 +37,17 @@ export function canSendFrom(mailbox: Mailbox): boolean {
 
 /**
  * Whether the user has an organization and a mailbox there they may send from, which a key needs
- * before it can send anything. It uses the organization the mail pages last showed.
+ * before it can send anything. It uses the organization the mail pages last showed, or
+ * `organizationId` for a key bound to one organization.
  */
-export function useSendReadiness(): SendReadiness {
+export function useSendReadiness(organizationId?: number): SendReadiness {
   const enabled = isWebFeatureEnabled('mailbox');
   const organizations = useOrganizations(enabled);
-  const chosen = useChosenMailOrganization();
+  const lastShown = useChosenMailOrganization();
+  const bound = organizationId
+    ? organizations.data?.items.find(item => item.id === organizationId)
+    : undefined;
+  const chosen = organizationId ? bound : lastShown;
   const mailboxes = useMailboxes(chosen?.id ?? 0);
   const user = useCurrentUser();
 
@@ -50,6 +55,8 @@ export function useSendReadiness(): SendReadiness {
   if (organizations.isError) return { status: 'error' };
   if (organizations.isPending) return { status: 'loading' };
   if (organizations.data.items.length === 0) return { status: 'no-organization' };
+  // A key bound to an organization the user has left has nothing to show.
+  if (organizationId && !bound) return { status: 'error' };
   if (!chosen) return { status: 'loading' };
 
   const organization = {

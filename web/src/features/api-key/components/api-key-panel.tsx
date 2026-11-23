@@ -43,6 +43,12 @@ import {
 } from '@/features/api-key/hooks/use-api-keys';
 import { API_KEY_PLACEHOLDER, SendQuickStart } from '@/features/api-key/components/send-quick-start';
 import { useSendReadiness } from '@/features/api-key/hooks/use-send-readiness';
+import {
+  useRestrictionDomains,
+  useRestrictionOrganizations,
+  type RestrictionOrganizations,
+} from '@/features/api-key/hooks/use-restriction-options';
+import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { createApiKeySchema } from '@/features/api-key/schemas';
 import {
   API_KEY_EXPIRY_CHOICES,
@@ -58,6 +64,7 @@ import {
 } from '@/features/api-key/scopes';
 import type { ApiKey, CreateApiKeyResult } from '@/features/api-key/types';
 import { useT } from '@/i18n';
+import { cn } from '@/utils';
 
 export function ApiKeyPanel() {
   const t = useT('settings.api');
@@ -66,13 +73,21 @@ export function ApiKeyPanel() {
   const createApiKey = useCreateApiKey();
   const revokeApiKey = useRevokeApiKey();
   const readiness = useSendReadiness();
-  const [createOpen, setCreateOpen] = useState(false);
   const [created, setCreated] = useState<CreateApiKeyResult | null>(null);
+  // The example for a key bound to an organization uses that organization's mailboxes.
+  const createdReadiness = useSendReadiness(created?.api_key.organization_id);
+  const restrictionOrganizations = useRestrictionOrganizations();
+  const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [purpose, setPurpose] = useState<ApiKeyPurpose>('send');
   const [scopes, setScopes] = useState<readonly ApiKeyScope[]>(DEFAULT_API_KEY_SCOPES);
   const [expiry, setExpiry] = useState<ApiKeyExpiryChoice>('never');
   const [expiresAt, setExpiresAt] = useState('');
+  // 0 leaves the key usable in every organization; domains apply only with an organization.
+  const [organizationId, setOrganizationId] = useState(0);
+  const [sendingDomains, setSendingDomains] = useState<readonly string[]>([]);
+  const restrictionDomains = useRestrictionDomains(organizationId);
+  const offeredDomains = restrictionDomains.status === 'ready' ? restrictionDomains.domains : [];
   const [errors, setErrors] = useState<FormErrors>({});
   // The plaintext key is shown once: the dialog closes only after it is copied or saved.
   const [secured, setSecured] = useState(false);
@@ -91,6 +106,8 @@ export function ApiKeyPanel() {
     setScopes(DEFAULT_API_KEY_SCOPES);
     setExpiry('never');
     setExpiresAt('');
+    setOrganizationId(0);
+    setSendingDomains([]);
     setErrors({});
     setSecured(false);
     setCloseBlocked(false);
@@ -122,11 +139,17 @@ export function ApiKeyPanel() {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    // Only domains the chosen organization still offers are sent.
+    const chosenDomains = offeredDomains.filter(item => sendingDomains.includes(item));
     const candidate = {
       name,
       // In the order the dialog offers them.
       scopes: API_KEY_SCOPES.filter(scope => chosenScopes.includes(scope)),
       ...(expiresAtValue ? { expires_at: expiresAtValue } : {}),
+      ...(organizationId > 0 ? { organization_id: organizationId } : {}),
+      ...(organizationId > 0 && chosenDomains.length > 0
+        ? { sending_domains: chosenDomains }
+        : {}),
     };
     const parsed = createApiKeySchema.safeParse(candidate);
     if (!parsed.success) {
@@ -238,6 +261,7 @@ export function ApiKeyPanel() {
                           </Badge>
                         </div>
                         <code className="text-xs text-muted-foreground">{apiKey.key_prefix}</code>
+                        <KeyRestriction apiKey={apiKey} organizations={restrictionOrganizations} />
                       </TableCell>
                       <TableCell className="col-span-2 sm:col-span-1">
                         <div className="flex max-w-72 flex-wrap gap-1">
@@ -337,7 +361,7 @@ export function ApiKeyPanel() {
                     </Button>
                   </div>
                 </div>
-                {canSend(created.api_key.scopes) && readiness.status !== 'unavailable' ? (
+                {canSend(created.api_key.scopes) && createdReadiness.status !== 'unavailable' ? (
                   <section className="space-y-3 border-t pt-4">
                     <div className="space-y-1">
                       <h3 className="text-sm font-semibold">{t('quickStart.title')}</h3>
@@ -346,9 +370,13 @@ export function ApiKeyPanel() {
                       </p>
                     </div>
                     <SendQuickStart
-                      readiness={readiness}
+                      readiness={createdReadiness}
                       apiKey={created.plaintext_key}
                       idPrefix="created-key"
+                      restriction={{
+                        organizationId: created.api_key.organization_id,
+                        sendingDomains: created.api_key.sending_domains,
+                      }}
                     />
                   </section>
                 ) : null}
@@ -474,6 +502,85 @@ export function ApiKeyPanel() {
                     <FieldError id="api-key-scopes-error" message={errors.scopes} />
                   </fieldset>
                 ) : null}
+                {restrictionOrganizations.status === 'unavailable' ? null : (
+                  <fieldset className="min-w-0 space-y-3">
+                    <legend className="text-sm font-medium">{t('restriction.title')}</legend>
+                    <div className="space-y-2">
+                      <Label htmlFor="api-key-organization">{t('restriction.organization')}</Label>
+                      <select
+                        id="api-key-organization"
+                        className={cn(nativeSelectClassName, 'w-full min-w-0')}
+                        value={organizationId}
+                        disabled={restrictionOrganizations.status !== 'ready'}
+                        aria-describedby="api-key-organization-hint"
+                        onChange={event => {
+                          setOrganizationId(Number(event.target.value));
+                          setSendingDomains([]);
+                        }}
+                      >
+                        <option value={0}>{t('restriction.anyOrganization')}</option>
+                        {restrictionOrganizations.status === 'ready'
+                          ? restrictionOrganizations.organizations.map(organization => (
+                              <option key={organization.id} value={organization.id}>
+                                {organization.name}
+                              </option>
+                            ))
+                          : null}
+                      </select>
+                      <p id="api-key-organization-hint" className="text-sm text-muted-foreground">
+                        {restrictionOrganizations.status === 'loading'
+                          ? t('restriction.organizationsLoading')
+                          : restrictionOrganizations.status === 'error'
+                            ? t('restriction.organizationsError')
+                            : t('restriction.organizationHint')}
+                      </p>
+                    </div>
+                    {organizationId > 0 && restrictionDomains.status !== 'unavailable' ? (
+                      <fieldset className="min-w-0 space-y-2">
+                        <legend className="text-sm font-medium">{t('restriction.domains')}</legend>
+                        {restrictionDomains.status === 'loading' ? (
+                          <p className="text-sm text-muted-foreground">
+                            {t('restriction.domainsLoading')}
+                          </p>
+                        ) : restrictionDomains.status === 'error' ? (
+                          <p className="text-sm text-muted-foreground">
+                            {t('restriction.domainsError')}
+                          </p>
+                        ) : offeredDomains.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            {t('restriction.domainsEmpty')}
+                          </p>
+                        ) : (
+                          <>
+                            <p className="text-sm text-muted-foreground">
+                              {t('restriction.domainsHint')}
+                            </p>
+                            <div className="grid gap-2">
+                              {offeredDomains.map(item => (
+                                <label
+                                  key={item}
+                                  className="flex min-w-0 cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 has-[[data-state=checked]]:border-primary/50 has-[[data-state=checked]]:bg-primary/5"
+                                >
+                                  <Checkbox
+                                    checked={sendingDomains.includes(item)}
+                                    onCheckedChange={value =>
+                                      setSendingDomains(current =>
+                                        value === true
+                                          ? [...current, item]
+                                          : current.filter(candidate => candidate !== item)
+                                      )
+                                    }
+                                  />
+                                  <span className="min-w-0 break-all">{item}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </fieldset>
+                    ) : null}
+                  </fieldset>
+                )}
                 <fieldset className="space-y-2">
                   <legend className="text-sm font-medium">{t('expiresAt')}</legend>
                   <div className="flex flex-wrap gap-2">
@@ -567,6 +674,37 @@ function FieldError({ id, message }: { id: string; message?: string }) {
     <p id={id} className="text-sm text-error">
       {message}
     </p>
+  );
+}
+
+/** What a limited key may reach; an unrestricted key shows nothing. */
+function KeyRestriction({
+  apiKey,
+  organizations,
+}: {
+  apiKey: ApiKey;
+  organizations: RestrictionOrganizations;
+}) {
+  const t = useT('settings.api');
+  if (!apiKey.organization_id) return null;
+  const organizationId = apiKey.organization_id;
+  const name =
+    organizations.status === 'ready'
+      ? organizations.organizations.find(item => item.id === organizationId)?.name
+      : undefined;
+  return (
+    <div className="mt-1 max-w-72 space-y-0.5 text-xs whitespace-normal text-muted-foreground">
+      <p className="break-words">
+        {t('restriction.onlyOrganization', {
+          organization: name ?? t('restriction.unknownOrganization', { id: organizationId }),
+        })}
+      </p>
+      {apiKey.sending_domains?.length ? (
+        <p className="break-all">
+          {t('restriction.onlyDomains', { domains: apiKey.sending_domains.join(', ') })}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -22,7 +22,7 @@ reads an older API's import result as having sent no welcome mail.
 
 ### Medium — Two new tables
 
-Migration `2026_12_26_090000_add_member_welcome_mail` creates `member_welcome_settings` (one row per
+Migration `2026_12_26_100000_add_member_welcome_mail` creates `member_welcome_settings` (one row per
 organization: on or off, language, subject, body) and `member_welcome_mails` (one row per welcomed
 mailbox, unique on `mailbox_id`, with a nullable foreign key to `transactional_messages`). It only
 creates tables and takes no lock on existing ones. Because of that foreign key, roll this migration
@@ -40,6 +40,35 @@ need `MAILBOX_TRANSACTIONAL_ENABLED`, which still governs API-key sends only. Ne
 admins). A fork that calls the transactional dispatch tail directly should use
 `dispatchTransactionalSoon`, which now holds it. See "Member Welcome Mail" in
 `contracts/MAILBOXES.md`.
+
+## Unreleased — Organization and sending-domain restrictions on API keys
+
+### Medium — Optional key restrictions, two error codes, and a migration on `api_keys`
+
+`POST /v1/api-keys` accepts an optional `organization_id` and, with it, an optional
+`sending_domains` list. A bound key acts in its organization without `Organization-Id` and answers
+`403 API_KEY.ORGANIZATION_MISMATCH` for any other; a domain-restricted key sending from another
+domain answers `403 API_KEY.DOMAIN_NOT_ALLOWED` on `POST /v1/outbound-mail-messages` and
+`POST /v1/transactional-messages`. Existing keys and keys created without the fields stay
+unrestricted. See "Restrictions" in `contracts/API_KEYS.md`.
+
+- Migration `2026_12_26_090000_add_api_key_restrictions` (apikey starter) adds
+  `api_keys.organization_id` (`bigint`, no foreign key) and `api_keys.sending_domains` (`text`, a
+  JSON array), both nullable without a default, plus the check
+  `chk_api_keys_sending_domains_organization` (domains need an organization). Adding the columns
+  only changes the catalog, but the `ALTER TABLE` takes a short `ACCESS EXCLUSIVE` lock on
+  `api_keys`, and adding the check scans the table under that lock to validate it (every row is
+  `NULL`, so it is quick on a small table). While it waits for the lock it blocks API key
+  authentication; run it off-peak with a `lock_timeout` (for example `SET lock_timeout = '5s'`).
+- **Down revokes restricted keys.** It runs `UPDATE api_keys SET revoked_at = now(), updated_at =
+  now()` on every active key with an organization or domain list before dropping the columns,
+  because older code would treat them as unrestricted. Re-applying Up does not restore them.
+- `domain.SendingDomainDirectory` is bound to the mailbox service and injected into the API key
+  service through the new `apikey.ProvideService`; `apikey.NewService` still builds a service that
+  issues only unrestricted keys. Run `make wire` in a fork with its own injector.
+- Clients that mirror error codes add `API_KEY.ORGANIZATION_MISMATCH` and
+  `API_KEY.DOMAIN_NOT_ALLOWED`. On API-key routes `Organization-Id` is now described by the optional
+  `APIKeyOrganizationContext` parameter in `contracts/openapi.yaml`.
 
 ## Unreleased — Template creation with an API key
 

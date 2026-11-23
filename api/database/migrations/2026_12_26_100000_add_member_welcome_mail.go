@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	register("2026_12_26_090000_add_member_welcome_mail", &addMemberWelcomeMail{
+	register("2026_12_26_100000_add_member_welcome_mail", &addMemberWelcomeMail{
 		BaseMigration: migration.BaseMigration{UseTransaction: true},
 	})
 }

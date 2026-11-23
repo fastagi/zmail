@@ -32,12 +32,22 @@ const readNoOrigin = () => '';
  * How to send a first message with a key: what is still missing (an organization, a mailbox), or
  * ready-to-run code with the real endpoint, organization, and one of the user's own mailboxes.
  */
+/** The limits of a just-created key, which the example must respect. */
+export interface QuickStartRestriction {
+  /** The key acts only in this organization, so the example sends no `Organization-Id`. */
+  organizationId?: number;
+  /** The key sends only from these domains, so the example sends from one of them. */
+  sendingDomains?: readonly string[];
+}
+
 export function SendQuickStart({
   readiness,
   apiKey = API_KEY_PLACEHOLDER,
   idPrefix,
+  restriction,
 }: {
   readiness: SendReadiness;
+  restriction?: QuickStartRestriction;
   /** The plaintext key right after creation; a placeholder otherwise. */
   apiKey?: string;
   /** Keeps form ids unique when the page shows the quick start twice. */
@@ -89,6 +99,7 @@ export function SendQuickStart({
       organizationName={readiness.organization.name}
       senders={readiness.senders}
       recipient={readiness.recipient}
+      restriction={restriction}
     />
   );
 }
@@ -128,8 +139,9 @@ function ReadyQuickStart({
   idPrefix,
   organizationId,
   organizationName,
-  senders,
+  senders: allSenders,
   recipient,
+  restriction,
 }: {
   apiKey: string;
   idPrefix: string;
@@ -137,8 +149,17 @@ function ReadyQuickStart({
   organizationName: string;
   senders: readonly string[];
   recipient: string;
+  restriction?: QuickStartRestriction;
 }) {
   const t = useT('settings.api.quickStart');
+  const bound = restriction?.organizationId === organizationId;
+  const allowedDomains = restriction?.sendingDomains;
+  const allowedSenders = allowedDomains
+    ? allSenders.filter(sender => allowedDomains.includes(senderDomain(sender)))
+    : allSenders;
+  // With no mailbox on an allowed domain the example keeps the user's own mailboxes, with a hint.
+  const noAllowedSender = allowedSenders.length === 0;
+  const senders = noAllowedSender ? allSenders : allowedSenders;
   const [chosenSender, setChosenSender] = useState(senders[0]);
   const from = senders.includes(chosenSender) ? chosenSender : senders[0];
   const siteOrigin = useSyncExternalStore(subscribeNever, readSiteOrigin, readNoOrigin);
@@ -147,11 +168,12 @@ function ReadyQuickStart({
       buildSendSnippets({
         apiOrigin: env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN ?? siteOrigin,
         organizationId,
+        omitOrganizationHeader: bound,
         apiKey,
         from,
         to: recipient,
       }),
-    [apiKey, from, organizationId, recipient, siteOrigin]
+    [apiKey, bound, from, organizationId, recipient, siteOrigin]
   );
   const senderId = `${idPrefix}-sender`;
 
@@ -178,11 +200,20 @@ function ReadyQuickStart({
       ) : null}
       <CodeSamples snippets={snippets} />
       <ul className="space-y-1.5 text-sm text-muted-foreground">
-        <li>
-          <code className="font-mono text-foreground">Organization-Id: {organizationId}</code>{' '}
-          {t('organizationHeader', { organization: organizationName })}
-        </li>
+        {bound ? (
+          <li>{t('boundOrganization', { organization: organizationName })}</li>
+        ) : (
+          <li>
+            <code className="font-mono text-foreground">Organization-Id: {organizationId}</code>{' '}
+            {t('organizationHeader', { organization: organizationName })}
+          </li>
+        )}
         <li>{t('fromHint', { from })}</li>
+        {allowedDomains && noAllowedSender ? (
+          <li className="break-words">
+            {t('noAllowedSender', { domains: allowedDomains.join(', ') })}
+          </li>
+        ) : null}
         <li>
           {t('recipientHint')}{' '}
           <Link
@@ -195,6 +226,10 @@ function ReadyQuickStart({
       </ul>
     </div>
   );
+}
+
+function senderDomain(address: string): string {
+  return address.slice(address.lastIndexOf('@') + 1).toLowerCase();
 }
 
 function CodeSamples({ snippets }: { snippets: SendSnippets }) {
