@@ -1,8 +1,5 @@
-/** Shown until the page knows its own origin and no `NEXT_PUBLIC_DEVELOPER_API_ORIGIN` is set. */
-const API_ORIGIN_FALLBACK = 'https://api.example.com';
-
 export interface SendSnippetInput {
-  /** The public API origin; empty falls back to a placeholder. */
+  /** The public API origin the samples call; the caller resolves it, there is no placeholder. */
   apiOrigin: string;
   organizationId: number;
   /** A key bound to its organization acts there without the `Organization-Id` header. */
@@ -53,7 +50,7 @@ export function buildSendSnippets({
   to,
 }: SendSnippetInput): SendSnippets {
   const origin = apiOrigin.trim().replace(/\/+$/u, '');
-  const url = `${origin === '' ? API_ORIGIN_FALLBACK : origin}/v1/outbound-mail-messages`;
+  const url = `${origin}/v1/outbound-mail-messages`;
   const json = JSON.stringify(
     { from, to: [to], subject: SEND_SNIPPET_SUBJECT, text: SEND_SNIPPET_TEXT },
     null,

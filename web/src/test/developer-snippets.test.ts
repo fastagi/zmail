@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEVELOPER_API_ORIGIN_FALLBACK, buildSnippets } from '@/features/developer/utils/snippets';
+import { buildSnippets } from '@/features/developer/utils/snippets';
 
 const input = {
   apiOrigin: 'https://api.acme.example/',
@@ -39,10 +39,10 @@ describe('developer snippets', () => {
     expect(snippets.curl).toContain(`Acme'\\''s app`);
   });
 
-  it('falls back to the example origin when none is configured', () => {
-    const snippets = buildSnippets({ ...input, apiOrigin: undefined });
-    expect(DEVELOPER_API_ORIGIN_FALLBACK).toBe('https://api.example.com');
-    expect(snippets.curl).toContain('https://api.example.com/v1/transactional-messages');
-    expect(snippets.python).toContain('https://api.example.com/v1/transactional-messages');
+  it('calls the given origin without a trailing slash and never a placeholder host (#144)', () => {
+    const snippets = buildSnippets({ ...input, apiOrigin: 'https://zmail.im/' });
+    expect(snippets.curl).toContain("'https://zmail.im/v1/transactional-messages'");
+    expect(snippets.python).toContain('https://zmail.im/v1/transactional-messages');
+    for (const sample of Object.values(snippets)) expect(sample).not.toContain('api.example.com');
   });
 });

@@ -50,12 +50,11 @@ describe('send-with-a-key snippets', () => {
     });
   });
 
-  it('uses the site origin shape without a trailing slash and a placeholder origin when empty', () => {
-    expect(buildSendSnippets({ ...input, apiOrigin: 'http://localhost:3181' }).curl).toContain(
+  it('uses the given origin without a trailing slash and never a placeholder host (#144)', () => {
+    expect(buildSendSnippets({ ...input, apiOrigin: 'http://localhost:3181/' }).curl).toContain(
       'http://localhost:3181/v1/outbound-mail-messages'
     );
-    expect(buildSendSnippets({ ...input, apiOrigin: '' }).curl).toContain(
-      'https://api.example.com/v1/outbound-mail-messages'
-    );
+    const snippets = buildSendSnippets({ ...input, apiOrigin: 'https://zmail.im' });
+    for (const sample of Object.values(snippets)) expect(sample).not.toContain('api.example.com');
   });
 });

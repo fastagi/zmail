@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Building2, Copy, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,11 +9,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { env } from '@/config/env';
 import type { SendReadiness } from '@/features/api-key/hooks/use-send-readiness';
 import { buildSendSnippets, type SendSnippets } from '@/features/api-key/utils/send-snippets';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
+import {
+  showsDeveloperApiOriginHint,
+  useDeveloperApiOrigin,
+} from '@/hooks/use-developer-api-origin';
 import { useT } from '@/i18n';
 
 /** Stands in for the key once its plaintext is no longer shown. */
@@ -22,11 +25,6 @@ export const API_KEY_PLACEHOLDER = 'YOUR_API_KEY';
 const LANGUAGES = ['curl', 'node', 'python'] as const;
 type Language = (typeof LANGUAGES)[number];
 const LANGUAGE_LABELS: Record<Language, string> = { curl: 'curl', node: 'Node.js', python: 'Python' };
-
-// Without a configured API origin the samples use this site's own origin, read after hydration.
-const subscribeNever = () => () => {};
-const readSiteOrigin = () => window.location.origin;
-const readNoOrigin = () => '';
 
 /**
  * How to send a first message with a key: what is still missing (an organization, a mailbox), or
@@ -162,18 +160,21 @@ function ReadyQuickStart({
   const senders = noAllowedSender ? allSenders : allowedSenders;
   const [chosenSender, setChosenSender] = useState(senders[0]);
   const from = senders.includes(chosenSender) ? chosenSender : senders[0];
-  const siteOrigin = useSyncExternalStore(subscribeNever, readSiteOrigin, readNoOrigin);
+  const apiOrigin = useDeveloperApiOrigin();
+  const origin = apiOrigin.status === 'ready' ? apiOrigin.origin : null;
   const snippets = useMemo(
     () =>
-      buildSendSnippets({
-        apiOrigin: env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN ?? siteOrigin,
-        organizationId,
-        omitOrganizationHeader: bound,
-        apiKey,
-        from,
-        to: recipient,
-      }),
-    [apiKey, bound, from, organizationId, recipient, siteOrigin]
+      origin === null
+        ? null
+        : buildSendSnippets({
+            apiOrigin: origin,
+            organizationId,
+            omitOrganizationHeader: bound,
+            apiKey,
+            from,
+            to: recipient,
+          }),
+    [apiKey, bound, from, organizationId, origin, recipient]
   );
   const senderId = `${idPrefix}-sender`;
 
@@ -198,7 +199,12 @@ function ReadyQuickStart({
           </select>
         </div>
       ) : null}
-      <CodeSamples snippets={snippets} />
+      <CodeSamples snippets={snippets} unavailable={apiOrigin.status === 'unavailable'} />
+      {showsDeveloperApiOriginHint() ? (
+        <p className="text-xs text-muted-foreground">
+          {t('originDevHint', { name: 'NEXT_PUBLIC_DEVELOPER_API_ORIGIN' })}
+        </p>
+      ) : null}
       <ul className="space-y-1.5 text-sm text-muted-foreground">
         {bound ? (
           <li>{t('boundOrganization', { organization: organizationName })}</li>
@@ -232,10 +238,21 @@ function senderDomain(address: string): string {
   return address.slice(address.lastIndexOf('@') + 1).toLowerCase();
 }
 
-function CodeSamples({ snippets }: { snippets: SendSnippets }) {
+/**
+ * The samples with a copy button. Without snippets (before hydration, or when no API address can
+ * be determined) nothing can be copied.
+ */
+function CodeSamples({
+  snippets,
+  unavailable,
+}: {
+  snippets: SendSnippets | null;
+  unavailable: boolean;
+}) {
   const t = useT('settings.api.quickStart');
   const [language, setLanguage] = useState<Language>('curl');
   const copy = async () => {
+    if (!snippets) return;
     try {
       await navigator.clipboard.writeText(snippets[language]);
       toast.success(t('copied'));
@@ -269,6 +286,7 @@ function CodeSamples({ snippets }: { snippets: SendSnippets }) {
           size="sm"
           variant="outline"
           icon={<Copy className="size-4" />}
+          disabled={!snippets}
           onClick={copy}
         >
           {t('copy')}
@@ -277,9 +295,16 @@ function CodeSamples({ snippets }: { snippets: SendSnippets }) {
       <pre
         aria-label={t('samples')}
         tabIndex={0}
+        aria-busy={!snippets && !unavailable}
         className="max-h-80 max-w-full overflow-auto rounded-md border bg-muted p-4 font-mono text-xs leading-relaxed whitespace-pre text-foreground focus-ring"
       >
-        <code>{snippets[language]}</code>
+        {snippets ? (
+          <code>{snippets[language]}</code>
+        ) : unavailable ? (
+          <span className="font-sans whitespace-normal text-muted-foreground">
+            {t('samplesUnavailable')}
+          </span>
+        ) : null}
       </pre>
     </section>
   );
