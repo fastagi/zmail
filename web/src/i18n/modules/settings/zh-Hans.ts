@@ -149,6 +149,10 @@ const messages = {
         label: 'AI 代理',
         description: '在授权了此密钥的邮箱中读取新邮件、起草回复。',
       },
+      templatesCreate: {
+        label: '创建邮件模板',
+        description: '让 AI 工具保存组织邮件模板供成员审阅；不能发送、修改或删除。',
+      },
     },
     expiresAt: '有效期',
     expiry: {

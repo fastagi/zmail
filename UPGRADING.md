@@ -11,6 +11,17 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Template creation with an API key
+
+### Medium — New `templates:create` scope and `POST /v1/agent-mail-templates`
+
+API keys accept a new scope, `templates:create` (`apikey.ScopeTemplatesCreate`), and a key holding
+it may create organization templates with `POST /v1/agent-mail-templates`, so an AI tool can save a
+draft template without a session. The route reuses the template create path and its rules, needs the
+key owner's membership plus the `api_keys` and `templates` grants, and never sends mail; see "Create
+a template from an AI tool" in `contracts/MAILBOXES.md`. A fork that mirrors the scope list
+(`knownScopes`, the `CreateAPIKeyRequest` enum, or the Web create dialog) adds the new value.
+
 ## Unreleased — Mail client access, part 2 (SMTP submission)
 
 ### Medium — Blind copies, the sending member, and inline attachments are stored

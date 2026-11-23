@@ -16,6 +16,7 @@ func TestKnownScopesCoverMailRoutes(t *testing.T) {
 		mailbox.ScopeMailRead,
 		mailbox.ScopeMailTransactional,
 		mailbox.ScopeMailAgent,
+		apikey.ScopeTemplatesCreate,
 	} {
 		assert.Contains(t, apikey.KnownScopes(), scope)
 	}

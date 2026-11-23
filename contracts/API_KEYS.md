@@ -34,8 +34,8 @@ Request:
 
 - `name` is trimmed and contains 1 to 100 Unicode code points.
 - `scopes` contains 1 to 32 input values. Each value is normalized to lowercase and duplicates are
-  removed. The result must be non-empty and every value must be one of Zmail's mail scopes
-  (`mail:send`, `mail:read`, `mail:transactional`, `mail:agent`, see
+  removed. The result must be non-empty and every value must be one of Zmail's scopes
+  (`mail:send`, `mail:read`, `mail:transactional`, `mail:agent`, `templates:create`, see
   [Authentication And Scopes](#authentication-and-scopes)) or the explicit `*` wildcard. An empty
   list, or any other value, is `422 COMMON.INVALID_INPUT` (a list over 32 values or a value over 65
   characters is `422 COMMON.VALIDATION_FAILED`), so a key that could reach nothing is never issued.
@@ -117,6 +117,9 @@ Zmail's mail routes use these scopes (see [`MAILBOXES.md`](MAILBOXES.md#programm
 agent mail feed, agent message reads, and agent drafts, and nothing else; by itself it reaches no
 mailbox: each mailbox needs a live agent grant issued to the key
 ([`MAILBOXES.md`](MAILBOXES.md#agent-grants)), and the key still never exceeds its owner's access.
+`templates:create` lets a key create organization templates with `POST /v1/agent-mail-templates`
+and nothing else: it neither sends nor reads, edits, or deletes templates
+([`MAILBOXES.md`](MAILBOXES.md#create-a-template-from-an-ai-tool)).
 
 `last_used_at` is operational metadata, not an authorization decision. Its write is best-effort,
 atomic, and throttled to at most once per minute per active key.

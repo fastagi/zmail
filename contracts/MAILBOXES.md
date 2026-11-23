@@ -2364,6 +2364,34 @@ update, or send) is `422 MAILBOX.TEMPLATE_KIND_MISMATCH`. A broadcast copies its
 starts, so a running broadcast is not affected. If the sender domain later loses verification, the template is
 kept and sends from it are refused.
 
+#### Create a template from an AI tool
+
+`POST /v1/agent-mail-templates` creates a template with an API key instead of a session, so an AI
+tool or agent can save a draft template for people to review. Configure the tool runner with a
+user-owned key scoped to `templates:create` and the organization ID; keep the key in the runner's
+secret store, and let the model supply only the JSON body. The body, the validation rules, and the
+response are those of `POST /v1/mail-templates`, and the key acts with its owner's current
+membership (see [Programmatic Sending](#programmatic-sending)):
+
+- a key without `templates:create` (or `*`) is `403 PERMISSION.DENIED`;
+- an owner who is not a member of the `Organization-Id` organization is `404 ORGANIZATION.NOT_FOUND`;
+- a member owner needs both the `api_keys` and the `templates` grant, like the session route:
+  either one missing is `403 ORGANIZATION.FEATURE_NOT_GRANTED`; owners and admins always have both;
+- a transactional template still needs an owner or admin (`403 PERMISSION.DENIED`).
+
+```sh
+curl --fail-with-body -X POST https://zmail.im/v1/agent-mail-templates \
+  -H "X-API-Key: $ZMAIL_API_KEY" \
+  -H "Organization-Id: $ZMAIL_ORG_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Welcome follow-up","subject":"Welcome, {{name}}","text":"Hello {{name}}, how can we help?","sample_variables":{"name":"Alex"}}'
+```
+
+A successful request is `201` with the saved template in `data`; members review it on the
+organization's Templates page. Creation sends no email. A duplicate name is
+`409 MAILBOX.TEMPLATE_NAME_TAKEN`. The scope grants no sending, reading, editing, or deletion, and
+test keys are refused.
+
 ### Contacts
 
 A contact is one address an organization sends broadcasts to: `email`, `first_name`, `last_name`,
@@ -3110,6 +3138,7 @@ Keys owned by an organization are not defined.
 | `GET /v1/agent-mail-events` | `mail:agent` (see [Agent Grants](#agent-grants)) |
 | `GET /v1/agent-mail-messages/:message_id` | `mail:agent` |
 | `POST /v1/agent-mail-drafts` | `mail:agent` |
+| `POST /v1/agent-mail-templates` | `templates:create`, and the `templates` grant (see [Create a template from an AI tool](#create-a-template-from-an-ai-tool)) |
 
 `mail:transactional` neither includes nor is included by `mail:send`; `*` grants both. Only the two
 transactional routes accept test keys (see [`API_KEYS.md`](API_KEYS.md)); every other route here
