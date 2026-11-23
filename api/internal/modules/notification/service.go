@@ -309,12 +309,12 @@ func (s *service) DispatchDue(ctx context.Context, limit int) (int, error) {
 	}
 	completed := 0
 	for index := range pushes {
-		if err := ctx.Err(); err != nil {
-			return completed, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return completed, ctxErr
 		}
-		ok, err := s.dispatchWebPush(ctx, pushes[index])
-		if err != nil {
-			return completed, err
+		ok, dispatchErr := s.dispatchWebPush(ctx, pushes[index])
+		if dispatchErr != nil {
+			return completed, dispatchErr
 		}
 		if ok {
 			completed++

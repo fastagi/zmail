@@ -232,8 +232,8 @@ func TestRegisterWebPushSubscriptionValidatesAndUpserts(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			value := testSubscriptionInput(t, pushEndpoint("invalid"))
 			test.mutate(&value)
-			_, err := service.RegisterWebPushSubscription(ctx, aliceID, value)
-			assert.ErrorIs(t, err, test.target)
+			_, registerErr := service.RegisterWebPushSubscription(ctx, aliceID, value)
+			assert.ErrorIs(t, registerErr, test.target)
 		})
 	}
 

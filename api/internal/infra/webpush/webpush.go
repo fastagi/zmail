@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -180,9 +179,9 @@ func NewVAPID(publicKey, privateKey, subject string) (*VAPID, error) {
 	if err != nil || !bytes.Equal(pub, ecdhKey.PublicKey().Bytes()) {
 		return nil, errors.New("webpush: VAPID public key does not match the private key")
 	}
-	key := &ecdsa.PrivateKey{
-		PublicKey: ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(pub[1:33]), Y: new(big.Int).SetBytes(pub[33:])},
-		D:         new(big.Int).SetBytes(priv),
+	key, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), priv)
+	if err != nil {
+		return nil, errors.New("webpush: invalid VAPID private key")
 	}
 	return &VAPID{publicKey: base64.RawURLEncoding.EncodeToString(pub), subject: subject, key: key}, nil
 }
@@ -292,17 +291,26 @@ func (c *Client) Send(ctx context.Context, msg Message) (Result, error) {
 	if err != nil {
 		return Retry, fmt.Errorf("webpush: push service unreachable: %w", err)
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	// Drain a little so the connection can be reused; a failed drain only costs that reuse, so
+	// the status alone decides the result either way.
+	if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); drainErr != nil {
+		_ = resp.Body.Close()
+		return classifyStatus(resp.StatusCode)
+	}
 	_ = resp.Body.Close()
+	return classifyStatus(resp.StatusCode)
+}
+
+func classifyStatus(status int) (Result, error) {
 	switch {
-	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+	case status >= 200 && status < 300:
 		return Delivered, nil
-	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+	case status == http.StatusNotFound || status == http.StatusGone:
 		return Gone, nil
-	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-		return Retry, fmt.Errorf("webpush: push service status %d", resp.StatusCode)
+	case status == http.StatusTooManyRequests || status >= 500:
+		return Retry, fmt.Errorf("webpush: push service status %d", status)
 	default:
-		return Rejected, fmt.Errorf("webpush: push service status %d", resp.StatusCode)
+		return Rejected, fmt.Errorf("webpush: push service status %d", status)
 	}
 }
 

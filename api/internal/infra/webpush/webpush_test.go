@@ -78,15 +78,15 @@ func decrypt(t *testing.T, body []byte, uaPrivate *ecdh.PrivateKey, auth []byte)
 	info := append([]byte("WebPush: info\x00"), uaPrivate.PublicKey().Bytes()...)
 	info = append(info, asPublicBytes...)
 	ikm := make([]byte, 32)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, shared, auth, info), ikm); err != nil {
+	if _, err = io.ReadFull(hkdf.New(sha256.New, shared, auth, info), ikm); err != nil {
 		t.Fatal(err)
 	}
 	cek := make([]byte, 16)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, ikm, salt, []byte("Content-Encoding: aes128gcm\x00")), cek); err != nil {
+	if _, err = io.ReadFull(hkdf.New(sha256.New, ikm, salt, []byte("Content-Encoding: aes128gcm\x00")), cek); err != nil {
 		t.Fatal(err)
 	}
 	nonce := make([]byte, 12)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, ikm, salt, []byte("Content-Encoding: nonce\x00")), nonce); err != nil {
+	if _, err = io.ReadFull(hkdf.New(sha256.New, ikm, salt, []byte("Content-Encoding: nonce\x00")), nonce); err != nil {
 		t.Fatal(err)
 	}
 	block, _ := aes.NewCipher(cek)
@@ -166,14 +166,17 @@ func TestVAPIDHeaderIsAVerifiableES256Token(t *testing.T) {
 		Exp int64  `json:"exp"`
 		Sub string `json:"sub"`
 	}
-	if err := json.Unmarshal(b64(t, parts[1]), &claims); err != nil {
+	if err = json.Unmarshal(b64(t, parts[1]), &claims); err != nil {
 		t.Fatal(err)
 	}
 	if claims.Aud != "https://fcm.googleapis.com" || claims.Sub != "mailto:ops@zmail.im" || claims.Exp != now.Add(12*time.Hour).Unix() {
 		t.Fatalf("claims = %+v", claims)
 	}
 	pub := b64(t, keys.PublicKey)
-	verifyKey := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(pub[1:33]), Y: new(big.Int).SetBytes(pub[33:])}
+	verifyKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), pub)
+	if err != nil {
+		t.Fatal(err)
+	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	sig := b64(t, parts[2])
 	if len(sig) != 64 || !ecdsa.Verify(verifyKey, digest[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])) {

@@ -160,7 +160,7 @@ func normalizeWebPushSubscription(input WebPushSubscriptionInput) (webPushRegist
 	if err != nil || len(p256dh) != 65 {
 		return webPushRegistration{}, ErrWebPushKeysInvalid
 	}
-	if _, err := ecdh.P256().NewPublicKey(p256dh); err != nil {
+	if _, keyErr := ecdh.P256().NewPublicKey(p256dh); keyErr != nil {
 		return webPushRegistration{}, ErrWebPushKeysInvalid
 	}
 	auth, err := decodeWebPushKey(input.Auth)
@@ -229,7 +229,7 @@ func (s *service) dispatchWebPush(ctx context.Context, delivery claimedEmailDeli
 			transient++
 			continue
 		}
-		result, _ := s.push.Send(sendCtx, webpush.Message{
+		result, sendErr := s.push.Send(sendCtx, webpush.Message{
 			Endpoint: target.Endpoint,
 			Keys:     webpush.Keys{P256dh: target.P256dh, Auth: target.Auth},
 			Payload:  payload,
@@ -239,6 +239,11 @@ func (s *service) dispatchWebPush(ctx context.Context, delivery claimedEmailDeli
 		})
 		if ctx.Err() != nil {
 			return false, ctx.Err()
+		}
+		// The error text may carry the endpoint, so it is never logged; an error beside a
+		// success result is treated as transient.
+		if sendErr != nil && (result == webpush.Delivered || result == webpush.Gone) {
+			result = webpush.Retry
 		}
 		switch result {
 		case webpush.Delivered:
