@@ -651,6 +651,15 @@ TABLE mailboxes
   COLUMN external_mail_tenant_id bigint
   COLUMN pending_owner_email character varying(320)
 
+TABLE member_developer_grants
+  COLUMN membership_id bigint NOT NULL
+  COLUMN organization_id bigint NOT NULL
+  COLUMN all_domains boolean NOT NULL DEFAULT false
+  COLUMN sending_domains text NOT NULL DEFAULT '[]'::text
+  COLUMN granted_by bigint
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE member_welcome_mails
   COLUMN id bigint NOT NULL DEFAULT nextval('member_welcome_mails_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -1307,6 +1316,11 @@ CONSTRAINT mailboxes.mailboxes_external_mail_tenant_id_fkey FOREIGN KEY (externa
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
+CONSTRAINT member_developer_grants.chk_member_developer_grants_scope CHECK ((all_domains OR (sending_domains <> '[]'::text)))
+CONSTRAINT member_developer_grants.fk_member_developer_grants_granted_by FOREIGN KEY (granted_by) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT member_developer_grants.fk_member_developer_grants_membership FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
+CONSTRAINT member_developer_grants.fk_member_developer_grants_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT member_developer_grants.member_developer_grants_pkey PRIMARY KEY (membership_id)
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_message FOREIGN KEY (transactional_message_id) REFERENCES transactional_messages(id) ON DELETE SET NULL
 CONSTRAINT member_welcome_mails.fk_member_welcome_mails_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -1650,6 +1664,8 @@ INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id
 INDEX CREATE INDEX idx_mailboxes_pending_owner ON mailboxes USING btree (organization_id, pending_owner_email) WHERE ((pending_owner_email IS NOT NULL) AND (deleted_at IS NULL))
 INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)
+INDEX CREATE INDEX idx_member_developer_grants_organization ON member_developer_grants USING btree (organization_id)
+INDEX CREATE UNIQUE INDEX member_developer_grants_pkey ON member_developer_grants USING btree (membership_id)
 INDEX CREATE UNIQUE INDEX idx_member_welcome_mails_mailbox ON member_welcome_mails USING btree (mailbox_id)
 INDEX CREATE INDEX idx_member_welcome_mails_message ON member_welcome_mails USING btree (transactional_message_id) WHERE (transactional_message_id IS NOT NULL)
 INDEX CREATE INDEX idx_member_welcome_mails_organization ON member_welcome_mails USING btree (organization_id)
