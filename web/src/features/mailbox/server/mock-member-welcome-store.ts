@@ -8,7 +8,10 @@ import type {
   UpdateMemberWelcomeSettingInput,
 } from '@/features/mailbox/member-welcome-schemas';
 
-/** The standard text of each language, as `contracts/MAILBOXES.md` (Member Welcome Mail) has it. */
+/**
+ * The standard text of each language, as the API has it. Chinese copy is written as Unicode escapes
+ * because source files stay English-only.
+ */
 const DEFAULTS: MemberWelcomeSetting['defaults'] = {
   'en-US': {
     subject: 'Welcome to {{organization_name}} on Zmail',
@@ -19,12 +22,12 @@ const DEFAULTS: MemberWelcomeSetting['defaults'] = {
       'If you also received an invitation, accept it first. Your mailbox is ready as soon as you join.',
   },
   'zh-Hans': {
-    subject: '欢迎加入 {{organization_name}}',
+    subject: '\u6b22\u8fce\u52a0\u5165 {{organization_name}}',
     body:
-      '{{member_name}}，你好：\n\n' +
-      '{{organization_name}} 已为你开通 Zmail 邮箱：{{mailbox_address}}\n\n' +
-      '请用收到这封邮件的邮箱地址登录：{{sign_in_url}}\n' +
-      '如果你还收到了加入邀请，请先接受邀请，加入后即可使用邮箱。',
+      '{{member_name}}\uff0c\u4f60\u597d\uff1a\n\n' +
+      '{{organization_name}} \u5df2\u4e3a\u4f60\u5f00\u901a Zmail \u90ae\u7bb1\uff1a{{mailbox_address}}\n\n' +
+      '\u8bf7\u7528\u6536\u5230\u8fd9\u5c01\u90ae\u4ef6\u7684\u90ae\u7bb1\u5730\u5740\u767b\u5f55\uff1a{{sign_in_url}}\n' +
+      '\u5982\u679c\u4f60\u8fd8\u6536\u5230\u4e86\u52a0\u5165\u9080\u8bf7\uff0c\u8bf7\u5148\u63a5\u53d7\u9080\u8bf7\uff0c\u52a0\u5165\u540e\u5373\u53ef\u4f7f\u7528\u90ae\u7bb1\u3002',
   },
 };
 const VARIABLES = ['member_name', 'mailbox_address', 'organization_name', 'sign_in_url'] as const;
@@ -91,7 +94,7 @@ class MockMemberWelcomeStore {
     const fields = validate(subject, body);
     if (fields) return { ok: false, fields };
     const values: Record<string, string> = {
-      member_name: input.language === 'zh-Hans' ? '陈晓明' : 'Alex Chen',
+      member_name: input.language === 'zh-Hans' ? '\u9648\u6653\u660e' : 'Alex Chen',
       mailbox_address: input.language === 'zh-Hans' ? 'xiaoming@example.com' : 'alex@example.com',
       organization_name: organizationName,
       sign_in_url: SIGN_IN_URL,
@@ -153,7 +156,7 @@ function validate(subject: string, body: string): Record<string, string[]> | nul
 function setupSection(language: MemberWelcomeLanguage, address: string): string {
   return language === 'en-US'
     ? `Set up a mail app\n\nUser name: ${address}\nIncoming mail (IMAP): 127.0.0.1, port 1993, SSL/TLS\nOutgoing mail (SMTP): 127.0.0.1, port 1465 (SSL/TLS) or 1587 (STARTTLS)`
-    : `设置邮件客户端\n\n用户名：${address}\n收信服务器（IMAP）：127.0.0.1，端口 1993，SSL/TLS\n发信服务器（SMTP）：127.0.0.1，端口 1465（SSL/TLS）或 1587（STARTTLS）`;
+    : `\u8bbe\u7f6e\u90ae\u4ef6\u5ba2\u6237\u7aef\n\n\u7528\u6237\u540d\uff1a${address}\n\u6536\u4fe1\u670d\u52a1\u5668\uff08IMAP\uff09\uff1a127.0.0.1\uff0c\u7aef\u53e3 1993\uff0cSSL/TLS\n\u53d1\u4fe1\u670d\u52a1\u5668\uff08SMTP\uff09\uff1a127.0.0.1\uff0c\u7aef\u53e3 1465\uff08SSL/TLS\uff09\u6216 1587\uff08STARTTLS\uff09`;
 }
 
 function escapeHtml(text: string): string {

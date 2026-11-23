@@ -57,7 +57,8 @@ type MemberWelcomeTemplate struct {
 	Body    string
 }
 
-// memberWelcomeDefaults is the standard text of each language.
+// memberWelcomeDefaults is the standard text of each language. The Simplified Chinese copy is
+// written as Unicode escapes because source files stay English-only.
 var memberWelcomeDefaults = map[MemberWelcomeLanguage]MemberWelcomeTemplate{
 	MemberWelcomeEnglish: {
 		Subject: "Welcome to {{organization_name}} on Zmail",
@@ -67,11 +68,11 @@ var memberWelcomeDefaults = map[MemberWelcomeLanguage]MemberWelcomeTemplate{
 			"If you also received an invitation, accept it first. Your mailbox is ready as soon as you join.",
 	},
 	MemberWelcomeChinese: {
-		Subject: "欢迎加入 {{organization_name}}",
-		Body: "{{member_name}}，你好：\n\n" +
-			"{{organization_name}} 已为你开通 Zmail 邮箱：{{mailbox_address}}\n\n" +
-			"请用收到这封邮件的邮箱地址登录：{{sign_in_url}}\n" +
-			"如果你还收到了加入邀请，请先接受邀请，加入后即可使用邮箱。",
+		Subject: "\u6b22\u8fce\u52a0\u5165 {{organization_name}}",
+		Body: "{{member_name}}\uff0c\u4f60\u597d\uff1a\n\n" +
+			"{{organization_name}} \u5df2\u4e3a\u4f60\u5f00\u901a Zmail \u90ae\u7bb1\uff1a{{mailbox_address}}\n\n" +
+			"\u8bf7\u7528\u6536\u5230\u8fd9\u5c01\u90ae\u4ef6\u7684\u90ae\u7bb1\u5730\u5740\u767b\u5f55\uff1a{{sign_in_url}}\n" +
+			"\u5982\u679c\u4f60\u8fd8\u6536\u5230\u4e86\u52a0\u5165\u9080\u8bf7\uff0c\u8bf7\u5148\u63a5\u53d7\u9080\u8bf7\uff0c\u52a0\u5165\u540e\u5373\u53ef\u4f7f\u7528\u90ae\u7bb1\u3002",
 	},
 }
 
@@ -254,14 +255,14 @@ func memberWelcomeSetupText(language MemberWelcomeLanguage, address string, setu
 			"   Incoming mail (IMAP): " + setup.IMAPHost + ", port " + imapPort + ", SSL/TLS\n" +
 			"   Outgoing mail (SMTP): " + setup.SMTPHost + ", port " + smtpPort + " (SSL/TLS) or " + submissionPort + " (STARTTLS)"
 	}
-	return "设置邮件客户端\n\n" +
-		"你也可以在 Apple 邮件、Outlook、Thunderbird 或手机自带的邮件 App 中收发这个邮箱的邮件。\n\n" +
-		"1. 登录 Zmail，打开“设置 > 邮件客户端”：" + setup.SettingsURL + "\n" +
-		"2. 为这台设备创建一个客户端专用密码。它只用于邮件 App，不是你的 Zmail 登录密码。\n" +
-		"3. 在邮件 App 中添加账户，填写：\n" +
-		"   用户名：" + address + "\n" +
-		"   收信服务器（IMAP）：" + setup.IMAPHost + "，端口 " + imapPort + "，SSL/TLS\n" +
-		"   发信服务器（SMTP）：" + setup.SMTPHost + "，端口 " + smtpPort + "（SSL/TLS）或 " + submissionPort + "（STARTTLS）"
+	return "\u8bbe\u7f6e\u90ae\u4ef6\u5ba2\u6237\u7aef\n\n" +
+		"\u4f60\u4e5f\u53ef\u4ee5\u5728 Apple \u90ae\u4ef6\u3001Outlook\u3001Thunderbird \u6216\u624b\u673a\u81ea\u5e26\u7684\u90ae\u4ef6 App \u4e2d\u6536\u53d1\u8fd9\u4e2a\u90ae\u7bb1\u7684\u90ae\u4ef6\u3002\n\n" +
+		"1. \u767b\u5f55 Zmail\uff0c\u6253\u5f00\u201c\u8bbe\u7f6e > \u90ae\u4ef6\u5ba2\u6237\u7aef\u201d\uff1a" + setup.SettingsURL + "\n" +
+		"2. \u4e3a\u8fd9\u53f0\u8bbe\u5907\u521b\u5efa\u4e00\u4e2a\u5ba2\u6237\u7aef\u4e13\u7528\u5bc6\u7801\u3002\u5b83\u53ea\u7528\u4e8e\u90ae\u4ef6 App\uff0c\u4e0d\u662f\u4f60\u7684 Zmail \u767b\u5f55\u5bc6\u7801\u3002\n" +
+		"3. \u5728\u90ae\u4ef6 App \u4e2d\u6dfb\u52a0\u8d26\u6237\uff0c\u586b\u5199\uff1a\n" +
+		"   \u7528\u6237\u540d\uff1a" + address + "\n" +
+		"   \u6536\u4fe1\u670d\u52a1\u5668\uff08IMAP\uff09\uff1a" + setup.IMAPHost + "\uff0c\u7aef\u53e3 " + imapPort + "\uff0cSSL/TLS\n" +
+		"   \u53d1\u4fe1\u670d\u52a1\u5668\uff08SMTP\uff09\uff1a" + setup.SMTPHost + "\uff0c\u7aef\u53e3 " + smtpPort + "\uff08SSL/TLS\uff09\u6216 " + submissionPort + "\uff08STARTTLS\uff09"
 }
 
 // plainTextHTML escapes text into paragraphs and line breaks and links each of links where it

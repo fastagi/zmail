@@ -497,14 +497,14 @@ Only owners and admins read and change the setting (`403 PERMISSION.DENIED` othe
 ```json
 {
   "enabled": true,
-  "language": "zh-Hans",
-  "subject": "欢迎加入 {{organization_name}}",
-  "body": "{{member_name}}，你好：\n\n…",
+  "language": "en-US",
+  "subject": "Welcome to {{organization_name}} on Zmail",
+  "body": "Hi {{member_name}},\n\n…",
   "customized": false,
   "variables": ["member_name", "mailbox_address", "organization_name", "sign_in_url"],
   "defaults": {
     "en-US": { "subject": "Welcome to {{organization_name}} on Zmail", "body": "Hi {{member_name}},\n\n…" },
-    "zh-Hans": { "subject": "欢迎加入 {{organization_name}}", "body": "{{member_name}}，你好：\n\n…" }
+    "zh-Hans": { "subject": "…", "body": "…" }
   },
   "updated_at": null
 }

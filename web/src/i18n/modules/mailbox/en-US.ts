@@ -1776,7 +1776,7 @@ const messages = {
         'When someone gets a mailbox through a roster import or from an admin, Zmail sends them one email on how to sign in and set up a mail app. It goes to the address they were invited with, which they can already read.',
       enabled: 'Send a welcome email to new members',
       language: 'Language',
-      languages: { 'zh-Hans': '简体中文', 'en-US': 'English' },
+      languages: { 'zh-Hans': 'Simplified Chinese', 'en-US': 'English' },
       subject: 'Subject',
       body: 'Message',
       bodyHint:

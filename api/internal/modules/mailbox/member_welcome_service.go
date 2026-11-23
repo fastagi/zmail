@@ -115,7 +115,7 @@ func (s *service) PreviewMemberWelcome(ctx context.Context, viewer domain.Organi
 		OrganizationName: viewer.OrganizationName, SignInURL: s.memberSignInURL(),
 	}
 	if input.Language == MemberWelcomeChinese {
-		values.MemberName, values.MailboxAddress = "陈晓明", "xiaoming@example.com"
+		values.MemberName, values.MailboxAddress = "\u9648\u6653\u660e", "xiaoming@example.com"
 	}
 	rendered, err := renderMemberWelcome(setting.Effective(), input.Language, values, s.memberWelcomeClientSetup())
 	if err != nil {
