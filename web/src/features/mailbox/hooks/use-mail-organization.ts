@@ -5,7 +5,11 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
-import type { MemberFeatures, Organization } from '@/features/organization/types';
+import type {
+  DeveloperScope,
+  MemberFeatures,
+  Organization,
+} from '@/features/organization/types';
 import { effectiveMemberFeatures } from '@/features/organization/utils/member-features';
 import { useT } from '@/i18n';
 
@@ -28,6 +32,11 @@ export interface MailOrganization {
   canManage: boolean;
   /** The features this member may use here; owners and admins have every one. */
   features: MemberFeatures;
+  /**
+   * The sending domains this member's developer access covers; null for owners and admins, who
+   * are unrestricted, and for members without developer access.
+   */
+  developerScope?: DeveloperScope | null;
 }
 
 export type MailOrganizationScope =
@@ -160,6 +169,7 @@ export function useMailOrganization(): MailOrganizationScope {
       name: selected.name,
       canManage: selected.role === 'owner' || selected.role === 'admin',
       features: effectiveMemberFeatures(selected.role, selected.features),
+      developerScope: selected.developer_scope ?? null,
     },
     organizations: items,
     select: organizationId => {

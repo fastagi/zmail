@@ -9,8 +9,10 @@ import {
 
 import { PLUGIN_WEB_FEATURES, errorNamespace } from './plugin-web-features';
 
+// DEVELOPER belongs to the organization's developer access grant, which spans API keys,
+// transactional mail, and webhooks rather than one feature.
 const coreNamespaces =
-  'COMMON|AUTH|USER|API_KEY|ORGANIZATION|PERMISSION|ROLE|NOTIFICATION|ASSET|SETTING|USAGE|WEBHOOK|OPERATOR';
+  'COMMON|AUTH|USER|API_KEY|ORGANIZATION|PERMISSION|ROLE|NOTIFICATION|ASSET|SETTING|USAGE|WEBHOOK|OPERATOR|DEVELOPER';
 // A plugin feature adds codes under its own namespace only, for example `KNOWLEDGE.` for `knowledge`.
 const apiErrorCodePattern = new RegExp(
   `^(?:${[coreNamespaces, ...PLUGIN_WEB_FEATURES.map(errorNamespace)].join('|')})(?:\\.[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)+$`

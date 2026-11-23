@@ -4,6 +4,13 @@ import type { DeveloperMessages } from './en-US';
 const messages = {
   title: '开发者',
   description: '从你自己的后端发送注册验证码、重置密码和账单等事务邮件。',
+  accessRequired: {
+    title: '需要管理员开通开发者授权',
+    description:
+      '开发者控制台用来管理 API 密钥、事务邮件模板、Webhook 和退信名单。开发者授权由组织的所有者或管理员按成员开通，并限定可以发信的域名。',
+    contactHint: '请联系管理员，在「成员」页为你开通“开发者”。',
+    backHome: '返回控制台',
+  },
   tabs: {
     start: '快速上手',
     templates: '事务模板',
@@ -166,7 +173,7 @@ const messages = {
       personal: '{count} 封排队中',
     },
     window: '统计最近 24 小时，失败的尝试也计入。',
-    usageAdminsOnly: '用量仅管理员可见。',
+    usageAdminsOnly: '用量仅管理员和开发者可见。',
     rulesTitle: '保护规则',
     rules: {
       recipient: {
@@ -257,7 +264,9 @@ const messages = {
     previewTitle: '模板预览',
     previewUnavailable: '这个模板无法预览。',
     from: '来自 {sender}',
-    readOnly: '只有所有者和管理员可以修改事务模板。',
+    readOnly: '只有所有者、管理员和开发者可以修改事务模板。',
+    outsideScopeBadge: '超出范围',
+    outsideScope: '发件域名已不在你的范围内，这个模板只能查看。',
     created: '模板已创建',
     saved: '模板已保存',
     sent24h: '近 24 小时发送 {count} 封',

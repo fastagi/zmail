@@ -1883,6 +1883,8 @@ export class MockMailboxStore {
         key: template.key,
         from: template.from,
         variable_definitions: template.variable_definitions,
+        // The mock has no developer scopes: every caller is inside.
+        outside_sending_scope: false,
       }));
   }
 
@@ -3022,6 +3024,7 @@ function buildTemplate(
         ? { address: input.from_address.toLowerCase(), name: input.from_name ?? '' }
         : null,
     variable_definitions: kind === 'transactional' ? (input.variable_definitions ?? []) : [],
+    outside_sending_scope: false,
   };
 }
 

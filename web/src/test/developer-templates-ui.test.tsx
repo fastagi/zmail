@@ -164,8 +164,49 @@ describe('developer console', () => {
     expect(screen.queryByRole('button', { name: 'New template' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(
-      screen.getByText('Only owners and admins can change transactional templates.')
+      screen.getByText('Only owners, admins, and developers can change transactional templates.')
     ).toBeInTheDocument();
+  });
+
+  it('a developer writes templates only from domains in their scope', async () => {
+    state.organizations.data = organizations('member', {
+      features: { ...memberGrants, developer: true },
+      developer_scope: { all_domains: false, domains: ['acme.example'] },
+    });
+    state.domains.data = [
+      domain({ domain: 'mail.example.com', kind: 'shared' }),
+      domain({ domain: 'acme.example', kind: 'organization' }),
+      domain({ domain: 'other.example', kind: 'organization' }),
+    ];
+    state.search = 'org=1&tab=templates';
+    renderConsole();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    const dialog = screen.getByRole('dialog');
+    const sender = within(dialog).getByLabelText('Sender domain');
+    expect(within(sender).getAllByRole('option').map(option => option.textContent)).toEqual([
+      'acme.example',
+    ]);
+  });
+
+  it('marks a template whose sender left the developer scope read-only', async () => {
+    state.organizations.data = organizations('member', {
+      features: { ...memberGrants, developer: true },
+      developer_scope: { all_domains: false, domains: ['other.example'] },
+    });
+    state.templates.data = [summary({ outside_sending_scope: true })];
+    state.template.data = template({ outside_sending_scope: true });
+    state.search = 'org=1&tab=templates';
+    renderConsole();
+
+    const list = await screen.findByRole('list', { name: 'Transactional templates' });
+    expect(within(list).getByText('Out of scope')).toBeInTheDocument();
+    expect(
+      screen.getByText('Its sender domain is no longer in your scope, so this template is read-only.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    // Creating stays possible inside the scope.
+    expect(screen.getByRole('button', { name: 'New template' })).toBeInTheDocument();
   });
 
   it('admin edits a transactional template and secret fallback is disabled', async () => {
@@ -269,9 +310,29 @@ function selectTab(name: string) {
   fireEvent.mouseDown(screen.getByRole('tab', { name }), { button: 0 });
 }
 
-function organizations(role: string) {
+const memberGrants = {
+  broadcasts: false,
+  contacts: true,
+  templates: true,
+  api_keys: true,
+  mail_clients: true,
+  developer: false,
+};
+
+function organizations(role: string, extra: Record<string, unknown> = {}) {
   const now = '2026-11-16T10:00:00Z';
-  const items = [{ id: 1, name: 'Acme', slug: 'acme', role, created_at: now, updated_at: now }];
+  const items = [
+    {
+      id: 1,
+      name: 'Acme',
+      slug: 'acme',
+      role,
+      ...(role === 'member' ? { features: memberGrants } : {}),
+      ...extra,
+      created_at: now,
+      updated_at: now,
+    },
+  ];
   return {
     items,
     meta: { current_page: 1, per_page: 20, total: 1, last_page: 1, from: 1, to: 1 },

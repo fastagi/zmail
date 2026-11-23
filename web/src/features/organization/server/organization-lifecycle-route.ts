@@ -144,6 +144,9 @@ export async function updateOrganizationMemberFeaturesRoute(
         templates: 'templates',
         api_keys: 'api_keys',
         mail_clients: 'mail_clients',
+        developer: 'developer',
+        developer_all_domains: 'developer_all_domains',
+        developer_domains: 'developer_domains',
       },
     });
   }

@@ -12,6 +12,7 @@ export type OrganizationErrorKey =
   | 'errors.invalidResponse'
   | 'errors.memberAlreadyExists'
   | 'errors.memberFeaturesFixed'
+  | 'errors.developerDomainNotAllowed'
   | 'errors.memberNotFound'
   | 'errors.notFound'
   | 'errors.ownershipTransferRequired'
@@ -71,6 +72,9 @@ export function resolveOrganizationErrorKey(error: unknown): OrganizationErrorKe
   }
   if (error.errorCode === ApiErrorCode.ORGANIZATION_MEMBER_FEATURES_FIXED) {
     return 'errors.memberFeaturesFixed';
+  }
+  if (error.errorCode === ApiErrorCode.DEVELOPER_DOMAIN_NOT_ALLOWED) {
+    return 'errors.developerDomainNotAllowed';
   }
   if (
     error.errorCode === ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_REQUIRED

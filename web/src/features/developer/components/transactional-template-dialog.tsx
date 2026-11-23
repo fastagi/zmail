@@ -84,9 +84,14 @@ function anyFallback(source: string, name: string): boolean {
 }
 
 /** Domains a transactional template may send from: verified ones, and the log instance's own. */
-function senderDomains(domains: readonly MailboxDomain[] | undefined, current: string): string[] {
+function senderDomains(
+  domains: readonly MailboxDomain[] | undefined,
+  current: string,
+  offers: (domain: MailboxDomain) => boolean
+): string[] {
   const names = (domains ?? [])
     .filter(domain => domain.kind === 'organization' || domain.provider === 'log')
+    .filter(offers)
     .map(domain => domain.domain);
   // A sender whose domain lost verification stays selectable so the template can still be saved.
   if (current !== '' && !names.includes(current)) names.push(current);
@@ -129,6 +134,8 @@ function draftOf(template: MailTemplate | null): Draft {
   };
 }
 
+const offersEveryDomain = () => true;
+
 /**
  * Creates or edits a transactional template: name, key, sender, content, and the declared
  * variables. A required variable has no fallback and every use of an optional one has one, so
@@ -139,11 +146,14 @@ export function TransactionalTemplateDialog({
   template,
   onClose,
   onSaved,
+  offersDomain = offersEveryDomain,
 }: {
   organizationId: number;
   template: MailTemplate | null;
   onClose: () => void;
   onSaved: (template: MailTemplate) => void;
+  /** Narrows the sender domains, as a developer's scope does. */
+  offersDomain?: (domain: MailboxDomain) => boolean;
 }) {
   const t = useT('developer');
   const tm = useT('mailbox');
@@ -164,7 +174,7 @@ export function TransactionalTemplateDialog({
     html: useId(),
   };
 
-  const options = senderDomains(domains.data, draft.domain);
+  const options = senderDomains(domains.data, draft.domain, offersDomain);
   const domain = draft.domain !== '' ? draft.domain : (options[0] ?? '');
   const source = { subject: draft.subject, html: draft.html, text: draft.text };
   const rows = useMemo(
