@@ -1,4 +1,8 @@
-import { writeComposeDraftFiles } from '@/features/mailbox/components/compose-draft-store';
+import {
+  forgetComposeDraftPageFiles,
+  setComposeDraftFileStore,
+  writeComposeDraftFiles,
+} from '@/features/mailbox/components/compose-draft-store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
@@ -2191,6 +2195,54 @@ describe('inbox keyboard shortcuts', () => {
     expect(screen.queryByText('must-stay.txt')).toBeNull();
   });
 
+  // Issue #142: the API keeps no draft attachments, so this browser keeps them across a reload.
+  it('a draft keeps its attached files across a reload where the browser can store them', async () => {
+    const kept = new Map<string, File[]>();
+    const previous = setComposeDraftFileStore({
+      get: key => Promise.resolve(kept.get(key) ?? null),
+      put: (key, files) => {
+        kept.set(key, [...files]);
+        return Promise.resolve(true);
+      },
+      remove: key => {
+        kept.delete(key);
+        return Promise.resolve();
+      },
+    });
+    try {
+      renderRoute();
+
+      press('c');
+      fireEvent.change(await screen.findByLabelText('Subject'), { target: { value: 'With file' } });
+      const file = new File(['keep me'], 'must-stay.txt', { type: 'text/plain' });
+      fireEvent.change(document.getElementById('mail-compose-files') as HTMLInputElement, {
+        target: { files: [file] },
+      });
+      expect(await screen.findByText('must-stay.txt')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith(
+          'Saved as a draft. Its attached files are kept in this browser; on another device, attach them again.'
+        )
+      );
+
+      // A reload forgets what the page held; the draft reopens with its file all the same.
+      forgetComposeDraftPageFiles();
+      press('c');
+      expect(await screen.findByLabelText('Subject')).toHaveValue('With file');
+      expect(await screen.findByText('must-stay.txt')).toBeInTheDocument();
+      expect(screen.queryByText(/Attach again/u)).toBeNull();
+
+      // Removing the file forgets the kept copy too.
+      expect(kept.size).toBe(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Remove must-stay.txt' }));
+      await waitFor(() => expect(kept.size).toBe(0));
+    } finally {
+      setComposeDraftFileStore(previous);
+    }
+  });
+
   it('keeps reminding to attach files again after a reload until they are attached', async () => {
     renderRoute();
 
@@ -2208,7 +2260,7 @@ describe('inbox keyboard shortcuts', () => {
     ) as string;
     writeComposeDraftFiles(key, null);
 
-    const reminder = 'Attach again: lost.pdf. Files are not kept after the page reloads.';
+    const reminder = 'Attach again: lost.pdf. This browser did not keep the files.';
     for (let round = 0; round < 2; round += 1) {
       press('c');
       expect(await screen.findByText(reminder)).toBeInTheDocument();
