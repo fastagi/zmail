@@ -174,7 +174,7 @@ one internal organization membership; `member_id` is the membership ID, not the 
 |---|---|---|---|
 | List members | `GET /v1/organizations/:id/members` | Pagination query | Paginated member views |
 | Change role | `PATCH /v1/organizations/:id/members/:member_id` | `{ role }` | Member view |
-| Change features | `PATCH /v1/organizations/:id/members/:member_id/features` | `{ broadcasts?, contacts?, templates?, api_keys? }` | Member view |
+| Change features | `PATCH /v1/organizations/:id/members/:member_id/features` | `{ broadcasts?, contacts?, templates?, api_keys?, mail_clients?, developer?, developer_all_domains?, developer_domains? }` | Member view |
 | Remove or leave | `DELETE /v1/organizations/:id/members/:member_id` | none | `204 No Content` |
 | Transfer ownership | `POST /v1/organizations/:id/ownership-transfer` | `{ new_owner_member_id }` | `{ previous_owner, new_owner }` |
 
@@ -218,7 +218,7 @@ A member view contains the relationship ID and a deliberately small public ident
 ## Member Feature Grants
 
 An organization decides, per member, which console features the member may use. The catalog is
-fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clients`.
+fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clients`, `developer`.
 
 - `owner` and `admin` always have every feature. Grants are stored on every membership but only
   take effect for the `member` role, so member views and the context view report the effective
@@ -237,6 +237,16 @@ fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clie
   `409 ORGANIZATION.MEMBER_FEATURES_FIXED`. A change takes effect on the member's next request.
 - A change emits one `organization_members.change_features` audit change listing only the features
   whose value changed, with member, organization, and user IDs.
+- `developer` (see [MAILBOXES.md](MAILBOXES.md#developer-access)) carries a sending scope and
+  implies `api_keys`: views report `api_keys: true` while `developer` is granted, and the stored
+  `api_keys` value returns when `developer` is withdrawn. Granting `developer: true` to a member
+  without a scope needs `developer_all_domains: true` or a non-empty `developer_domains` list (at
+  most 50 names); naming a scope while withdrawing or without a grant returns
+  `422 COMMON.VALIDATION_FAILED`. Every listed name must be a verified domain of the organization
+  (`403 DEVELOPER.DOMAIN_NOT_ALLOWED` otherwise); the shared sending domain never is. Organization,
+  context, and member views carry `developer_scope: { all_domains, domains } | null`, null for owners,
+  admins, and members without the grant. Invitations never carry `developer`. The audit change
+  records a changed scope as `developer_scope`.
 - A route that needs a feature the active membership lacks returns
   `403 ORGANIZATION.FEATURE_NOT_GRANTED`. The routes each feature opens are listed in
   [`MAILBOXES.md`](MAILBOXES.md#member-feature-grants).
