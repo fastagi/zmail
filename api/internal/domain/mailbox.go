@@ -273,6 +273,10 @@ type Mailbox struct {
 	// OwnerUserID is the owner of a personal mailbox; nil for a shared one, or when the owner's
 	// account was deleted.
 	OwnerUserID *uint
+	// PendingOwnerEmail reserves a personal mailbox without an owner for the person invited at that
+	// email, lowercased: the account that joins the organization with it becomes the owner. Empty
+	// for every other mailbox. Until then nobody reads the mailbox.
+	PendingOwnerEmail string
 	// OwnerLeftAt is when the owner of a personal mailbox left the organization; nil while the
 	// owner is a member. The mailbox then awaits handover.
 	OwnerLeftAt *time.Time

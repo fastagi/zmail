@@ -20,6 +20,7 @@ func TestExternalMailSyncOpsUpDown(t *testing.T) {
 	exec(`INSERT INTO external_mail_sync_runs (connection_id, started_at, finished_at, outcome, fetched_count, stored_count)
 		VALUES (1, now(), now(), 'ok', 3, 2)`)
 
+	require.NoError(t, (&addMailboxPendingOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
@@ -35,6 +36,7 @@ func TestExternalMailSyncOpsUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMailPush{}).Up(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
+	require.NoError(t, (&addMailboxPendingOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 
 	var backfilled bool

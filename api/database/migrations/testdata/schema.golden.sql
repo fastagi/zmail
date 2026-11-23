@@ -592,6 +592,7 @@ TABLE mailboxes
   COLUMN origin character varying(16) NOT NULL DEFAULT 'zmail'::character varying
   COLUMN connected_send boolean NOT NULL DEFAULT false
   COLUMN external_mail_tenant_id bigint
+  COLUMN pending_owner_email character varying(320)
 
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
@@ -650,6 +651,10 @@ TABLE organization_invitations
   COLUMN updated_at timestamp with time zone
   COLUMN email_send_status character varying(32)
   COLUMN email_attempted_at timestamp with time zone
+  COLUMN can_use_broadcasts boolean NOT NULL DEFAULT false
+  COLUMN can_use_contacts boolean NOT NULL DEFAULT true
+  COLUMN can_use_templates boolean NOT NULL DEFAULT true
+  COLUMN can_use_api_keys boolean NOT NULL DEFAULT false
 
 TABLE organization_memberships
   COLUMN id bigint NOT NULL DEFAULT nextval('organization_memberships_id_seq'::regclass)
@@ -1174,6 +1179,7 @@ CONSTRAINT mailbox_members.mailbox_members_membership_id_fkey FOREIGN KEY (membe
 CONSTRAINT mailbox_members.mailbox_members_permission_check CHECK (((permission)::text = ANY ((ARRAY['view'::character varying, 'send'::character varying, 'manage'::character varying])::text[])))
 CONSTRAINT mailbox_members.mailbox_members_pkey PRIMARY KEY (mailbox_id, membership_id)
 CONSTRAINT mailboxes.chk_mailboxes_origin CHECK (((origin)::text = ANY ((ARRAY['zmail'::character varying, 'connected'::character varying])::text[])))
+CONSTRAINT mailboxes.chk_mailboxes_pending_owner CHECK (((pending_owner_email IS NULL) OR (((type)::text = 'personal'::text) AND (owner_user_id IS NULL))))
 CONSTRAINT mailboxes.chk_mailboxes_personal_webhooks CHECK ((((type)::text = 'shared'::text) OR (NOT webhooks_enabled)))
 CONSTRAINT mailboxes.chk_mailboxes_tenant_origin CHECK (((external_mail_tenant_id IS NULL) OR ((origin)::text = 'connected'::text)))
 CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['personal'::character varying, 'shared'::character varying])::text[])))
@@ -1498,6 +1504,7 @@ INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (addres
 INDEX CREATE INDEX idx_mailboxes_external_mail_tenant ON mailboxes USING btree (external_mail_tenant_id) WHERE (external_mail_tenant_id IS NOT NULL)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)
 INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id, owner_user_id) WHERE ((deleted_at IS NULL) AND ((type)::text = 'personal'::text))
+INDEX CREATE INDEX idx_mailboxes_pending_owner ON mailboxes USING btree (organization_id, pending_owner_email) WHERE ((pending_owner_email IS NOT NULL) AND (deleted_at IS NULL))
 INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)
 INDEX CREATE UNIQUE INDEX migrations_pkey ON migrations USING btree (id)

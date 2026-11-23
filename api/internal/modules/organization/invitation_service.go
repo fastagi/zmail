@@ -67,19 +67,31 @@ func (s *service) Invite(
 	if err != nil {
 		return nil, err
 	}
+	return s.createInvitation(ctx, manager, normalizeInvitationEmail(req.Email), req.Role, domain.DefaultMemberFeatures(), "invite")
+}
 
+// createInvitation stores and emails one invitation from the manager, and audits it under action.
+func (s *service) createInvitation(
+	ctx context.Context,
+	manager *domain.OrganizationMembership,
+	email string,
+	role domain.OrganizationRole,
+	features domain.MemberFeatures,
+	action string,
+) (*OrganizationInvitationResult, error) {
 	token, err := generateOrganizationInvitationToken()
 	if err != nil {
 		return nil, err
 	}
 	now := s.now()
 	invitation := &domain.OrganizationInvitation{
-		OrganizationID: organizationID,
-		InvitedBy:      userID,
-		Email:          normalizeInvitationEmail(req.Email),
-		Role:           req.Role,
+		OrganizationID: manager.OrganizationID,
+		InvitedBy:      manager.UserID,
+		Email:          email,
+		Role:           role,
 		TokenHash:      crypto.SHA256Hex(token),
 		ExpiresAt:      now.Add(s.invitationPolicy.TTL),
+		Features:       features,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -91,13 +103,13 @@ func (s *service) Invite(
 	link := invitationAcceptURL(s.invitationPolicy.PublicURL, token)
 
 	s.audit(ctx, auditstarter.Change{
-		Action:     "invite",
+		Action:     action,
 		Resource:   "organization_invitations",
 		TargetType: "organization_invitation",
 		TargetID:   strconv.FormatUint(uint64(invitation.ID), 10),
 		Result:     domain.AuditResultSuccess,
 		Metadata: map[string]any{
-			"organization_id":   organizationID,
+			"organization_id":   manager.OrganizationID,
 			"role":              invitation.Role,
 			"email_send_status": emailStatus,
 			"link_issued":       link != "",
@@ -108,6 +120,43 @@ func (s *service) Invite(
 		EmailSendStatus: emailStatus,
 		InvitationURL:   link,
 	}, nil
+}
+
+// FindPendingInvitationByEmail returns the organization's pending invitation for the email, or
+// nil. The roster import that calls it has already checked the caller manages the organization.
+func (s *service) FindPendingInvitationByEmail(ctx context.Context, organizationID uint, email string) (*domain.OrganizationInvitation, error) {
+	if s == nil || s.invitationRepo == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	return s.invitationRepo.FindPendingInvitationByEmail(ctx, organizationID, normalizeInvitationEmail(email), s.now())
+}
+
+// InviteRosterMember invites one roster row with its role and grants. The actor must still manage
+// the organization; the invitation is audited as roster_invite and never returns its link, which
+// a bulk result has no place to show safely.
+func (s *service) InviteRosterMember(
+	ctx context.Context,
+	actorUserID, organizationID uint,
+	email string,
+	role domain.OrganizationRole,
+	features domain.MemberFeatures,
+) (*domain.OrganizationInvitation, string, error) {
+	email = normalizeInvitationEmail(email)
+	if actorUserID == 0 || organizationID == 0 || !role.CanBeInvited() || !validInvitationEmailInput(email) {
+		return nil, "", domain.ErrInvalidInput
+	}
+	if s.invitationRepo == nil {
+		return nil, "", domain.ErrServiceUnavailable
+	}
+	manager, err := s.invitationManager(ctx, actorUserID, organizationID)
+	if err != nil {
+		return nil, "", err
+	}
+	result, err := s.createInvitation(ctx, manager, email, role, features, "roster_invite")
+	if err != nil {
+		return nil, "", err
+	}
+	return result.Invitation, string(result.EmailSendStatus), nil
 }
 
 // ResendInvitation gives a pending invitation a fresh token and expiry and emails the new link.

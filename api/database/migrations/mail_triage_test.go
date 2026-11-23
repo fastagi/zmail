@@ -44,6 +44,7 @@ func TestMailTriageMigrationUpDown(t *testing.T) {
 	exec(`INSERT INTO mail_triage (message_id, mailbox_id, category, reason, source, status, next_attempt_at, created_at, updated_at)
 		VALUES (11, 1, 'reply', 'Asks a question', 'ai', 'done', now(), now(), now())`)
 
+	require.NoError(t, (&addMailboxPendingOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
@@ -62,6 +63,7 @@ func TestMailTriageMigrationUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMailPush{}).Up(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
+	require.NoError(t, (&addMailboxPendingOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 

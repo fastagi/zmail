@@ -6,6 +6,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
@@ -37,11 +38,37 @@ var ProviderSet = wire.NewSet(
 	NewWebhookCatalog,
 	NewWebhookNotifier,
 	wire.Bind(new(mailNotifier), new(*webhookNotifier)),
-	NewService,
+	ProvideService,
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,
 	NewOperatorMetricsHandler,
 )
+
+// ProvideService builds the service with the organization starter's roster inviter, which sends
+// the invitations of a roster import.
+func ProvideService(
+	repo domain.MailboxRepository,
+	memberships membershipDirectory,
+	templates domain.MailTemplateRepository,
+	contacts domain.MailContactRepository,
+	broadcasts domain.MailBroadcastRepository,
+	organize domain.MailOrganizeRepository,
+	domains domain.MailDomainRepository,
+	zones domain.MailZoneRepository,
+	domainProvider mailtransport.DomainProvider,
+	transport mailtransport.Transport,
+	notifier mailNotifier,
+	settings Settings,
+	transactional domain.TransactionalMailRepository,
+	limits *ratelimit.Stores,
+	accounts accountDirectory,
+	inviter domain.OrganizationRosterInviter,
+) *service {
+	svc := NewService(repo, memberships, templates, contacts, broadcasts, organize, domains, zones, domainProvider,
+		transport, notifier, settings, transactional, limits, accounts)
+	svc.inviter = inviter
+	return svc
+}
 
 // NewMembershipDirectory reads memberships through the organization starter's repository.
 func NewMembershipDirectory(organizations domain.OrganizationRepository) membershipDirectory {
@@ -108,6 +135,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_15_090000_add_external_mail_push",
 			"2026_12_16_090000_add_external_mail_provider_releases",
 			"2026_12_17_090000_add_external_mail_release_owner",
+			"2026_12_19_100000_add_mailbox_pending_owner",
 		),
 	)
 }

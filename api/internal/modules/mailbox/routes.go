@@ -163,6 +163,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.POST("/mailbox-imports", h.ImportMailboxes).Name("mailbox_imports.store").
 			Middleware(middleware.BodyLimit(maxImportBodyBytes))
 		auth.GET("/mailbox-exports", h.ExportMailboxes).Name("mailbox_exports.index")
+		auth.POST("/member-imports", h.ImportMembers).Name("member_imports.store").
+			Middleware(middleware.BodyLimit(maxImportBodyBytes))
 
 		auth.GET("/mailboxes/:mailbox_id/members", h.ListMailboxMembers).
 			Name("mailboxes.members.index").WhereNumber("mailbox_id")

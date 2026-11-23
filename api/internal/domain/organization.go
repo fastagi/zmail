@@ -114,8 +114,10 @@ type OrganizationInvitation struct {
 	// nil for invitations created before attempts were recorded.
 	EmailSendStatus  string     `json:"email_send_status,omitempty"`
 	EmailAttemptedAt *time.Time `json:"email_attempted_at,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	// Features are the grants the membership starts with when the invitation is accepted.
+	Features  MemberFeatures `json:"-"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // Status derives expiry without mutating invitation history on read.
@@ -165,6 +167,9 @@ type OrganizationInvitationRepository interface {
 	ReissueInvitation(ctx context.Context, organizationID, invitationID uint, tokenHash string, expiresAt, now time.Time) (*OrganizationInvitation, error)
 	// FindPendingInvitation returns an invitation that is pending and unexpired at now.
 	FindPendingInvitation(ctx context.Context, organizationID, invitationID uint, now time.Time) (*OrganizationInvitation, error)
+	// FindPendingInvitationByEmail returns the invitation for the lowercased email that is pending
+	// and unexpired at now, or nil when there is none.
+	FindPendingInvitationByEmail(ctx context.Context, organizationID uint, email string, now time.Time) (*OrganizationInvitation, error)
 	// RecordInvitationEmailAttempt stores an attempt outcome only while tokenHash is still current.
 	RecordInvitationEmailAttempt(ctx context.Context, organizationID, invitationID uint, tokenHash, status string, now time.Time) error
 }

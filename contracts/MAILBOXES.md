@@ -61,6 +61,7 @@ recorded but has no special rights to it. A removed member loses access on their
 | Mailbox directory | `GET /api/mailbox-directory` | `GET /v1/mailbox-directory` | Keyset envelope |
 | Import mailboxes | `POST /api/mailbox-imports` | `POST /v1/mailbox-imports` | `200` envelope, at most 500 rows |
 | Export mailboxes | `GET /api/mailbox-exports` | `GET /v1/mailbox-exports` | `200` CSV file |
+| Import a roster | `POST /api/member-imports` | `POST /v1/member-imports` | `200` envelope, at most 500 rows |
 | List members | `GET /api/mailboxes/:id/members` | `GET /v1/mailboxes/:mailbox_id/members` | `200` envelope, at most 100 items |
 | Set a member | `PUT /api/mailboxes/:id/members/:userId` | `PUT /v1/mailboxes/:mailbox_id/members/:user_id` | `200` envelope |
 | Remove a member | `DELETE /api/mailboxes/:id/members/:userId` | `DELETE /v1/mailboxes/:mailbox_id/members/:user_id` | `204` |
@@ -334,6 +335,93 @@ message content, unread count, or access.
 | `MAILBOX.DOMAIN_PROVIDER_FAILED` | Cloudflare refused the routing rule |
 | `COMMON.INTERNAL` | Anything else |
 
+### Roster Import
+
+`POST /v1/member-imports` onboards people from a roster in one action: it invites each person to
+the organization, reserves each a personal mailbox on a verified organization domain, and gives
+each invitation the feature grants the membership starts with. Only owners and admins may.
+
+```json
+{
+  "dry_run": false,
+  "domain": "company.com",
+  "features": { "broadcasts": false, "contacts": true, "templates": true, "api_keys": false },
+  "rows": [
+    { "email": "alice@gmail.com", "name": "Alice Wang", "role": "member", "mailbox": "alice" },
+    { "email": "bo@outlook.com", "name": "", "role": "admin", "mailbox": "" }
+  ]
+}
+```
+
+- 1 to 500 rows; `dry_run` and `domain` are required. `email` is required and at most 320
+  characters, `name` 480, `role` 16, and `mailbox` 320; body violations are
+  `422 COMMON.VALIDATION_FAILED`.
+- `email` is the address the person signs in with and accepts the invitation from; it is
+  lowercased and must be one address of at most 100 characters. `role` is `member` (the default
+  when empty) or `admin`, ignoring case. `name` becomes the mailbox display name.
+- `mailbox` is a local part (`alice`) on `domain`, or a whole address whose domain overrides
+  `domain`. Empty means the email's local part without a `+tag`. The address must be on a
+  verified domain of the organization, never the shared domain.
+- `features` is applied to every invitation the request creates; absent means the new-member
+  defaults, contacts and templates. Owners and admins always have every feature, so an admin row's
+  grants only matter if the admin is later made a member.
+- One leading `'` is removed from `email`, `name`, and `mailbox` when the next character is `=`,
+  `+`, `-`, or `@`.
+
+Each row reconciles toward the same end state, so sending a file again is safe:
+
+1. A current member who owns a personal Zmail mailbox is skipped as `already_member`. One who owns
+   none gets the mailbox at once (`created`); their role and grants are never changed.
+2. Anyone else gets the mailbox reserved first, then the invitation, so a refused address never
+   sends an invitation. An existing pending invitation or reservation for the same email is
+   reused. When both already exist the row is skipped as `already_invited`.
+3. An address held by any other mailbox, live or deleted, is skipped as `mailbox_taken`.
+
+A reserved mailbox is a personal mailbox without an owner. Under the ordinary access rules nobody
+reads it: owners and admins see its metadata and may delete it, never its mail. Its routing rule
+exists from the start, so mail sent before the person joins is kept. When the account whose email
+matches the reservation joins the organization (accepting an invitation checks the email), the
+mailbox becomes theirs and `owner_assigned` is written to its access history. A revoked or expired
+invitation leaves the reservation in place for a later import of the same row.
+
+A dry run makes the same checks, counts the mailbox limit in row order, and writes nothing. A real
+run handles each row on its own, so a failed row never undoes another; a row whose invitation
+fails after its mailbox was reserved keeps the reservation, and sending that row again finishes it.
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "dry_run": false, "total": 3, "valid": 0, "invited": 1, "created": 0, "skipped": 1, "failed": 1,
+    "rows": [
+      { "row": 1, "email": "alice@gmail.com", "address": "alice@company.com", "status": "invited", "skip_reason": null, "error_code": null, "mailbox_id": 51, "invitation_id": 12, "email_send_status": "accepted_by_provider" },
+      { "row": 2, "email": "sam@gmail.com", "address": "sales@company.com", "status": "skipped", "skip_reason": "mailbox_taken", "error_code": null, "mailbox_id": null, "invitation_id": null, "email_send_status": null },
+      { "row": 3, "email": "not-an-email", "address": "", "status": "failed", "skip_reason": null, "error_code": "MAILBOX.IMPORT_EMAIL_INVALID", "mailbox_id": null, "invitation_id": null, "email_send_status": null }
+    ]
+  }
+}
+```
+
+`status` is `valid` (dry run only), `invited`, `created`, `skipped` (with `skip_reason`
+`already_member`, `already_invited`, or `mailbox_taken`), or `failed` (with `error_code`).
+`email_send_status` is the invitation email outcome (`accepted_by_provider`, `failed`, or
+`not_configured`) when the row sent one. The invitation link is never returned here; a manager
+shares one through a resend. Row error codes:
+
+| `error_code` | Meaning |
+|---|---|
+| `MAILBOX.IMPORT_EMAIL_INVALID` | The email is not one address of at most 100 characters |
+| `MAILBOX.IMPORT_ROLE_INVALID` | The role is neither `member` nor `admin` |
+| `MAILBOX.IMPORT_DUPLICATE_ROW` | An earlier row has the same email or mailbox address |
+| `MAILBOX.IMPORT_DOMAIN_REQUIRED` | The mailbox would be on the shared domain, or no domain was given |
+| `MAILBOX.ADDRESS_INVALID` | A bad local part or display name |
+| `MAILBOX.DOMAIN_NOT_FOUND` | The domain is not one the organization connected |
+| `MAILBOX.DOMAIN_NOT_VERIFIED` | The organization's domain is still pending |
+| `MAILBOX.LIMIT_REACHED` | The organization would pass `MAILBOX_MAX_PER_ORGANIZATION`, counted in row order |
+| `MAILBOX.DOMAIN_PROVIDER_FAILED` | Cloudflare refused the routing rule |
+| `COMMON.INTERNAL` | Anything else, such as an invitation that could not be stored |
+
 `GET /v1/mailbox-exports?type=shared` (or `personal`; `type` is required, otherwise
 `422 COMMON.VALIDATION_FAILED`) answers a CSV file. Only owners and admins may. It is the only
 surface that carries member email addresses.
@@ -469,6 +557,7 @@ per page:
 | `member_removed` | A member is removed, or leaves the organization | The member | `{}`, or `{ "reason": "left_organization" }` |
 | `owner_left` | A personal mailbox's owner leaves the organization | The owner | `{ "reason": "left_organization" }` |
 | `owner_returned` | That owner rejoins before a handover | The owner | `{}` |
+| `owner_assigned` | The person a [roster import](#roster-import) reserved the mailbox for joins | The new owner | `{}` |
 | `handed_over` | An admin hands the mailbox over | The successor | `{ "former_owner_user_id", "sealed_before" }` |
 | `sealed_deleted` | An admin deletes the sealed history | `null` | `{ "deleted_messages", "deleted_broadcasts" }` |
 | `webhooks_changed` | The webhook switch changes | `null` | `{ "enabled" }` |
@@ -481,7 +570,7 @@ per page:
 | `agent_granted` | An [agent grant](#agent-grants) is issued | The key's owner | `{ "grant_id", "api_key_id", "capabilities", "reveal_secrets", "expires_at", "sender_filters", "label_filters" }` (filter counts) |
 | `agent_revoked` | An agent grant is revoked, by a person or by Zmail | The key's owner | `{ "grant_id", "api_key_id", "reason" }` |
 
-`actor_user_id` is `null` for a change Zmail made itself, such as `owner_left`, `owner_returned`,
+`actor_user_id` is `null` for a change Zmail made itself, such as `owner_left`, `owner_returned`, `owner_assigned`,
 and `member_removed` for a departure. `detail` holds ids, permissions, timestamps, counts, and display
 names only, never message content. Connection events never carry the outside account's address. Creating a shared mailbox writes `created` and one `member_set` per first
 member. Clients ignore `detail` keys they do not know.
@@ -3408,6 +3497,9 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.LIMIT_REACHED` | 409 |
 | `MAILBOX.IMPORT_DUPLICATE_ROW` | Import row only |
 | `MAILBOX.IMPORT_MEMBER_NOT_FOUND` | Import row only |
+| `MAILBOX.IMPORT_EMAIL_INVALID` | Roster import row only |
+| `MAILBOX.IMPORT_ROLE_INVALID` | Roster import row only |
+| `MAILBOX.IMPORT_DOMAIN_REQUIRED` | Roster import row only |
 | `MAILBOX.ACCESS_CONFLICT` | 409 |
 | `MAILBOX.ACCESS_INVALID` | 422 |
 | `MAILBOX.ADDRESS_INVALID` | 422 |

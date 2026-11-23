@@ -13,6 +13,7 @@ import (
 func TestExternalMailReleaseOwnerUpDown(t *testing.T) {
 	db, exec := externalMailFixture(t)
 	migrated := dumpSchema(t, db)
+	require.NoError(t, (&addMailboxPendingOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	assert.NotContains(t, dumpSchema(t, db), "owner_scope")
 
@@ -31,6 +32,7 @@ func TestExternalMailReleaseOwnerUpDown(t *testing.T) {
 	}
 
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
+	require.NoError(t, (&addMailboxPendingOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 	type owner struct {
 		ConnectionID uint
