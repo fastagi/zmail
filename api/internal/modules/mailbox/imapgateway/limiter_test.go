@@ -69,3 +69,34 @@ func TestUserKeyHidesTheUsername(t *testing.T) {
 		t.Fatalf("userKey = %q", key)
 	}
 }
+
+func TestLimiterFailureBudgetCoversAnIPv6Prefix(t *testing.T) {
+	ctx := context.Background()
+	limiter := newAuthLimiter(ratelimit.NewMemoryStores(), time.Now)
+	// Twenty failures spread over one /64 lock the whole /64.
+	for i := range 20 {
+		limiter.Failed(ctx, "user"+string(rune('a'+i))+"@mail.example", "2001:db8:1:2::"+string(rune('a'+i%6)))
+	}
+	if limiter.Allow(ctx, "carol@mail.example", "2001:db8:1:2:ffff::1") {
+		t.Fatal("another address in the locked /64 is allowed")
+	}
+	if !limiter.Allow(ctx, "carol@mail.example", "2001:db8:1:3::1") {
+		t.Fatal("an address in another /64 is allowed")
+	}
+}
+
+func TestIPBucket(t *testing.T) {
+	for ip, want := range map[string]string{
+		"192.0.2.7":            "192.0.2.7",
+		"::ffff:192.0.2.7":     "192.0.2.7",
+		"2001:db8:1:2:3:4:5:6": "2001:db8:1:2::/64",
+		"2001:db8:1:2::1":      "2001:db8:1:2::/64",
+		"fe80::1%en0":          "fe80::/64",
+		"not an address":       "not an address",
+		"":                     "",
+	} {
+		if got := ipBucket(ip); got != want {
+			t.Errorf("ipBucket(%q) = %q; want %q", ip, got, want)
+		}
+	}
+}

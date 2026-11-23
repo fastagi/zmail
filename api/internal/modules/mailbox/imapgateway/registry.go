@@ -2,6 +2,7 @@ package imapgateway
 
 import (
 	"errors"
+	"net/netip"
 	"sync"
 )
 
@@ -37,11 +38,11 @@ func (r *sessionRegistry) open(s *session) error {
 	switch {
 	case len(r.byID) >= r.maxTotal:
 		return errTooManyConnections
-	case r.byIP[s.ip] >= r.maxPerIP:
+	case r.byIP[ipBucket(s.ip)] >= r.maxPerIP:
 		return errTooManyFromAddress
 	}
 	r.byID[s.id] = s
-	r.byIP[s.ip]++
+	r.byIP[ipBucket(s.ip)]++
 	return nil
 }
 
@@ -64,8 +65,9 @@ func (r *sessionRegistry) close(s *session, membershipID uint) {
 		return
 	}
 	delete(r.byID, s.id)
-	if r.byIP[s.ip]--; r.byIP[s.ip] <= 0 {
-		delete(r.byIP, s.ip)
+	bucket := ipBucket(s.ip)
+	if r.byIP[bucket]--; r.byIP[bucket] <= 0 {
+		delete(r.byIP, bucket)
 	}
 	if membershipID != 0 {
 		if r.byUser[membershipID]--; r.byUser[membershipID] <= 0 {
@@ -89,4 +91,23 @@ func (r *sessionRegistry) snapshot() []*session {
 		sessions = append(sessions, s)
 	}
 	return sessions
+}
+
+// ipBucket is the key the per-IP caps and sign-in budgets count under: an IPv4 address as it is
+// (an IPv4-mapped IPv6 one as IPv4), and the /64 of an IPv6 address, since one subscriber is
+// handed a whole /64. Anything that does not parse stays as it is.
+func ipBucket(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.WithZone("").Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	prefix, err := addr.Prefix(64)
+	if err != nil {
+		return ip
+	}
+	return prefix.String()
 }

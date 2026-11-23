@@ -67,9 +67,9 @@ func userKey(username string) string {
 	return "user:" + hex.EncodeToString(sum[:])[:16]
 }
 
-func ipKey(ip string) string { return "ip:" + ip }
+func ipKey(ip string) string { return "ip:" + ipBucket(ip) }
 
-func knownKey(username, ip string) string { return userKey(username) + "|" + ip }
+func knownKey(username, ip string) string { return userKey(username) + "|" + ipBucket(ip) }
 
 // Allow reports whether a sign-in may be tried now; it spends one attempt of the IP's budget.
 func (l *authLimiter) Allow(ctx context.Context, username, ip string) bool {
