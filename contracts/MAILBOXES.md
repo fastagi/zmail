@@ -2717,8 +2717,11 @@ and is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in any other state.
   pauses with `bounce_rate_high`, and at 0.3% spam complaints (`counts.complained`, Gmail's limit
   for bulk senders) with `complaint_rate_high`.
 - `POST /v1/mail-broadcasts/{id}/pauses` holds a sending broadcast, or a waiting test wave, with
-  `paused_by_owner`. `POST /v1/mail-broadcasts/{id}/resumptions` continues a paused one: a waiting
-  test wave continues with everyone, a broadcast paused by hand continues the wave it was in, and
+  `paused_by_owner`; holding a waiting test wave keeps its `resume_at`.
+  `POST /v1/mail-broadcasts/{id}/resumptions` continues a paused one: a waiting test wave continues
+  with everyone, a broadcast paused by hand continues the wave it was in (a test wave that is already
+  done goes back to `paused` with `test_wave_complete`, waiting until the `resume_at` it had, or
+  `test_wait_minutes` from the resume when it finished while paused), and
   one the health check paused continues with everyone and `safety_override` true, so it is not
   paused automatically again. Either is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in another state. A
 broadcast can be deleted when it is `draft`, `sent`, or `canceled`; messages already sent stay in

@@ -494,10 +494,15 @@ func (r *repository) PauseBroadcast(ctx context.Context, organizationID, id uint
 	} else {
 		query = query.Where("status IN ?", []string{string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused)})
 	}
+	// An owner holding a waiting test wave keeps its window, so a resume waits for the same end.
+	var resumeAt any
+	if reason == stopReasonOwner {
+		resumeAt = gorm.Expr("CASE WHEN stop_reason = ? THEN resume_at ELSE NULL END", stopReasonTestWave)
+	}
 	result := query.Updates(map[string]any{
 		"status":      string(domain.MailBroadcastPaused),
 		"stop_reason": reason,
-		"resume_at":   nil,
+		"resume_at":   resumeAt,
 		"updated_at":  gorm.Expr("now()"),
 	})
 	if result.Error != nil {
@@ -509,28 +514,38 @@ func (r *repository) PauseBroadcast(ctx context.Context, organizationID, id uint
 	return nil
 }
 
-func (r *repository) ResumeBroadcast(ctx context.Context, organizationID, id uint, override bool) error {
+func (r *repository) ResumeBroadcast(ctx context.Context, organizationID, id uint, override bool, now time.Time) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	query := r.conn(ctx).Model(&MailBroadcastPO{}).Where("id = ? AND status = ?", id, string(domain.MailBroadcastPaused))
-	if organizationID != 0 {
-		query = query.Where("organization_id = ?", organizationID)
-	}
 	// A test wave that finished, or a broadcast the owner overrides, continues with everyone; one
-	// the owner paused by hand continues the wave it was in.
-	values := map[string]any{
-		"status":      string(domain.MailBroadcastSending),
-		"stop_reason": "",
-		"resume_at":   nil,
-		"current_wave": gorm.Expr("CASE WHEN stop_reason = ? OR ? THEN 2 ELSE current_wave END",
-			stopReasonTestWave, override),
-		"updated_at": gorm.Expr("now()"),
+	// the owner paused by hand continues the wave it was in. When that wave is a test wave that is
+	// already done, continuing it means waiting out its window again: until the end it had when it
+	// was paused, or a full wait from now when it finished while paused.
+	args := []any{stopReasonTestWave, now, now, stopReasonTestWave, override, override, stopReasonOwner,
+		id, string(domain.MailBroadcastPaused)}
+	scope := ""
+	if organizationID != 0 {
+		scope = " AND b2.organization_id = ?"
+		args = append(args, organizationID)
 	}
-	if override {
-		values["safety_override"] = true
-	}
-	result := query.Updates(values)
+	result := r.conn(ctx).Exec(`UPDATE mail_broadcasts b SET
+			status = CASE WHEN w.wait THEN 'paused' ELSE 'sending' END,
+			stop_reason = CASE WHEN w.wait THEN ? ELSE '' END,
+			resume_at = CASE WHEN w.wait THEN GREATEST(
+				COALESCE(b.resume_at, CAST(? AS timestamptz) + b.test_wait_minutes * interval '1 minute'),
+				CAST(? AS timestamptz)) ELSE NULL END,
+			current_wave = CASE WHEN b.stop_reason = ? OR ? THEN 2 ELSE b.current_wave END,
+			safety_override = b.safety_override OR ?,
+			updated_at = now()
+		FROM (
+			SELECT b2.id, (b2.stop_reason = ? AND b2.current_wave = 1 AND b2.test_percent > 0
+				AND NOT EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b2.id AND r.status = 'pending' AND r.wave = 1)
+				AND EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b2.id AND r.status = 'pending' AND r.wave = 2)) AS wait
+			FROM mail_broadcasts b2
+			WHERE b2.id = ? AND b2.status = ?`+scope+`
+		) w
+		WHERE b.id = w.id`, args...)
 	if result.Error != nil {
 		return result.Error
 	}

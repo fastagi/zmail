@@ -11,6 +11,19 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Resuming a test wave paused during its wait
+
+### Low — No deploy order
+
+`POST /v1/mail-broadcasts/{id}/resumptions` on a staged broadcast whose test wave was done when an
+owner paused it now answers `paused` with `test_wave_complete` and the `resume_at` it had (or
+`test_wait_minutes` from the resume when the wave finished while paused), instead of `sending` with
+the worker restarting the wait on its next round. Pausing a waiting test wave keeps its `resume_at`
+next to `paused_by_owner`. No field or code is new, and the Web already labels the waiting state, so
+either half can ship first. A fork that implements `domain.MailBroadcastRepository` must add the
+`now time.Time` parameter to `ResumeBroadcast`. See "Staged Sending And Automatic Pause" in
+`contracts/MAILBOXES.md`.
+
 ## Unreleased — Developer access
 
 ### High — Deploy the Web before the API
