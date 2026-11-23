@@ -25,14 +25,15 @@ func imapUIDOf(t *testing.T, db *gorm.DB, messageID int) *imapUIDRow {
 	return &rows[0]
 }
 
-func imapFolderOf(t *testing.T, db *gorm.DB, mailboxID int, key string) (uidValidity, uidNext int64, found bool) {
+// imapFolderOf reads a folder of mailbox 1, the fixture's only mailbox.
+func imapFolderOf(t *testing.T, db *gorm.DB, key string) (uidValidity, uidNext int64, found bool) {
 	t.Helper()
 	var rows []struct {
 		Uidvalidity int64
 		Uidnext     int64
 	}
-	require.NoError(t, db.Raw(`SELECT uidvalidity, uidnext FROM mail_imap_folders WHERE mailbox_id = ? AND folder_key = ?`,
-		mailboxID, key).Scan(&rows).Error)
+	require.NoError(t, db.Raw(`SELECT uidvalidity, uidnext FROM mail_imap_folders WHERE mailbox_id = 1 AND folder_key = ?`,
+		key).Scan(&rows).Error)
 	if len(rows) == 0 {
 		return 0, 0, false
 	}
@@ -51,7 +52,7 @@ func TestMailImapUidTrigger(t *testing.T) {
 	exec(insertIMAPMessage, 2, "inbound", "received")
 	assert.Equal(t, &imapUIDRow{"inbox", 1}, imapUIDOf(t, db, 1))
 	assert.Equal(t, &imapUIDRow{"inbox", 2}, imapUIDOf(t, db, 2))
-	validity, next, found := imapFolderOf(t, db, 1, "inbox")
+	validity, next, found := imapFolderOf(t, db, "inbox")
 	require.True(t, found)
 	assert.Equal(t, int64(3), next)
 	assert.InDelta(t, time.Now().Unix(), validity, 120)
@@ -81,7 +82,7 @@ func TestMailImapUidTrigger(t *testing.T) {
 	assert.Equal(t, &imapUIDRow{"folder:7", 1}, imapUIDOf(t, db, 1))
 	exec(`UPDATE mail_messages SET placement = 'default', folder_id = NULL WHERE id = 1`)
 	exec(`DELETE FROM mail_folders WHERE id = 7`)
-	_, _, found = imapFolderOf(t, db, 1, "folder:7")
+	_, _, found = imapFolderOf(t, db, "folder:7")
 	assert.False(t, found, "deleting a folder forgets its uid counter")
 
 	exec(`DELETE FROM mail_messages WHERE id = 1`)
@@ -146,7 +147,7 @@ func TestMailImapUidsBackfillAndUpDown(t *testing.T) {
 	assert.Equal(t, &imapUIDRow{"sent", 1}, imapUIDOf(t, db, 4))
 	assert.Nil(t, imapUIDOf(t, db, 6))
 	assert.Equal(t, &imapUIDRow{"folder:7", 1}, imapUIDOf(t, db, 8))
-	firstValidity, next, found := imapFolderOf(t, db, 1, "inbox")
+	firstValidity, next, found := imapFolderOf(t, db, "inbox")
 	require.True(t, found)
 	assert.Equal(t, int64(3), next)
 	exec(insertIMAPMessage, 9, "inbound", "received")
@@ -155,7 +156,7 @@ func TestMailImapUidsBackfillAndUpDown(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	rollBackMailImapUIDs(t, db)
 	applyMailImapUIDs(t, db)
-	secondValidity, _, found := imapFolderOf(t, db, 1, "inbox")
+	secondValidity, _, found := imapFolderOf(t, db, "inbox")
 	require.True(t, found)
 	assert.NotEqual(t, firstValidity, secondValidity, "renumbering must change UIDVALIDITY")
 }
