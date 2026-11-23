@@ -10,6 +10,7 @@ export const MEMBER_FEATURES: readonly MemberFeature[] = [
   'contacts',
   'templates',
   'api_keys',
+  'mail_clients',
 ];
 
 const ALL_FEATURES: MemberFeatures = {
@@ -17,6 +18,7 @@ const ALL_FEATURES: MemberFeatures = {
   contacts: true,
   templates: true,
   api_keys: true,
+  mail_clients: true,
 };
 
 /**

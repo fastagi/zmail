@@ -139,7 +139,13 @@ describe('rosterSummary', () => {
 });
 
 describe('roster import mock', () => {
-  const features = { broadcasts: true, contacts: false, templates: true, api_keys: false };
+  const features = {
+    broadcasts: true,
+    contacts: false,
+    templates: true,
+    api_keys: false,
+    mail_clients: true,
+  };
   const owner = { userId: 1, role: 'owner' as const };
   const domain = (name: string) =>
     name === 'news.example.com'
@@ -375,7 +381,13 @@ describe('roster import dialog', () => {
     expect(admin.importMembers).toHaveBeenLastCalledWith(1, {
       dryRun: true,
       domain: 'news.example.com',
-      features: { broadcasts: false, contacts: true, templates: true, api_keys: false },
+      features: {
+        broadcasts: false,
+        contacts: true,
+        templates: true,
+        api_keys: false,
+        mail_clients: true,
+      },
       rows,
     });
     const failedRow = screen

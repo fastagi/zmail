@@ -141,6 +141,7 @@ const messages = {
     contacts: 'Contacts',
     templates: 'Templates',
     api_keys: 'API keys',
+    mail_clients: 'Mail apps',
   },
   featuresColumn: 'Features',
   featuresAllForManagers: 'Every feature',

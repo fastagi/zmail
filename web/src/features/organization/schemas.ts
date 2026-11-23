@@ -1,4 +1,5 @@
 import {
+  _default,
   array,
   boolean,
   email,
@@ -41,7 +42,13 @@ export const invitationEmailSendStatusSchema = enumSchema([
 ]);
 
 /** The console features an organization grants each member, in display order. */
-export const memberFeatureSchema = enumSchema(['broadcasts', 'contacts', 'templates', 'api_keys']);
+export const memberFeatureSchema = enumSchema([
+  'broadcasts',
+  'contacts',
+  'templates',
+  'api_keys',
+  'mail_clients',
+]);
 
 /**
  * What a membership may use. Owners and admins always report every feature. Optional on the
@@ -52,6 +59,8 @@ export const memberFeaturesSchema = strictObject({
   contacts: boolean(),
   templates: boolean(),
   api_keys: boolean(),
+  // An API from before mail client access does not report it; nothing there signs mail apps in.
+  mail_clients: _default(boolean(), false),
 });
 
 const safeIdSchema = number().check(
@@ -226,6 +235,7 @@ export const updateOrganizationMemberFeaturesSchema = strictObject({
   contacts: optional(boolean()),
   templates: optional(boolean()),
   api_keys: optional(boolean()),
+  mail_clients: optional(boolean()),
 }).check(
   refine((value) => Object.values(value).some((granted) => granted !== undefined), {
     message: 'Name at least one feature',

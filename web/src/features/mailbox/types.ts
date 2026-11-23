@@ -149,6 +149,7 @@ export interface MemberImportFeatures {
   contacts: boolean;
   templates: boolean;
   api_keys: boolean;
+  mail_clients: boolean;
 }
 export interface MemberImportInput {
   dryRun: boolean;
