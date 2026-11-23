@@ -101,7 +101,10 @@ func APIKeyRestrictionFromContext(ctx context.Context) APIKeyRestriction {
 	if ctx == nil {
 		return APIKeyRestriction{}
 	}
-	value, _ := ctx.Value(apiKeyRestrictionKey{}).(APIKeyRestriction)
+	value, ok := ctx.Value(apiKeyRestrictionKey{}).(APIKeyRestriction)
+	if !ok {
+		return APIKeyRestriction{}
+	}
 	return value
 }
 

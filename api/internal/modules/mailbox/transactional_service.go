@@ -230,7 +230,7 @@ func (s *service) SendTransactional(ctx context.Context, actor TransactionalActo
 	if err != nil {
 		return nil, false, err
 	}
-	if err := requireAPIKeySendingDomain(ctx, template.FromAddress); err != nil {
+	if err = requireAPIKeySendingDomain(ctx, template.FromAddress); err != nil {
 		return nil, false, err
 	}
 	send, err := s.newTransactionalSend(actor, template, parsed, input.To, input.Variables, input.IdempotencyKey)
