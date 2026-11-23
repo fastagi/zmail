@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { isWebFeatureEnabled } from '@/config/features';
 import { ApiKeyPanel } from '@/features/api-key';
+import { LazyMailClientsTab } from '@/features/mailbox/components/mail-clients-tab-lazy';
 import { MemberFeatureGate } from '@/features/mailbox/components/member-feature-gate';
 import { NotificationSettingsTab } from '@/features/notification/components/notification-settings-tab';
 import { getT } from '@/i18n/server';
@@ -29,11 +30,6 @@ const ProfilePanel = lazy(async () => {
 const UserSettingPanel = lazy(async () => {
   const feature = await import('@/features/setting/components/user-setting-panel');
   return { default: feature.UserSettingPanel };
-});
-
-const MailClientsTab = lazy(async () => {
-  const feature = await import('@/features/mailbox/components/mail-clients-tab');
-  return { default: feature.MailClientsTab };
 });
 
 const settingsTabs = [
@@ -141,9 +137,7 @@ export default async function SettingsPage() {
         {mailClientsEnabled ? (
           <TabsContent value="mail-clients" className="pt-5">
             <MemberFeatureGate feature="mail_clients">
-              <Suspense fallback={<UserSettingPanelFallback />}>
-                <MailClientsTab />
-              </Suspense>
+              <LazyMailClientsTab />
             </MemberFeatureGate>
           </TabsContent>
         ) : null}
