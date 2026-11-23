@@ -3587,7 +3587,7 @@ outside account does not publish.
 | `title` | The sender's display name, or address without one; control characters folded, at most 160 characters |
 | `body` | The subject with codes and sensitive links masked as in [Masked Secrets](#masked-secrets), at most 80 characters (cut with `…`), or `(no subject)` |
 | `action_url` | `/console/mailboxes?org=<organization_id>&mailbox=<mailbox_id>&open=<message_id>` |
-| `channels` | `in_app`, `web_push`; none required |
+| `channels` | `web_push` only, not required; the inbox already lists new mail, so it never enters the notification center |
 
 No message body, recipient list, or attachment name is published. Publishing runs after the message
 is stored; a failure is logged at `warn` with mailbox, message, and user ids only and never changes the

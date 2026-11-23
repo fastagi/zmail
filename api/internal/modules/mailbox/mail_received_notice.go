@@ -54,10 +54,9 @@ func (s *service) publishMailReceived(ctx context.Context, mailbox *domain.Mailb
 			Title:          title,
 			Body:           body,
 			ActionURL:      actionURL,
-			Channels: []domain.NotificationChannel{
-				domain.NotificationChannelInApp,
-				domain.NotificationChannelWebPush,
-			},
+			// Push only: the inbox already lists new mail, so an in-app record per message would
+			// flood the notification center.
+			Channels: []domain.NotificationChannel{domain.NotificationChannelWebPush},
 		})
 		if errors.Is(err, domain.ErrServiceUnavailable) {
 			// The notification starter does not run.

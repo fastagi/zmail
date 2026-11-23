@@ -85,7 +85,7 @@ func TestReceiveInboundPublishesMailReceivedToEveryoneWhoCanReadTheMailbox(t *te
 		publication.Title != "Alice Example" ||
 		publication.Body != "Your verification code is ••••••" ||
 		publication.ActionURL != wantURL ||
-		!slices.Equal(publication.Channels, []domain.NotificationChannel{domain.NotificationChannelInApp, domain.NotificationChannelWebPush}) ||
+		!slices.Equal(publication.Channels, []domain.NotificationChannel{domain.NotificationChannelWebPush}) ||
 		len(publication.RequiredChannels) != 0 {
 		t.Fatalf("publication = %+v", publication)
 	}
