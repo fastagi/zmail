@@ -1,12 +1,9 @@
-/** Shown in the snippets until an operator sets `NEXT_PUBLIC_DEVELOPER_API_ORIGIN`. */
-export const DEVELOPER_API_ORIGIN_FALLBACK = 'https://api.example.com';
-
 /** The example recipient of every snippet; the caller replaces it with the real user. */
 const exampleRecipient = 'user@example.com';
 
 export interface SnippetInput {
-  /** The public API origin; absent or empty falls back to `https://api.example.com`. */
-  apiOrigin: string | undefined;
+  /** The public API origin the samples call; the caller resolves it, there is no placeholder. */
+  apiOrigin: string;
   organizationId: number;
   /** The plaintext key, or a placeholder when it is no longer shown. */
   apiKey: string;
@@ -22,9 +19,8 @@ export interface Snippets {
   python: string;
 }
 
-function endpoint(apiOrigin: string | undefined): string {
-  const origin = (apiOrigin ?? '').trim().replace(/\/+$/u, '');
-  return `${origin === '' ? DEVELOPER_API_ORIGIN_FALLBACK : origin}/v1/transactional-messages`;
+function endpoint(apiOrigin: string): string {
+  return `${apiOrigin.trim().replace(/\/+$/u, '')}/v1/transactional-messages`;
 }
 
 /** A single-quoted POSIX shell word. */

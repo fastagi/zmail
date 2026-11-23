@@ -227,6 +227,10 @@ const messages = {
       copy: 'Copy',
       copied: 'Code copied',
       copyError: 'Copy failed. Select the code manually.',
+      samplesUnavailable:
+        'Code samples are temporarily unavailable: the API address for this site could not be determined.',
+      originDevHint:
+        "Development only: {name} is not set, so the sample uses this site's address. Set it to the public API origin before deploying.",
       noOrganizationTitle: 'Create an organization first',
       noOrganizationDescription:
         'Mail is sent from an organization\'s mailboxes. Create an organization, add a mailbox, then come back for your key.',

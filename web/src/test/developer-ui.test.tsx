@@ -101,6 +101,23 @@ describe('developer quick start and send log', () => {
     vi.useRealTimers();
   });
 
+  it('samples call this site, name no env variable, and copy (#144)', async () => {
+    state.search = 'org=1&tab=start&mode=test';
+    const { container } = renderConsole();
+
+    const samples = await screen.findByLabelText('Code samples');
+    expect(samples).toHaveTextContent(`${window.location.origin}/v1/transactional-messages`);
+    expect(container.textContent).not.toContain('api.example.com');
+    expect(container.textContent).not.toContain('NEXT_PUBLIC_');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    await waitFor(() =>
+      expect(clipboard.writeText).toHaveBeenCalledWith(
+        expect.stringContaining(`${window.location.origin}/v1/transactional-messages`)
+      )
+    );
+  });
+
   it('creating a key shows it once then only the prefix', async () => {
     state.search = 'org=1&tab=start&mode=test';
     const plaintext = 'fastbuild_test_ab12cd_SECRETVALUE9z8y';

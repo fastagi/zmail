@@ -222,6 +222,8 @@ const messages = {
       copy: '复制',
       copied: '代码已复制',
       copyError: '无法复制，请手动选择代码。',
+      samplesUnavailable: '代码示例暂不可用：无法确定本站的 API 地址。',
+      originDevHint: '仅开发环境可见：未设置 {name}，示例使用当前站点地址。部署前请设置为公开的 API 地址。',
       noOrganizationTitle: '请先创建组织',
       noOrganizationDescription: '邮件从组织的邮箱发出。先创建组织并添加邮箱，再回来创建密钥。',
       createOrganization: '创建组织',

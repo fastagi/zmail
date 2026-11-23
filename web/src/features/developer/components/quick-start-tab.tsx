@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, KeyRound, Send } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { env } from '@/config/env';
 import { useApiKeys, useCreateApiKey } from '@/features/api-key/hooks/use-api-keys';
 import type { ApiKey } from '@/features/api-key/types';
 import {
@@ -26,6 +26,10 @@ import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared
 import type { MailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailTemplate, useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
 import type { MailboxDomain } from '@/features/mailbox/types';
+import {
+  showsDeveloperApiOriginHint,
+  useDeveloperApiOrigin,
+} from '@/hooks/use-developer-api-origin';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -102,10 +106,6 @@ function senderDomain(
  * samples in plain HTTP, and a test send to the caller's own address that is followed for up to
  * 30 seconds.
  */
-// Without a configured API origin the samples use this site's own origin, read after hydration.
-const subscribeNever = () => () => {};
-const readSiteOrigin = () => window.location.origin;
-
 export function QuickStartTab({
   organization,
   mode,
@@ -157,17 +157,20 @@ export function QuickStartTab({
     );
   }, [template, detail.data]);
 
-  const siteOrigin = useSyncExternalStore(subscribeNever, readSiteOrigin, () => undefined);
-  const snippets = buildSnippets({
-    apiOrigin: env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN ?? siteOrigin,
-    organizationId: organization.id,
-    apiKey:
-      createdHere?.plaintext && createdHere.revealed
-        ? createdHere.plaintext
-        : t('start.keyPlaceholder'),
-    template: template?.key ?? EXAMPLE_TEMPLATE_KEY,
-    variables,
-  });
+  const apiOrigin = useDeveloperApiOrigin();
+  const snippets =
+    apiOrigin.status === 'ready'
+      ? buildSnippets({
+          apiOrigin: apiOrigin.origin,
+          organizationId: organization.id,
+          apiKey:
+            createdHere?.plaintext && createdHere.revealed
+              ? createdHere.plaintext
+              : t('start.keyPlaceholder'),
+          template: template?.key ?? EXAMPLE_TEMPLATE_KEY,
+          variables,
+        })
+      : null;
 
   const steps = [
     {
@@ -263,10 +266,12 @@ export function QuickStartTab({
         {templates.isSuccess && items.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('start.noTemplate')}</p>
         ) : null}
-        <CodeSamples snippets={snippets} />
-        {env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN ? null : (
-          <p className="text-xs text-muted-foreground">{t('start.originHint')}</p>
-        )}
+        <CodeSamples snippets={snippets} unavailable={apiOrigin.status === 'unavailable'} />
+        {showsDeveloperApiOriginHint() ? (
+          <p className="text-xs text-muted-foreground">
+            {t('start.originDevHint', { name: 'NEXT_PUBLIC_DEVELOPER_API_ORIGIN' })}
+          </p>
+        ) : null}
         <TestSend
           organizationId={organization.id}
           mode={mode}
@@ -403,35 +408,73 @@ function KeyPanel({
   );
 }
 
-function CodeSamples({ snippets }: { snippets: Snippets }) {
+/**
+ * The samples with a copy button. Without snippets (before hydration, or when no API address can
+ * be determined) nothing can be copied.
+ */
+function CodeSamples({
+  snippets,
+  unavailable,
+}: {
+  snippets: Snippets | null;
+  unavailable: boolean;
+}) {
   const t = useT('developer');
   const [language, setLanguage] = useState<Language>('curl');
+  const copy = async () => {
+    if (!snippets) return;
+    try {
+      await navigator.clipboard.writeText(snippets[language]);
+      toast.success(t('start.samplesCopied'));
+    } catch {
+      toast.error(t('start.samplesCopyFailed'));
+    }
+  };
   return (
     <section className="min-w-0 space-y-2">
-      <div
-        role="group"
-        aria-label={t('start.language')}
-        className="inline-flex rounded-md bg-muted p-0.5"
-      >
-        {LANGUAGES.map(item => (
-          <Button
-            key={item}
-            type="button"
-            size="sm"
-            variant={language === item ? 'secondary' : 'ghost'}
-            aria-pressed={language === item}
-            onClick={() => setLanguage(item)}
-          >
-            {LANGUAGE_LABELS[item]}
-          </Button>
-        ))}
+      <div className="flex items-center justify-between gap-2">
+        <div
+          role="group"
+          aria-label={t('start.language')}
+          className="inline-flex rounded-md bg-muted p-0.5"
+        >
+          {LANGUAGES.map(item => (
+            <Button
+              key={item}
+              type="button"
+              size="sm"
+              variant={language === item ? 'secondary' : 'ghost'}
+              aria-pressed={language === item}
+              onClick={() => setLanguage(item)}
+            >
+              {LANGUAGE_LABELS[item]}
+            </Button>
+          ))}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          icon={<Copy className="size-4" />}
+          disabled={!snippets}
+          onClick={() => void copy()}
+        >
+          {t('start.copySamples')}
+        </Button>
       </div>
       <pre
         aria-label={t('start.samples')}
         tabIndex={0}
+        aria-busy={!snippets && !unavailable}
         className="max-w-full overflow-x-auto rounded-md border bg-muted p-4 font-mono text-xs leading-relaxed whitespace-pre text-foreground focus-ring"
       >
-        <code>{snippets[language]}</code>
+        {snippets ? (
+          <code>{snippets[language]}</code>
+        ) : unavailable ? (
+          <span className="font-sans whitespace-normal text-muted-foreground">
+            {t('start.samplesUnavailable')}
+          </span>
+        ) : null}
       </pre>
     </section>
   );

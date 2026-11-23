@@ -56,8 +56,13 @@ const messages = {
     samples: 'Code samples',
     language: 'Language',
     keyPlaceholder: 'YOUR_API_KEY',
-    originHint:
-      "The samples use this site's address. If your API is served from another address, replace it.",
+    copySamples: 'Copy code',
+    samplesCopied: 'Code copied',
+    samplesCopyFailed: 'Copy failed. Select the code and copy it by hand.',
+    samplesUnavailable:
+      'Code samples are temporarily unavailable: the API address for this site could not be determined.',
+    originDevHint:
+      "Development only: {name} is not set, so the samples use this site's address. Set it to the public API origin before deploying.",
     template: 'Template',
     noTemplate:
       'Create a transactional template first; until then the samples use an example template key.',
