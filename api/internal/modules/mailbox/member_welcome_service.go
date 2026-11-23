@@ -306,9 +306,9 @@ func (s *service) storeMemberWelcome(ctx context.Context, mailbox *domain.Mailbo
 		}
 		candidate := *message
 		if candidate.CountsInLane() && candidate.Status == domain.TransactionalStatusQueued {
-			reason, err := s.transactionalLaneReason(tx, message.OrganizationID, message.CreatedAt)
-			if err != nil {
-				return nil, err
+			reason, laneErr := s.transactionalLaneReason(tx, message.OrganizationID, message.CreatedAt)
+			if laneErr != nil {
+				return nil, laneErr
 			}
 			candidate.QueuedReason = reason
 		}

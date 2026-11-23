@@ -58,7 +58,7 @@ func toMemberWelcomeSettingResponse(setting MemberWelcomeSetting) MemberWelcomeS
 	defaults := make(map[string]MemberWelcomeCopyResponse, len(memberWelcomeLanguages))
 	for _, language := range memberWelcomeLanguages {
 		standard := MemberWelcomeDefault(language)
-		defaults[string(language)] = MemberWelcomeCopyResponse{Subject: standard.Subject, Body: standard.Body}
+		defaults[string(language)] = MemberWelcomeCopyResponse(standard)
 	}
 	return MemberWelcomeSettingResponse{
 		Enabled: setting.Enabled, Language: string(setting.Language),

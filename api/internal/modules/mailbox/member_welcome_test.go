@@ -198,13 +198,13 @@ func TestMemberWelcomeSettingIsForManagers(t *testing.T) {
 	if err != nil || !setting.Enabled || setting.Language != MemberWelcomeChinese || setting.Customized() || setting.UpdatedAt != nil {
 		t.Fatalf("default = %+v, %v", setting, err)
 	}
-	if _, err := f.service.MemberWelcomeSetting(ctx, member); !errors.Is(err, domain.ErrPermissionDenied) {
+	if _, err = f.service.MemberWelcomeSetting(ctx, member); !errors.Is(err, domain.ErrPermissionDenied) {
 		t.Fatalf("member read: %v", err)
 	}
-	if _, err := f.service.UpdateMemberWelcomeSetting(ctx, member, MemberWelcomeInput{Enabled: true, Language: MemberWelcomeEnglish}); !errors.Is(err, domain.ErrPermissionDenied) {
+	if _, err = f.service.UpdateMemberWelcomeSetting(ctx, member, MemberWelcomeInput{Enabled: true, Language: MemberWelcomeEnglish}); !errors.Is(err, domain.ErrPermissionDenied) {
 		t.Fatalf("member update: %v", err)
 	}
-	if _, err := f.service.PreviewMemberWelcome(ctx, member, MemberWelcomePreviewInput{Language: MemberWelcomeEnglish}); !errors.Is(err, domain.ErrPermissionDenied) {
+	if _, err = f.service.PreviewMemberWelcome(ctx, member, MemberWelcomePreviewInput{Language: MemberWelcomeEnglish}); !errors.Is(err, domain.ErrPermissionDenied) {
 		t.Fatalf("member preview: %v", err)
 	}
 
@@ -220,7 +220,7 @@ func TestMemberWelcomeSettingIsForManagers(t *testing.T) {
 	if err != nil || reset.Customized() || reset.Effective() != MemberWelcomeDefault(MemberWelcomeEnglish) {
 		t.Fatalf("reset = %+v, %v", reset, err)
 	}
-	if _, err := f.service.UpdateMemberWelcomeSetting(ctx, owner, MemberWelcomeInput{
+	if _, err = f.service.UpdateMemberWelcomeSetting(ctx, owner, MemberWelcomeInput{
 		Enabled: true, Language: MemberWelcomeEnglish, Body: "{{password}}",
 	}); err == nil {
 		t.Fatal("an unknown variable was saved")

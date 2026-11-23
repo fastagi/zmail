@@ -159,6 +159,7 @@ func (s *service) ImportMembers(ctx context.Context, viewer domain.OrganizationC
 				result.WelcomeQueued++
 			case MemberWelcomeFailed, MemberWelcomeSuppressed:
 				result.WelcomeFailed++
+			case MemberWelcomeAlreadySent, MemberWelcomeDisabled, MemberWelcomeNotConfigured, "":
 			}
 		}
 		switch outcome.Status {
