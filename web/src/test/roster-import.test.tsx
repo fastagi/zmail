@@ -19,7 +19,7 @@ vi.mock('@/features/mailbox/services/mailbox-admin-service', () => ({
   mailboxAdminService: admin,
 }));
 
-const { RosterImportDialog, mergeRetry } =
+const { RosterImportDialog, mergeRetry, rosterSummary } =
   await import('@/features/mailbox/components/admin/roster-import-dialog');
 
 describe('roster CSV', () => {
@@ -110,6 +110,31 @@ describe('mergeRetry', () => {
       [4, 'u4@example.com', 'failed'],
     ]);
     expect(merged).toMatchObject({ total: 4, invited: 2, skipped: 1, failed: 1 });
+  });
+});
+
+describe('rosterSummary', () => {
+  it('counts a taken address as needing attention and invited mailboxes as reserved', () => {
+    const summary = rosterSummary(
+      result([
+        row(1, 'invited', { mailbox_id: 11 }),
+        row(2, 'invited', { mailbox_id: 12 }),
+        row(3, 'created', { mailbox_id: 13 }),
+        row(4, 'skipped', { skip_reason: 'mailbox_taken' }),
+        row(5, 'skipped', { skip_reason: 'already_member' }),
+        row(6, 'skipped', { skip_reason: 'already_invited', mailbox_id: 14 }),
+        row(7, 'failed', { error_code: 'MAILBOX.IMPORT_EMAIL_INVALID' }),
+      ])
+    );
+    expect(summary).toEqual({
+      total: 7,
+      ready: 0,
+      invited: 2,
+      reserved: 2,
+      created: 1,
+      noop: 2,
+      attention: 2,
+    });
   });
 });
 
@@ -306,7 +331,11 @@ describe('roster import dialog', () => {
       )
       .mockResolvedValueOnce(
         result([
-          row(1, 'invited', { email: rows[0].email, email_send_status: 'accepted_by_provider' }),
+          row(1, 'invited', {
+            email: rows[0].email,
+            mailbox_id: 11,
+            email_send_status: 'accepted_by_provider',
+          }),
           row(2, 'failed', {
             email: 'bad',
             address: '',
@@ -322,7 +351,11 @@ describe('roster import dialog', () => {
             address: '',
             error_code: 'MAILBOX.IMPORT_EMAIL_INVALID',
           }),
-          row(2, 'invited', { email: rows[2].email, email_send_status: 'not_configured' }),
+          row(2, 'invited', {
+            email: rows[2].email,
+            mailbox_id: 13,
+            email_send_status: 'not_configured',
+          }),
         ])
       );
 
@@ -337,7 +370,7 @@ describe('roster import dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check rows' }));
 
     expect(
-      await screen.findByText('3 rows: 2 ready, 0 need no change, 1 with problems')
+      await screen.findByText('3 rows: 2 ready, 0 need no change, 1 need attention')
     ).toBeInTheDocument();
     expect(admin.importMembers).toHaveBeenLastCalledWith(1, {
       dryRun: true,
@@ -349,17 +382,25 @@ describe('roster import dialog', () => {
       .getAllByText('Enter a valid email of up to 100 characters.')[0]
       ?.closest('tr');
     expect(failedRow).toHaveAttribute('data-status', 'failed');
+    // A bad email is not fixed by another prefix, so the row offers none.
+    expect(screen.queryByLabelText('New mailbox prefix for bad')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Import 2 rows' }));
     expect(
-      await screen.findByText('3 rows: 1 invited, 0 mailboxes created, 0 skipped, 2 failed')
+      await screen.findByText(
+        '3 rows: 1 invited with 1 mailbox reserved, 0 mailboxes created for existing members, 0 need no change, 2 need attention'
+      )
     ).toBeInTheDocument();
     expect(admin.importMembers).toHaveBeenLastCalledWith(
       1,
       expect.objectContaining({ dryRun: false, rows })
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry 2 failed rows' }));
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      'Invited 1 person and reserved 1 mailbox for them. 0 existing members got a mailbox; 2 rows need attention.'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry 2 rows that need attention' }));
     await waitFor(() =>
       expect(admin.importMembers).toHaveBeenLastCalledWith(
         1,
@@ -367,7 +408,9 @@ describe('roster import dialog', () => {
       )
     );
     expect(
-      await screen.findByText('3 rows: 2 invited, 0 mailboxes created, 0 skipped, 1 failed')
+      await screen.findByText(
+        '3 rows: 2 invited with 2 mailboxes reserved, 0 mailboxes created for existing members, 0 need no change, 1 need attention'
+      )
     ).toBeInTheDocument();
     const bobRow = screen.getByText('bob@example.com').closest('tr');
     expect(bobRow).not.toBeNull();
@@ -377,6 +420,112 @@ describe('roster import dialog', () => {
       )
     ).toHaveLength(2);
     expect(toast.warning).toHaveBeenCalled();
+  });
+
+  it('flags a taken address, lets the admin pick a new prefix, and retries that row', async () => {
+    service.domains.mockResolvedValue([domainEntry('news.example.com', 'organization')]);
+    const rows = [
+      { email: 'alice@example.com', name: 'Alice', role: 'admin', mailbox: '' },
+      { email: 'carol@example.com', name: 'Carol', role: '', mailbox: 'ops' },
+      { email: 'dave@example.com', name: 'Dave', role: '', mailbox: '' },
+    ];
+    const taken = row(2, 'skipped', {
+      email: rows[1].email,
+      address: 'ops@news.example.com',
+      skip_reason: 'mailbox_taken',
+    });
+    const invitedBefore = row(3, 'skipped', {
+      email: rows[2].email,
+      address: 'dave@news.example.com',
+      skip_reason: 'already_invited',
+      mailbox_id: 30,
+    });
+    admin.importMembers
+      .mockResolvedValueOnce(
+        result(
+          [
+            row(1, 'valid', { email: rows[0].email, address: 'alice@news.example.com' }),
+            taken,
+            invitedBefore,
+          ],
+          true
+        )
+      )
+      .mockResolvedValueOnce(
+        result([
+          row(1, 'invited', {
+            email: rows[0].email,
+            address: 'alice@news.example.com',
+            mailbox_id: 10,
+            email_send_status: 'accepted_by_provider',
+          }),
+          taken,
+          invitedBefore,
+        ])
+      )
+      .mockResolvedValueOnce(
+        result([
+          row(1, 'invited', {
+            email: rows[1].email,
+            address: 'carol.w@news.example.com',
+            mailbox_id: 20,
+            email_send_status: 'accepted_by_provider',
+          }),
+        ])
+      );
+
+    renderDialog();
+    fireEvent.change(await screen.findByLabelText('Or paste rows'), {
+      target: {
+        value:
+          'email,name,role,mailbox\nalice@example.com,Alice,admin,\ncarol@example.com,Carol,,ops\ndave@example.com,Dave,,\n',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Check rows' }));
+
+    // A taken address is not a no-op: the person is never invited.
+    expect(
+      await screen.findByText('3 rows: 1 ready, 1 need no change, 1 need attention')
+    ).toBeInTheDocument();
+    const carolRow = screen.getByText('carol@example.com').closest('tr') as HTMLElement;
+    expect(carolRow).toHaveAttribute('data-attention', 'true');
+    expect(within(carolRow).getAllByText('Address taken').length).toBeGreaterThan(0);
+    const daveRow = screen.getByText('dave@example.com').closest('tr') as HTMLElement;
+    expect(daveRow).toHaveAttribute('data-attention', 'false');
+    // The concrete plan and the role show in the preview.
+    expect(
+      screen.getAllByText('Will invite them and reserve alice@news.example.com.').length
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText('Admin').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 row' }));
+    expect(
+      await screen.findByText(
+        '3 rows: 1 invited with 1 mailbox reserved, 0 mailboxes created for existing members, 1 need no change, 1 need attention'
+      )
+    ).toBeInTheDocument();
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      'Invited 1 person and reserved 1 mailbox for them. 0 existing members got a mailbox; 1 row needs attention.'
+    );
+
+    fireEvent.change(screen.getByLabelText('New mailbox prefix for carol@example.com'), {
+      target: { value: 'carol.w' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry 1 row that needs attention' }));
+    await waitFor(() =>
+      expect(admin.importMembers).toHaveBeenLastCalledWith(
+        1,
+        expect.objectContaining({ dryRun: false, rows: [{ ...rows[1], mailbox: 'carol.w' }] })
+      )
+    );
+    expect(
+      await screen.findByText(
+        '3 rows: 2 invited with 2 mailboxes reserved, 0 mailboxes created for existing members, 1 need no change, 0 need attention'
+      )
+    ).toBeInTheDocument();
+    expect(toast.success).toHaveBeenLastCalledWith(
+      'Retried: 1 invited, 1 mailbox reserved, 0 created, 0 still need attention.'
+    );
   });
 
   it('says why text cannot be read before calling the API', async () => {

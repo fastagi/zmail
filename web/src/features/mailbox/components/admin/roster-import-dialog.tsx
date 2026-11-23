@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -219,7 +220,15 @@ function RosterImportSteps({
   const [step, setStep] = useState<Step>({ kind: 'choose' });
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  /** New mailbox prefixes the admin typed for rows whose address was taken, by row index. */
+  const [edits, setEdits] = useState<Record<number, string>>({});
   const pending = importMembers.isPending;
+
+  const withEdits = (rows: MemberImportRowInput[]) =>
+    rows.map((row, index) => {
+      const prefix = edits[index]?.trim();
+      return prefix ? { ...row, mailbox: prefix } : row;
+    });
 
   const chooseFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -247,29 +256,36 @@ function RosterImportSteps({
         features,
         rows: read.rows,
       });
+      setEdits({});
       setStep({ kind: 'preview', rows: read.rows, result });
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
     }
   };
 
-  const submit = async (rows: MemberImportRowInput[]) => {
+  const submit = async (original: MemberImportRowInput[]) => {
     setError(null);
+    const rows = withEdits(original);
     try {
       const result = await importMembers.mutateAsync({ dryRun: false, domain, features, rows });
+      setEdits({});
       setStep({ kind: 'done', rows, result });
-      const { invited, created, failed } = result;
-      toast[failed > 0 ? 'warning' : 'success'](
-        t('admin.rosterImport.doneToast', { invited, created, failed })
+      const { invited, reserved, created, attention } = rosterSummary(result);
+      toast[attention > 0 ? 'warning' : 'success'](
+        t('admin.rosterImport.doneToast', { invited, reserved, created, attention })
       );
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
     }
   };
 
-  /** Sends only the failed rows again and puts their new outcome in place of the old one. */
-  const retryFailed = async (rows: MemberImportRowInput[], previous: MemberImportResult) => {
-    const indexes = previous.rows.filter(row => row.status === 'failed').map(row => row.row - 1);
+  /**
+   * Sends only the rows that need attention again, with any new prefix typed for a taken address,
+   * and puts their new outcome in place of the old one.
+   */
+  const retryAttention = async (original: MemberImportRowInput[], previous: MemberImportResult) => {
+    const rows = withEdits(original);
+    const indexes = previous.rows.filter(needsAttention).map(row => row.row - 1);
     const subset = indexes.map(index => rows[index]).filter(row => row !== undefined);
     if (subset.length === 0) return;
     setError(null);
@@ -282,10 +298,11 @@ function RosterImportSteps({
         rows: subset,
       });
       const merged = mergeRetry(previous, indexes, next);
+      setEdits({});
       setStep({ kind: 'done', rows, result: merged });
-      const { invited, created, failed } = next;
-      toast[failed > 0 ? 'warning' : 'success'](
-        t('admin.rosterImport.retryToast', { invited, created, failed })
+      const { invited, reserved, created, attention } = rosterSummary(next);
+      toast[attention > 0 ? 'warning' : 'success'](
+        t('admin.rosterImport.retryToast', { invited, reserved, created, attention })
       );
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
@@ -294,28 +311,34 @@ function RosterImportSteps({
     }
   };
 
-  const downloadFailed = (rows: MemberImportRowInput[], result: MemberImportResult) => {
-    const failed = result.rows
-      .filter(row => row.status === 'failed')
-      .map(row => {
-        const input = rows[row.row - 1];
-        return [
-          input?.email ?? row.email,
-          input?.name ?? '',
-          input?.role ?? '',
-          input?.mailbox ?? '',
-          rowNote(t, row),
-        ].map(guardFormulaCell);
-      });
+  const downloadAttention = (original: MemberImportRowInput[], result: MemberImportResult) => {
+    const rows = withEdits(original);
+    const failed = result.rows.filter(needsAttention).map(row => {
+      const input = rows[row.row - 1];
+      return [
+        input?.email ?? row.email,
+        input?.name ?? '',
+        input?.role ?? '',
+        input?.mailbox ?? '',
+        rowNote(t, row),
+      ].map(guardFormulaCell);
+    });
     saveCsv(
       toCsv([['email', 'name', 'role', 'mailbox', 'error'], ...failed]),
       'roster-failed-rows.csv'
     );
   };
 
-  const summary = step.kind === 'choose' ? null : summaryOf(step.result);
-  const failedCount = summary?.failed ?? 0;
-  const actionable = step.kind === 'preview' ? step.result.valid : 0;
+  const summary = step.kind === 'choose' ? null : rosterSummary(step.result);
+  const attentionCount = summary?.attention ?? 0;
+  // Ready rows, plus taken addresses the admin gave a new prefix.
+  const actionable =
+    step.kind === 'preview'
+      ? step.result.valid +
+        step.result.rows.filter(
+          row => canEditPrefix(row) && (edits[row.row - 1]?.trim() ?? '') !== ''
+        ).length
+      : 0;
 
   return (
     <>
@@ -427,12 +450,7 @@ function RosterImportSteps({
             {step.kind === 'choose'
               ? t('admin.rosterImport.checking')
               : t('admin.rosterImport.importing', {
-                  count:
-                    step.kind === 'done'
-                      ? failedCount
-                      : step.kind === 'preview'
-                        ? step.result.valid
-                        : 0,
+                  count: step.kind === 'done' ? attentionCount : actionable,
                 })}
           </p>
         ) : null}
@@ -451,18 +469,25 @@ function RosterImportSteps({
                 ? t('admin.rosterImport.previewSummary', {
                     total: summary.total,
                     ready: summary.ready,
-                    skipped: summary.skipped,
-                    failed: summary.failed,
+                    noop: summary.noop,
+                    attention: summary.attention,
                   })
                 : t('admin.rosterImport.doneSummary', {
                     total: summary.total,
                     invited: summary.invited,
+                    reserved: summary.reserved,
                     created: summary.created,
-                    skipped: summary.skipped,
-                    failed: summary.failed,
+                    noop: summary.noop,
+                    attention: summary.attention,
                   })}
             </p>
-            <RosterResultTable rows={step.result.rows} />
+            <RosterResultTable
+              rows={step.result.rows}
+              inputs={step.rows}
+              edits={edits}
+              disabled={pending}
+              onEdit={(index, value) => setEdits(current => ({ ...current, [index]: value }))}
+            />
           </>
         ) : null}
       </DialogBody>
@@ -505,14 +530,14 @@ function RosterImportSteps({
         ) : null}
         {step.kind === 'done' ? (
           <>
-            {failedCount > 0 ? (
+            {attentionCount > 0 ? (
               <>
                 <Button
                   type="button"
                   variant="outline"
                   icon={<Download className="size-4" />}
                   disabled={pending}
-                  onClick={() => downloadFailed(step.rows, step.result)}
+                  onClick={() => downloadAttention(step.rows, step.result)}
                 >
                   {t('admin.rosterImport.downloadFailed')}
                 </Button>
@@ -521,9 +546,9 @@ function RosterImportSteps({
                   variant="outline"
                   icon={<RotateCcw className="size-4" />}
                   loading={retrying}
-                  onClick={() => void retryFailed(step.rows, step.result)}
+                  onClick={() => void retryAttention(step.rows, step.result)}
                 >
-                  {t('admin.rosterImport.retryFailed', { count: failedCount })}
+                  {t('admin.rosterImport.retryFailed', { count: attentionCount })}
                 </Button>
               </>
             ) : null}
@@ -537,8 +562,38 @@ function RosterImportSteps({
   );
 }
 
-function RosterResultTable({ rows }: { rows: MemberImportRowResult[] }) {
+function RosterResultTable({
+  rows,
+  inputs,
+  edits,
+  disabled,
+  onEdit,
+}: {
+  rows: MemberImportRowResult[];
+  inputs: MemberImportRowInput[];
+  edits: Record<number, string>;
+  disabled: boolean;
+  onEdit: (index: number, value: string) => void;
+}) {
   const t = useT('mailbox');
+  const roleOf = (row: MemberImportRowResult) => {
+    const raw = (inputs[row.row - 1]?.role ?? '').trim();
+    const role = raw.toLowerCase();
+    if (role === '' || role === 'member') return t('admin.rosterImport.roles.member');
+    if (role === 'admin') return t('admin.rosterImport.roles.admin');
+    return raw;
+  };
+  const statusBadge = (row: MemberImportRowResult) => {
+    const taken = isTaken(row);
+    return (
+      <Badge
+        variant={taken ? 'outline' : statusVariant(row.status)}
+        className={cn(taken && 'border-warning/40 bg-warning-subtle text-warning')}
+      >
+        {t(taken ? 'admin.rosterImport.status.taken' : `admin.rosterImport.status.${row.status}`)}
+      </Badge>
+    );
+  };
   return (
     <div className="max-h-80 overflow-auto rounded-md border">
       <Table>
@@ -546,6 +601,9 @@ function RosterResultTable({ rows }: { rows: MemberImportRowResult[] }) {
           <TableRow>
             <TableHead className="w-12">{t('admin.rosterImport.columns.row')}</TableHead>
             <TableHead>{t('admin.rosterImport.columns.email')}</TableHead>
+            <TableHead className="hidden sm:table-cell">
+              {t('admin.rosterImport.columns.role')}
+            </TableHead>
             <TableHead className="hidden sm:table-cell">
               {t('admin.rosterImport.columns.address')}
             </TableHead>
@@ -558,52 +616,102 @@ function RosterResultTable({ rows }: { rows: MemberImportRowResult[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map(row => (
-            <TableRow
-              key={row.row}
-              data-status={row.status}
-              className={cn(row.status === 'failed' && 'bg-destructive/5 hover:bg-destructive/10')}
-            >
-              <TableCell className="tabular-nums text-muted-foreground">{row.row}</TableCell>
-              <TableCell className="max-w-48 whitespace-normal sm:truncate" title={row.email}>
-                <span className="break-all sm:break-normal">{row.email || '—'}</span>
-                {/* On a phone the other columns stack here instead of scrolling sideways. */}
-                <div className="mt-1 space-y-1 sm:hidden">
-                  {row.address ? (
-                    <p className="break-all text-xs text-muted-foreground">{row.address}</p>
-                  ) : null}
-                  <Badge variant={statusVariant(row.status)}>
-                    {t(`admin.rosterImport.status.${row.status}`)}
-                  </Badge>
-                  <p className={cn('text-xs', noteTone(row))}>{rowNote(t, row)}</p>
-                </div>
-              </TableCell>
-              <TableCell className="hidden max-w-48 truncate sm:table-cell" title={row.address}>
-                {row.address || '—'}
-              </TableCell>
-              <TableCell className="hidden sm:table-cell">
-                <Badge variant={statusVariant(row.status)}>
-                  {t(`admin.rosterImport.status.${row.status}`)}
-                </Badge>
-              </TableCell>
-              <TableCell
+          {rows.map(row => {
+            const index = row.row - 1;
+            return (
+              <TableRow
+                key={row.row}
+                data-status={row.status}
+                data-attention={needsAttention(row) ? 'true' : 'false'}
                 className={cn(
-                  'hidden min-w-48 whitespace-normal text-sm sm:table-cell',
-                  noteTone(row)
+                  row.status === 'failed' && 'bg-destructive/5 hover:bg-destructive/10',
+                  isTaken(row) && 'bg-warning-subtle hover:bg-warning-subtle'
                 )}
               >
-                {rowNote(t, row)}
-              </TableCell>
-            </TableRow>
-          ))}
+                <TableCell className="align-top tabular-nums text-muted-foreground">
+                  {row.row}
+                </TableCell>
+                <TableCell className="max-w-56 whitespace-normal align-top" title={row.email}>
+                  <span className="break-all">{row.email || '—'}</span>
+                  {/* On a phone the other columns stack here instead of scrolling sideways. */}
+                  <div className="mt-1 space-y-1 sm:hidden">
+                    <p className="text-xs text-muted-foreground">{roleOf(row)}</p>
+                    {row.address ? (
+                      <p className="break-all text-xs text-muted-foreground">{row.address}</p>
+                    ) : null}
+                    {statusBadge(row)}
+                    <p className={cn('text-xs', noteTone(row))}>{rowNote(t, row)}</p>
+                  </div>
+                  {canEditPrefix(row) ? (
+                    <Input
+                      className="mt-2 h-8 max-w-48 border-warning/40 text-sm dark:bg-background"
+                      aria-label={t('admin.rosterImport.newPrefixLabel', { email: row.email })}
+                      placeholder={t('admin.rosterImport.newPrefixPlaceholder')}
+                      value={edits[index] ?? ''}
+                      disabled={disabled}
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      onChange={event => onEdit(index, event.target.value)}
+                    />
+                  ) : null}
+                </TableCell>
+                <TableCell className="hidden align-top text-sm sm:table-cell">
+                  {roleOf(row)}
+                </TableCell>
+                <TableCell
+                  className="hidden max-w-48 truncate align-top sm:table-cell"
+                  title={row.address}
+                >
+                  {row.address || '—'}
+                </TableCell>
+                <TableCell className="hidden align-top sm:table-cell">{statusBadge(row)}</TableCell>
+                <TableCell
+                  className={cn(
+                    'hidden min-w-48 whitespace-normal align-top text-sm sm:table-cell',
+                    noteTone(row)
+                  )}
+                >
+                  {rowNote(t, row)}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
   );
 }
 
+/** A taken address leaves the person un-invited: the admin has to choose another prefix. */
+/** Row codes a different mailbox prefix fixes; the row can take a new one inline. */
+const PREFIX_ERROR_CODES: readonly string[] = [
+  ApiErrorCode.MAILBOX_IMPORT_DUPLICATE_ROW,
+  ApiErrorCode.MAILBOX_ADDRESS_INVALID,
+  ApiErrorCode.MAILBOX_ADDRESS_RESERVED,
+  ApiErrorCode.MAILBOX_ADDRESS_TAKEN,
+];
+
+function canEditPrefix(row: MemberImportRowResult) {
+  return (
+    isTaken(row) ||
+    (row.status === 'failed' &&
+      row.error_code !== null &&
+      PREFIX_ERROR_CODES.includes(row.error_code))
+  );
+}
+
+function isTaken(row: MemberImportRowResult) {
+  return row.status === 'skipped' && row.skip_reason === 'mailbox_taken';
+}
+
+/** Rows the admin must act on: refused rows and taken addresses. Other skips are no-ops. */
+export function needsAttention(row: MemberImportRowResult) {
+  return row.status === 'failed' || isTaken(row);
+}
+
 function noteTone(row: MemberImportRowResult) {
-  return row.status === 'failed' ? 'text-error' : 'text-muted-foreground';
+  if (row.status === 'failed') return 'text-error';
+  return isTaken(row) ? 'text-warning' : 'text-muted-foreground';
 }
 
 function statusVariant(status: MemberImportRowResult['status']) {
@@ -635,7 +743,7 @@ function rowNote(t: MailboxT, row: MemberImportRowResult): string {
     case 'created':
       return t('admin.rosterImport.notes.created');
     default:
-      return t('admin.rosterImport.notes.valid');
+      return t('admin.rosterImport.notes.valid', { address: row.address });
   }
 }
 
@@ -655,19 +763,24 @@ export function rosterRowErrorKey(code: string | null) {
   }
 }
 
-/** Counts for the summary lines: `ready` is what a confirmed dry run would process. */
-function summaryOf(result: MemberImportResult) {
+/**
+ * Counts for the summary lines. `reserved` counts the mailboxes held for invited people,
+ * `noop` the skips that need nothing, and `attention` the failed rows plus taken addresses.
+ */
+export function rosterSummary(result: MemberImportResult) {
+  const attention = result.rows.filter(needsAttention).length;
   return {
     total: result.total,
     ready: result.valid,
     invited: result.invited,
+    reserved: result.rows.filter(row => row.status === 'invited' && row.mailbox_id !== null).length,
     created: result.created,
-    skipped: result.skipped,
-    failed: result.failed,
+    noop: result.rows.filter(row => row.status === 'skipped' && !isTaken(row)).length,
+    attention,
   };
 }
 
-/** Puts the retried rows' outcomes in place of the failed ones and counts again. */
+/** Puts the retried rows' outcomes in place of the old ones and counts again. */
 export function mergeRetry(
   previous: MemberImportResult,
   indexes: number[],

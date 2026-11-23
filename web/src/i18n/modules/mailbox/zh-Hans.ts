@@ -550,7 +550,8 @@ const messages = {
     apiTitle: '从你自己的系统发信',
     apiDescription: '在开发者中心创建 API 密钥，就能用团队的邮箱地址从网站或后端发信。',
     sharedBadge: '共享域名',
-    sharedDescription: '连接自己的域名之前，团队邮箱地址以 @{domain} 结尾。连接后，可以为每位同事开 @你的公司.com 邮箱。',
+    sharedDescription:
+      '连接自己的域名之前，团队邮箱地址以 @{domain} 结尾。连接后，可以为每位同事开 @你的公司.com 邮箱。',
     apiOpen: '打开开发者中心',
     cfCheck: '检查权限',
     cfCheck_dns: 'DNS 记录',
@@ -591,11 +592,13 @@ const messages = {
     cfZone: 'Cloudflare 域名',
     cfBind: '绑定此域名',
     connectedTitle: '自有域名',
-    connectedDescription: '用 @你的公司.com 收发邮件。Zmail 会自动配置收信、发信和防冒充（DMARC）记录，并逐条检查。',
+    connectedDescription:
+      '用 @你的公司.com 收发邮件。Zmail 会自动配置收信、发信和防冒充（DMARC）记录，并逐条检查。',
     connectedDisabled: '此服务暂未开放自有域名，团队邮箱地址使用下方的共享域名。',
     connectedEmpty: '还没有连接域名。',
     connectTitle: '连接你的域名',
-    connectWhen: '适合大多数域名，无需任何 Token。如果域名的 DNS 还不在 Cloudflare，Zmail 会给出两条 DNS 服务器地址，你到域名注册商处改一次即可。',
+    connectWhen:
+      '适合大多数域名，无需任何 Token。如果域名的 DNS 还不在 Cloudflare，Zmail 会给出两条 DNS 服务器地址，你到域名注册商处改一次即可。',
     connectProviderFailed:
       'Cloudflare 拒绝了 Zmail 为此域名发出的请求（未使用你的 Token）。请确认域名拼写正确且已注册；.example、.test 等保留域名无法使用。如果持续失败，请稍后重试或联系客服。',
     connectLabel: '域名',
@@ -616,14 +619,16 @@ const messages = {
     statusVerified: '已验证',
     statusPending: '待验证',
     statusSettingUp: '设置中',
-    settingUpHint: 'Zmail 正在写入收信、发信和 DMARC 记录，大约需要一分钟，完成后记录会显示在这里。你可以先离开此页面。',
+    settingUpHint:
+      'Zmail 正在写入收信、发信和 DMARC 记录，大约需要一分钟，完成后记录会显示在这里。你可以先离开此页面。',
     settingUpToast: '正在 Cloudflare 中设置域名',
     pendingHint: '所有记录就绪后，才能在此域名上创建邮箱。DNS 生效可能需要几分钟，稍后再检查一次。',
     setupErrorDetails: '技术详情',
     setupError: {
       permissionDenied: {
         title: 'Cloudflare 没有允许这一步',
-        action: 'Cloudflare 连接缺少权限。请重新连接 Cloudflare，并授予 DNS 和 Email Routing 的编辑权限，然后点“重新设置”。',
+        action:
+          'Cloudflare 连接缺少权限。请重新连接 Cloudflare，并授予 DNS 和 Email Routing 的编辑权限，然后点“重新设置”。',
       },
       providerUnavailable: {
         title: 'Cloudflare 暂时繁忙或无法访问',
@@ -636,11 +641,13 @@ const messages = {
       },
       sendingRefused: {
         title: 'Cloudflare 没有为这个域名开启发信',
-        action: '请确认这个 Cloudflare 账号可以使用 Email Sending，然后点“重新设置”。多次失败时，把下面的技术详情发给 Zmail 客服。',
+        action:
+          '请确认这个 Cloudflare 账号可以使用 Email Sending，然后点“重新设置”。多次失败时，把下面的技术详情发给 Zmail 客服。',
       },
       dnsRecordRefused: {
         title: '有一条必需的 DNS 记录没能添加',
-        action: '多半是已经存在同名记录。请对照下面的记录列表，在 Cloudflare 删除标为“冲突”的那条，然后点“重新设置”。',
+        action:
+          '多半是已经存在同名记录。请对照下面的记录列表，在 Cloudflare 删除标为“冲突”的那条，然后点“重新设置”。',
       },
       routingRuleRefused: {
         title: '有邮箱的收信规则没能创建',
@@ -652,7 +659,8 @@ const messages = {
       },
       zoneNotFound: {
         title: '找不到这个域名在 Cloudflare 里的区域了',
-        action: '区域可能已被删除，或当前 Cloudflare 连接不再包含它。请重新连接能访问这个区域的 Cloudflare。',
+        action:
+          '区域可能已被删除，或当前 Cloudflare 连接不再包含它。请重新连接能访问这个区域的 Cloudflare。',
       },
       setupFailed: {
         title: '有一个设置步骤没有完成',
@@ -678,7 +686,8 @@ const messages = {
     recordHelpReceiving: '收信（MX）：让发给 @{domain} 的邮件送到 Zmail。',
     recordHelpSending: '发信（SPF、DKIM）：证明邮件确实来自你的域名，避免进入垃圾箱。',
     recordHelpDmarc: 'DMARC：告诉收件服务器如何处理冒充你域名的邮件。',
-    recordHelpAuto: '这些记录由 Zmail 自动写入，无需手动修改。显示“缺失”的记录通常几分钟内就会生效，可以点“检查 DNS”再看一次。',
+    recordHelpAuto:
+      '这些记录由 Zmail 自动写入，无需手动修改。显示“缺失”的记录通常几分钟内就会生效，可以点“检查 DNS”再看一次。',
     purposeReceiving: '收信',
     purposeSending: '发信',
     purposeDmarc: 'DMARC',
@@ -706,11 +715,15 @@ const messages = {
     nameserversNextTitle: '接下来会发生什么',
     nameserversNext1: 'Cloudflare 发现新的 DNS 服务器：通常几分钟到几小时，最长 48 小时。',
     nameserversNext2: 'Zmail 自动写入邮件记录，大约一分钟。',
-    nameserversNext3: '就可以在这个域名上创建邮箱了。Zmail 每 10 分钟自动检查一次，你可以关闭此页面，就绪后这里会显示。',
+    nameserversNext3:
+      '就可以在这个域名上创建邮箱了。Zmail 每 10 分钟自动检查一次，你可以关闭此页面，就绪后这里会显示。',
     registrarCloudflare: 'Cloudflare',
-    registrarCloudflareStep1: '如果域名的 DNS 已经在你自己的 Cloudflare 账号里，不需要修改 DNS 服务器。',
-    registrarCloudflareStep2: '先在这里移除 {zone}，再用上方“域名的 DNS 已在你自己的 Cloudflare 账号里？”的方式连接。',
-    registrarCloudflareStep3: '在 Cloudflare 注册的域名只能使用该账号的 DNS 服务器，所以只能用这种方式。',
+    registrarCloudflareStep1:
+      '如果域名的 DNS 已经在你自己的 Cloudflare 账号里，不需要修改 DNS 服务器。',
+    registrarCloudflareStep2:
+      '先在这里移除 {zone}，再用上方“域名的 DNS 已在你自己的 Cloudflare 账号里？”的方式连接。',
+    registrarCloudflareStep3:
+      '在 Cloudflare 注册的域名只能使用该账号的 DNS 服务器，所以只能用这种方式。',
     registrarOther: '其他注册商',
     registrarOtherStep1: '登录域名注册商的控制台，打开域名列表。',
     registrarOtherStep2: '找到 {zone} 的“DNS 服务器”或“Nameservers”设置（不是“解析记录”）。',
@@ -1463,7 +1476,8 @@ const messages = {
       '正在等待每日发送上限：组织 24 小时内可发的群发邮件已用完。还有 {pending} 位收件人在等待，不会丢失，大约 {time} 自动继续发送。你仍然可以暂停或取消。',
     limitPausedNoTime:
       '正在等待每日发送上限：组织 24 小时内可发的群发邮件已用完。还有 {pending} 位收件人在等待，不会丢失，24 小时窗口有空余额度后自动继续发送。你仍然可以暂停或取消。',
-    limitAhead: '这次群发会在发完前碰到每日发送上限，大约 {time} 自动继续，所以最后一部分邮件会晚一些发出。',
+    limitAhead:
+      '这次群发会在发完前碰到每日发送上限，大约 {time} 自动继续，所以最后一部分邮件会晚一些发出。',
     rateLabel: '发送速度',
     rateValue: '每分钟 {rate} 封',
     rateMeasuring: '正在测算',
@@ -1472,7 +1486,8 @@ const messages = {
     etaPaused: '暂停期间不估算',
     etaNotStarted: '开始发送后显示',
     etaMeasuring: '正在计算',
-    etaHint: '根据最近 {minutes} 分钟的速度和每日发送上限估算。同时进行的其他群发可能让它晚一些完成。',
+    etaHint:
+      '根据最近 {minutes} 分钟的速度和每日发送上限估算。同时进行的其他群发可能让它晚一些完成。',
     noticeHint: '发完或被自动暂停时，你会收到站内通知和一封邮件。',
     filterAll: '全部',
     total: '收件人',
@@ -1698,22 +1713,30 @@ const messages = {
       importing: '正在导入 {count} 行…',
       back: '返回修改',
       confirm: '导入 {count} 行',
-      previewSummary: '共 {total} 行：{ready} 行可导入，{skipped} 行无需处理，{failed} 行有问题',
+      previewSummary: '共 {total} 行：{ready} 行可导入，{noop} 行无需处理，{attention} 行需要处理',
       doneSummary:
-        '共 {total} 行：已邀请 {invited}，已开通邮箱 {created}，跳过 {skipped}，失败 {failed}',
-      doneToast: '已邀请 {invited} 人，开通邮箱 {created} 个，失败 {failed} 行',
-      retryToast: '重试完成：已邀请 {invited}，已开通 {created}，仍失败 {failed}',
-      retryFailed: '重试失败的 {count} 行',
-      downloadFailed: '下载失败的行',
+        '共 {total} 行：已邀请 {invited} 人并预留 {reserved} 个邮箱，为现有成员开通 {created} 个，{noop} 行无需处理，{attention} 行需要处理',
+      doneToast:
+        '已邀请 {invited} 人，已为他们预留 {reserved} 个邮箱；为现有成员开通 {created} 个，{attention} 行需要处理',
+      retryToast:
+        '重试完成：已邀请 {invited} 人，预留 {reserved} 个邮箱，开通 {created} 个，仍有 {attention} 行需要处理',
+      retryFailed: '重试需要处理的 {count} 行',
+      downloadFailed: '下载需要处理的行',
       done: '完成',
       close: '关闭',
       retryLoad: '重试',
       noDomainTitle: '请先绑定域名',
-      noDomainDescription:
-        '个人邮箱要开在组织已验证的域名上。绑定并验证域名后，再回来导入花名册。',
+      noDomainDescription: '个人邮箱要开在组织已验证的域名上。绑定并验证域名后，再回来导入花名册。',
       connectDomain: '去绑定域名',
+      newPrefixLabel: '{email} 的新邮箱前缀',
+      newPrefixPlaceholder: '新前缀',
+      roles: {
+        member: '成员',
+        admin: '管理员',
+      },
       columns: {
         row: '行',
+        role: '角色',
         email: '邮箱',
         address: '个人邮箱',
         status: '状态',
@@ -1725,14 +1748,15 @@ const messages = {
         created: '已开通',
         skipped: '已跳过',
         failed: '失败',
+        taken: '地址被占用',
       },
       skip: {
         already_member: '已是成员，且已有个人邮箱。',
         already_invited: '已邀请过，邮箱也已预留。',
-        mailbox_taken: '这个地址已被其他人或共享邮箱占用，请换一个邮箱前缀。',
+        mailbox_taken: '这个地址已被其他人或共享邮箱占用，所以不会发出邀请。请换一个邮箱前缀。',
       },
       notes: {
-        valid: '将发出邀请或开通邮箱。',
+        valid: '将邀请对方并预留 {address}。',
         invited: '邀请已发出，邮箱已为对方预留。',
         invitedNoEmail: '邀请已创建，但邮件没有发出。可在「邀请」标签里重新发送。',
         created: '已是成员，个人邮箱已开通。',
