@@ -45,9 +45,15 @@ import { API_KEY_PLACEHOLDER, SendQuickStart } from '@/features/api-key/componen
 import { useSendReadiness } from '@/features/api-key/hooks/use-send-readiness';
 import { createApiKeySchema } from '@/features/api-key/schemas';
 import {
+  API_KEY_EXPIRY_CHOICES,
+  API_KEY_EXPIRY_PRESET_DAYS,
+  API_KEY_PURPOSE_SCOPES,
+  API_KEY_PURPOSES,
   API_KEY_SCOPE_MESSAGE_KEYS,
   API_KEY_SCOPES,
   DEFAULT_API_KEY_SCOPES,
+  type ApiKeyExpiryChoice,
+  type ApiKeyPurpose,
   type ApiKeyScope,
 } from '@/features/api-key/scopes';
 import type { ApiKey, CreateApiKeyResult } from '@/features/api-key/types';
@@ -63,9 +69,14 @@ export function ApiKeyPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [created, setCreated] = useState<CreateApiKeyResult | null>(null);
   const [name, setName] = useState('');
+  const [purpose, setPurpose] = useState<ApiKeyPurpose>('send');
   const [scopes, setScopes] = useState<readonly ApiKeyScope[]>(DEFAULT_API_KEY_SCOPES);
+  const [expiry, setExpiry] = useState<ApiKeyExpiryChoice>('never');
   const [expiresAt, setExpiresAt] = useState('');
-  const [formError, setFormError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<FormErrors>({});
+  // The plaintext key is shown once: the dialog closes only after it is copied or saved.
+  const [secured, setSecured] = useState(false);
+  const [closeBlocked, setCloseBlocked] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }),
@@ -76,33 +87,50 @@ export function ApiKeyPanel() {
     setCreateOpen(false);
     setCreated(null);
     setName('');
+    setPurpose('send');
     setScopes(DEFAULT_API_KEY_SCOPES);
+    setExpiry('never');
     setExpiresAt('');
-    setFormError(null);
+    setErrors({});
+    setSecured(false);
+    setCloseBlocked(false);
     createApiKey.reset();
+  };
+
+  const requestCloseCreateDialog = () => {
+    if (created && !secured) {
+      setCloseBlocked(true);
+      return;
+    }
+    closeCreateDialog();
+  };
+
+  const markSecured = (value: boolean) => {
+    setSecured(value);
+    if (value) setCloseBlocked(false);
   };
 
   const submitCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setFormError(null);
-    const expiry = expiresAt ? new Date(expiresAt) : null;
-    if (expiry && (Number.isNaN(expiry.getTime()) || expiry <= new Date())) {
-      setFormError(t('invalidForm'));
-      return;
-    }
-    if (scopes.length === 0) {
-      setFormError(t('scopeRequired'));
-      return;
-    }
+    const chosenScopes = purpose === 'custom' ? scopes : API_KEY_PURPOSE_SCOPES[purpose];
+    const expiresAtValue = resolveExpiry(expiry, expiresAt);
+    const nextErrors: FormErrors = {};
+    if (!isValidName(name)) nextErrors.name = t('errors.nameRequired');
+    if (chosenScopes.length === 0) nextErrors.scopes = t('errors.scopeRequired');
+    if (expiresAtValue === 'missing') nextErrors.expiry = t('errors.expiryRequired');
+    if (expiresAtValue === 'past') nextErrors.expiry = t('errors.expiryPast');
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     const candidate = {
       name,
       // In the order the dialog offers them.
-      scopes: API_KEY_SCOPES.filter(scope => scopes.includes(scope)),
-      ...(expiry ? { expires_at: expiry.toISOString() } : {}),
+      scopes: API_KEY_SCOPES.filter(scope => chosenScopes.includes(scope)),
+      ...(expiresAtValue ? { expires_at: expiresAtValue } : {}),
     };
     const parsed = createApiKeySchema.safeParse(candidate);
     if (!parsed.success) {
-      setFormError(t('invalidForm'));
+      setErrors({ form: t('invalidForm') });
       return;
     }
 
@@ -113,7 +141,7 @@ export function ApiKeyPanel() {
       toast.success(t('createdSuccess'));
     } catch {
       createApiKey.reset();
-      setFormError(t('createError'));
+      setErrors({ form: t('createError') });
     }
   };
 
@@ -121,6 +149,7 @@ export function ApiKeyPanel() {
     if (!created) return;
     try {
       await navigator.clipboard.writeText(created.plaintext_key);
+      markSecured(true);
       toast.success(t('copied'));
     } catch {
       toast.error(t('copyError'));
@@ -178,10 +207,13 @@ export function ApiKeyPanel() {
                 <p className="text-sm font-medium">{t('emptyTitle')}</p>
                 <p className="mt-1 text-sm text-muted-foreground">{t('emptyDescription')}</p>
               </div>
+              <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setCreateOpen(true)}>
+                {t('create')}
+              </Button>
             </div>
           ) : (
             <Table>
-              <TableHeader>
+              <TableHeader className="hidden sm:table-header-group">
                 <TableRow>
                   <TableHead>{t('columns.name')}</TableHead>
                   <TableHead>{t('columns.scopes')}</TableHead>
@@ -194,8 +226,11 @@ export function ApiKeyPanel() {
                 {apiKeys.data.items.map(apiKey => {
                   const status = apiKeyStatus(apiKey);
                   return (
-                    <TableRow key={apiKey.id}>
-                      <TableCell>
+                    <TableRow
+                      key={apiKey.id}
+                      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 py-2 sm:table-row sm:py-0"
+                    >
+                      <TableCell className="min-w-0 whitespace-normal sm:whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{apiKey.name}</span>
                           <Badge variant={apiKey.mode === 'test' ? 'secondary' : 'outline'}>
@@ -204,7 +239,7 @@ export function ApiKeyPanel() {
                         </div>
                         <code className="text-xs text-muted-foreground">{apiKey.key_prefix}</code>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="col-span-2 sm:col-span-1">
                         <div className="flex max-w-72 flex-wrap gap-1">
                           {apiKey.scopes.length ? (
                             apiKey.scopes.map(scope => (
@@ -217,22 +252,26 @@ export function ApiKeyPanel() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="col-span-2 sm:col-span-1">
+                        <span className="mr-2 text-muted-foreground sm:hidden">
+                          {t('columns.status')}
+                        </span>
                         <Badge variant={status === 'revoked' ? 'destructive' : 'outline'}>
                           {t(`status.${status}`)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="col-span-2 text-muted-foreground sm:col-span-1">
+                        <span className="mr-2 sm:hidden">{t('columns.lastUsed')}</span>
                         {apiKey.last_used_at
                           ? dateFormatter.format(new Date(apiKey.last_used_at))
                           : t('neverUsed')}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="col-start-2 row-start-1 text-right">
                         <Button
                           isIcon
                           size="sm"
                           variant="ghost"
-                          aria-label={t('revoke')}
+                          aria-label={t('revokeLabel', { name: apiKey.name })}
                           title={t('revoke')}
                           disabled={status === 'revoked'}
                           onClick={() => setRevokeTarget(apiKey)}
@@ -265,7 +304,7 @@ export function ApiKeyPanel() {
 
       <Dialog
         open={createOpen}
-        onOpenChange={open => (open ? setCreateOpen(true) : closeCreateDialog())}
+        onOpenChange={open => (open ? setCreateOpen(true) : requestCloseCreateDialog())}
       >
         <DialogContent size={created ? 'lg' : 'default'}>
           <DialogHeader>
@@ -314,8 +353,22 @@ export function ApiKeyPanel() {
                   </section>
                 ) : null}
               </DialogBody>
-              <DialogFooter>
-                <Button onClick={closeCreateDialog}>{t('done')}</Button>
+              <DialogFooter className="flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={secured}
+                      onCheckedChange={value => markSecured(value === true)}
+                    />
+                    {t('secretSaved')}
+                  </label>
+                  {closeBlocked ? (
+                    <p role="alert" className="text-sm text-error">
+                      {t('secretCloseBlocked')}
+                    </p>
+                  ) : null}
+                </div>
+                <Button onClick={requestCloseCreateDialog}>{t('done')}</Button>
               </DialogFooter>
             </>
           ) : (
@@ -329,60 +382,135 @@ export function ApiKeyPanel() {
                     maxLength={100}
                     autoComplete="off"
                     placeholder={t('namePlaceholder')}
+                    aria-invalid={errors.name ? true : undefined}
+                    aria-describedby={errors.name ? 'api-key-name-error' : undefined}
                     onChange={event => setName(event.target.value)}
                   />
+                  <FieldError id="api-key-name-error" message={errors.name} />
                 </div>
                 <fieldset className="space-y-2">
-                  <legend className="text-sm font-medium">{t('scopes')}</legend>
-                  <p className="text-sm text-muted-foreground">{t('scopesHint')}</p>
+                  <legend className="text-sm font-medium">{t('purpose')}</legend>
                   <div className="grid gap-2">
-                    {API_KEY_SCOPES.map(scope => {
-                      const key = API_KEY_SCOPE_MESSAGE_KEYS[scope];
-                      const checked = scopes.includes(scope);
-                      return (
-                        <label
-                          key={scope}
-                          className="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/50 has-[[data-state=checked]]:border-primary/50 has-[[data-state=checked]]:bg-primary/5"
-                        >
-                          <Checkbox
-                            checked={checked}
-                            className="mt-0.5"
-                            onCheckedChange={value =>
-                              setScopes(current =>
-                                value === true
-                                  ? [...current, scope]
-                                  : current.filter(item => item !== scope)
-                              )
-                            }
-                          />
-                          <span className="min-w-0 space-y-0.5">
-                            <span className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
-                              {t(`scopeOptions.${key}.label`)}
+                    {API_KEY_PURPOSES.map(option => (
+                      <label
+                        key={option}
+                        className="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/50 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/5"
+                      >
+                        <input
+                          type="radio"
+                          name="api-key-purpose"
+                          value={option}
+                          className="mt-1"
+                          checked={purpose === option}
+                          aria-labelledby={`api-key-purpose-${option}-label`}
+                          aria-describedby={`api-key-purpose-${option}-hint`}
+                          onChange={() => setPurpose(option)}
+                        />
+                        <span className="min-w-0 space-y-0.5">
+                          <span
+                            id={`api-key-purpose-${option}-label`}
+                            className="flex flex-wrap items-center gap-x-2 text-sm font-medium"
+                          >
+                            {t(`purposes.${option}.label`)}{' '}
+                            {option === 'custom' ? null : (
                               <code className="text-xs font-normal text-muted-foreground">
-                                {scope}
+                                ({API_KEY_PURPOSE_SCOPES[option].join(' + ')})
                               </code>
-                            </span>
-                            <span className="block text-sm text-muted-foreground">
-                              {t(`scopeOptions.${key}.description`)}
-                            </span>
+                            )}
                           </span>
-                        </label>
-                      );
-                    })}
+                          <span
+                            id={`api-key-purpose-${option}-hint`}
+                            className="block text-sm text-muted-foreground"
+                          >
+                            {t(`purposes.${option}.description`)}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
                   </div>
                 </fieldset>
-                <div className="space-y-2">
-                  <Label htmlFor="api-key-expiry">{t('expiresAt')}</Label>
-                  <Input
-                    id="api-key-expiry"
-                    type="datetime-local"
-                    value={expiresAt}
-                    onChange={event => setExpiresAt(event.target.value)}
-                  />
-                </div>
-                {formError ? (
+                {purpose === 'custom' ? (
+                  <fieldset
+                    className="space-y-2"
+                    aria-describedby={errors.scopes ? 'api-key-scopes-error' : undefined}
+                  >
+                    <legend className="text-sm font-medium">{t('scopes')}</legend>
+                    <p className="text-sm text-muted-foreground">{t('scopesHint')}</p>
+                    <div className="grid gap-2">
+                      {API_KEY_SCOPES.map(scope => {
+                        const key = API_KEY_SCOPE_MESSAGE_KEYS[scope];
+                        const checked = scopes.includes(scope);
+                        return (
+                          <label
+                            key={scope}
+                            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/50 has-[[data-state=checked]]:border-primary/50 has-[[data-state=checked]]:bg-primary/5"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              className="mt-0.5"
+                              onCheckedChange={value =>
+                                setScopes(current =>
+                                  value === true
+                                    ? [...current, scope]
+                                    : current.filter(item => item !== scope)
+                                )
+                              }
+                            />
+                            <span className="min-w-0 space-y-0.5">
+                              <span className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
+                                {t(`scopeOptions.${key}.label`)}
+                                <code className="text-xs font-normal text-muted-foreground">
+                                  {scope}
+                                </code>
+                              </span>
+                              <span className="block text-sm text-muted-foreground">
+                                {t(`scopeOptions.${key}.description`)}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <FieldError id="api-key-scopes-error" message={errors.scopes} />
+                  </fieldset>
+                ) : null}
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">{t('expiresAt')}</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {API_KEY_EXPIRY_CHOICES.map(option => (
+                      <label
+                        key={option}
+                        className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/5"
+                      >
+                        <input
+                          type="radio"
+                          name="api-key-expiry-choice"
+                          value={option}
+                          checked={expiry === option}
+                          onChange={() => setExpiry(option)}
+                        />
+                        {t(`expiry.${option}`)}
+                      </label>
+                    ))}
+                  </div>
+                  {expiry === 'custom' ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="api-key-expiry">{t('expiry.date')}</Label>
+                      <Input
+                        id="api-key-expiry"
+                        type="datetime-local"
+                        value={expiresAt}
+                        aria-invalid={errors.expiry ? true : undefined}
+                        aria-describedby={errors.expiry ? 'api-key-expiry-error' : undefined}
+                        onChange={event => setExpiresAt(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                  <FieldError id="api-key-expiry-error" message={errors.expiry} />
+                </fieldset>
+                {errors.form ? (
                   <p role="alert" className="text-sm text-error">
-                    {formError}
+                    {errors.form}
                   </p>
                 ) : null}
               </DialogBody>
@@ -403,7 +531,14 @@ export function ApiKeyPanel() {
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('revokeTitle')}</DialogTitle>
-            <DialogDescription>{t('revokeDescription')}</DialogDescription>
+            <DialogDescription>
+              {revokeTarget
+                ? t('revokeDescription', {
+                    name: revokeTarget.name,
+                    prefix: revokeTarget.key_prefix,
+                  })
+                : null}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRevokeTarget(null)}>
@@ -417,6 +552,45 @@ export function ApiKeyPanel() {
       </Dialog>
     </>
   );
+}
+
+interface FormErrors {
+  name?: string;
+  scopes?: string;
+  expiry?: string;
+  form?: string;
+}
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} className="text-sm text-error">
+      {message}
+    </p>
+  );
+}
+
+function isValidName(value: string): boolean {
+  const length = Array.from(value.trim()).length;
+  return length >= 1 && length <= 100;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The ISO expiry a choice resolves to, `null` for none, or why a custom date is unusable. */
+function resolveExpiry(
+  choice: ApiKeyExpiryChoice,
+  customValue: string
+): string | null | 'missing' | 'past' {
+  if (choice === 'never') return null;
+  if (choice !== 'custom') {
+    return new Date(Date.now() + API_KEY_EXPIRY_PRESET_DAYS[choice] * DAY_MS).toISOString();
+  }
+  if (!customValue) return 'missing';
+  const date = new Date(customValue);
+  if (Number.isNaN(date.getTime())) return 'missing';
+  if (date.getTime() <= Date.now()) return 'past';
+  return date.toISOString();
 }
 
 /** Whether a key can call `POST /v1/outbound-mail-messages`. */
