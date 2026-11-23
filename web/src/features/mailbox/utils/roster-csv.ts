@@ -4,10 +4,10 @@ import { parseCsv, toCsv } from '@/features/mailbox/utils/csv';
 
 /** The roster columns; each header also has its Simplified Chinese names. */
 const rosterHeaders = {
-  email: ['email', '邮箱', '登录邮箱', '受邀邮箱'],
-  name: ['name', '姓名', '名称'],
-  role: ['role', '角色'],
-  mailbox: ['mailbox', '邮箱前缀', '企业邮箱', '邮箱地址'],
+  email: ['email', '\u90ae\u7bb1', '\u767b\u5f55\u90ae\u7bb1', '\u53d7\u9080\u90ae\u7bb1'],
+  name: ['name', '\u59d3\u540d', '\u540d\u79f0'],
+  role: ['role', '\u89d2\u8272'],
+  mailbox: ['mailbox', '\u90ae\u7bb1\u524d\u7f00', '\u4f01\u4e1a\u90ae\u7bb1', '\u90ae\u7bb1\u5730\u5740'],
 } as const;
 
 /** The roster template: the header line and two example rows to replace. */
@@ -53,7 +53,7 @@ export function readRosterRows(text: string): RosterRowsResult {
 
 /** Spreadsheets copy cells as tab-separated lines; a file or typed text is CSV. */
 function parseRoster(text: string): string[][] {
-  const source = text.startsWith('﻿') ? text.slice(1) : text;
+  const source = text.startsWith('\ufeff') ? text.slice(1) : text;
   const firstLine = source.split(/\r\n|\r|\n/u, 1)[0] ?? '';
   if (firstLine.includes('\t') && !firstLine.includes(',')) {
     return source.split(/\r\n|\r|\n/u).map(line => line.split('\t'));
