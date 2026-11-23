@@ -297,3 +297,63 @@ func TestCloudflareErrorRespondedOnlyWithHTTPStatus(t *testing.T) {
 		})
 	}
 }
+
+// TestCloudflareSendsBccAndInlineAttachments: blind copies travel in the request's bcc field, never
+// in a header, and an inline image keeps its Content-ID.
+func TestCloudflareSendsBccAndInlineAttachments(t *testing.T) {
+	var body map[string]any
+	transport := cloudflareAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"message_id":"<a@mail.example>","delivered":[],"permanent_bounces":[],"queued":[],"suppressed_recipients":[]}}`))
+	})
+	_, err := transport.Send(context.Background(), Message{
+		FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Bcc: []string{"carol@example.com"},
+		Subject: "Hi", HTMLBody: `<img src="cid:logo@x">`,
+		Headers: map[string]string{"Bcc": "leak@example.com"},
+		Attachments: []Attachment{
+			{Filename: "logo.png", ContentType: "image/png", Content: []byte("png"), ContentID: "logo@x", Inline: true},
+			{Filename: "a.pdf", ContentType: "application/pdf", Content: []byte("pdf"), ContentID: "pdf@x"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if bcc, _ := body["bcc"].([]any); len(bcc) != 1 || bcc[0] != "carol@example.com" {
+		t.Fatalf("bcc = %v", body["bcc"])
+	}
+	if headers, _ := body["headers"].(map[string]any); headers != nil {
+		for name := range headers {
+			if strings.EqualFold(name, "bcc") {
+				t.Fatalf("a Bcc header reached the provider: %v", headers)
+			}
+		}
+	}
+	attachments, _ := body["attachments"].([]any)
+	if len(attachments) != 2 {
+		t.Fatalf("attachments = %v", body["attachments"])
+	}
+	inline, _ := attachments[0].(map[string]any)
+	if inline["disposition"] != "inline" || inline["contentId"] != "logo@x" {
+		t.Fatalf("inline attachment = %v", inline)
+	}
+	plain, _ := attachments[1].(map[string]any)
+	if plain["disposition"] != "attachment" || plain["contentId"] != nil {
+		t.Fatalf("a regular attachment with a Content-ID stays an attachment = %v", plain)
+	}
+}
+
+func TestCloudflareOmitsBccWhenThereIsNone(t *testing.T) {
+	var body map[string]any
+	transport := cloudflareAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"message_id":"<a@mail.example>","delivered":[],"permanent_bounces":[],"queued":[],"suppressed_recipients":[]}}`))
+	})
+	if _, err := transport.Send(context.Background(), Message{FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Hi", TextBody: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["bcc"]; ok {
+		t.Fatalf("bcc = %v", body["bcc"])
+	}
+}

@@ -314,8 +314,9 @@ func (s *service) PurgeExpiredTrash(ctx context.Context, now time.Time, limit in
 }
 
 // fillViewerState sets what each message looks like to the viewer: their own read state and star,
-// and the mailbox's labels.
+// and the mailbox's labels. Blind copies stay only on the messages the viewer sent.
 func (s *service) fillViewerState(ctx context.Context, viewer domain.OrganizationContext, messages ...*domain.MailMessage) error {
+	hideBlindCopies(viewer.MembershipID, messages...)
 	if err := s.fillRead(ctx, viewer, messages...); err != nil {
 		return err
 	}
@@ -334,6 +335,16 @@ func (s *service) fillViewerState(ctx context.Context, viewer domain.Organizatio
 		message.Starred = starred[message.ID]
 	}
 	return s.fillLabels(ctx, messages...)
+}
+
+// hideBlindCopies clears the blind copies of every message that membershipID did not send; zero,
+// an API key, is nobody's.
+func hideBlindCopies(membershipID uint, messages ...*domain.MailMessage) {
+	for _, message := range messages {
+		if message != nil && (membershipID == 0 || message.SentByMembershipID != membershipID) {
+			message.Bcc = nil
+		}
+	}
 }
 
 // fillLabels sets the label ids of each message. Labels are shared, so every reader sees them.

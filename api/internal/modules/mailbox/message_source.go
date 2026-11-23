@@ -71,6 +71,7 @@ func composeMessageSource(message *domain.MailMessage, attachments []domain.Mail
 	for _, attachment := range attachments {
 		files = append(files, mailtransport.Attachment{
 			Filename: attachment.Filename, ContentType: attachment.ContentType, Content: attachment.Content,
+			ContentID: attachment.ContentID, Inline: attachment.Inline,
 		})
 	}
 	return buildMIMEMessage(mailtransport.Message{

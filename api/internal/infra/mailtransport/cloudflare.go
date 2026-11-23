@@ -48,9 +48,11 @@ type cloudflareAddress struct {
 }
 
 type cloudflareSendRequest struct {
-	From    cloudflareAddress `json:"from"`
-	To      []string          `json:"to"`
-	Cc      []string          `json:"cc,omitempty"`
+	From cloudflareAddress `json:"from"`
+	To   []string          `json:"to"`
+	Cc   []string          `json:"cc,omitempty"`
+	// Bcc recipients are delivered without appearing in any header.
+	Bcc     []string          `json:"bcc,omitempty"`
 	Subject string            `json:"subject"`
 	Text    string            `json:"text,omitempty"`
 	HTML    string            `json:"html,omitempty"`
@@ -64,6 +66,8 @@ type cloudflareAttachment struct {
 	Filename    string `json:"filename"`
 	Type        string `json:"type"`
 	Disposition string `json:"disposition"`
+	// ContentID names an inline part for cid: references in the HTML body.
+	ContentID string `json:"contentId,omitempty"`
 }
 
 type cloudflareSendResponse struct {
@@ -114,17 +118,22 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 		From:    cloudflareAddress{Address: mail.FromAddress, Name: mail.FromName},
 		To:      mail.To,
 		Cc:      mail.Cc,
+		Bcc:     mail.Bcc,
 		Subject: mail.Subject,
 		Text:    mail.TextBody,
 		HTML:    mail.HTMLBody,
 	}
 	for _, attachment := range mail.Attachments {
-		body.Attachments = append(body.Attachments, cloudflareAttachment{
+		file := cloudflareAttachment{
 			Content:     base64.StdEncoding.EncodeToString(attachment.Content),
 			Filename:    attachment.Filename,
 			Type:        attachment.ContentType,
 			Disposition: "attachment",
-		})
+		}
+		if attachment.Inline && attachment.ContentID != "" {
+			file.Disposition, file.ContentID = "inline", attachment.ContentID
+		}
+		body.Attachments = append(body.Attachments, file)
 	}
 	body.Headers = sendHeaders(mail)
 	payload, err := json.Marshal(body)
@@ -199,7 +208,8 @@ func sendHeaders(mail Message) map[string]string {
 	headers := make(map[string]string, len(mail.Headers)+3)
 	for name, value := range mail.Headers {
 		switch strings.ToLower(strings.TrimSpace(name)) {
-		case "message-id", "in-reply-to", "references":
+		case "message-id", "in-reply-to", "references", "bcc":
+			// Blind copies never travel in a header.
 			continue
 		}
 		headers[name] = value
