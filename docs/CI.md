@@ -45,7 +45,10 @@ lands, and before cutting a release. The initialized-project check is not part o
 ## Runner Contract
 
 Workflows default to `ubuntu-latest`. An installation may set repository variable
-`CI_RUNNER_LABELS` to a JSON array of labels for a compatible self-hosted runner. On a runner
+`CI_RUNNER_LABELS` to a JSON array of labels for a compatible self-hosted or managed runner (for
+example a Namespace profile, `["namespace-profile-default"]`). Jobs that run the governance or
+contract scripts set up Python 3.12 and the Go version in `api/go.mod` themselves, so the runner image's own toolchains do not matter.
+Do not point a public repository at a self-hosted runner on a host that also runs production. On a runner
 host shared by several repositories, give the repository its own pool label (for example
 `["self-hosted","fe5-zmail"]`) with its own runner cap, so its jobs do not queue behind other
 repositories.
