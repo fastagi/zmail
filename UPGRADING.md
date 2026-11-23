@@ -46,8 +46,9 @@ so roll the Web forward first. Existing memberships and pending invitations are 
 - `2026_12_24_100000_add_mail_imap_uids` (mailbox starter) creates `mail_imap_folders` and
   `mail_imap_uids`, numbers every existing message in one `INSERT … SELECT` over all of
   `mail_messages`, and adds an `AFTER INSERT OR UPDATE OF placement, folder_id, status, mailbox_id`
-  trigger on `mail_messages` and an `AFTER DELETE` trigger on `mail_folders`. `CREATE TRIGGER` takes a
-  `SHARE ROW EXCLUSIVE` lock on both tables for the rest of the migration's transaction, which blocks
+  trigger on `mail_messages` and an `AFTER DELETE` trigger on `mail_folders`. The migration first takes a
+  `SHARE ROW EXCLUSIVE` lock on `mail_messages` (and `CREATE TRIGGER` the same lock on `mail_folders`)
+  for the rest of its transaction, so no message is written between the backfill and the trigger; this blocks
   inbound delivery, sending, and organizing while the backfill scans the table, so run it outside
   peak mail traffic on large mail stores. Afterwards every insert and every placement or status
   change of a message also writes one row to each UID table; two writers filing mail into the same

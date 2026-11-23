@@ -71,7 +71,15 @@ $$`
 // are kept by triggers on mail_messages, so every write path (inbound, sending, organizing, the
 // trash purge, folder deletion, handover) is covered. Existing mail is numbered by id once.
 func (m *addMailImapUIDs) Up(db *gorm.DB) error {
+	// LOCK TABLE needs a transaction; inside the runner's own transaction this is a savepoint.
+	return db.Transaction(func(tx *gorm.DB) error { return m.up(tx) })
+}
+
+func (m *addMailImapUIDs) up(db *gorm.DB) error {
 	return execStatements(db,
+		// Writers wait until the triggers exist, so no message is filed between the backfill's
+		// read and the trigger's creation without a UID, and no move leaves a stale one.
+		`LOCK TABLE mail_messages IN SHARE ROW EXCLUSIVE MODE`,
 		`CREATE TABLE mail_imap_folders (
 		    mailbox_id bigint NOT NULL,
 		    folder_key varchar(32) NOT NULL,
