@@ -38,6 +38,21 @@ so roll the Web forward first. Existing memberships and pending invitations are 
   or nil (which refuses creating mail client passwords). Run `make wire`.
 - `mail:broadcast:work` now also deletes mail client passwords revoked more than 90 days ago, as its
   last step.
+- Creating a mail client password with the `smtp` scope answers `422` with `errors.scopes` until
+  mail submission ships; only `["imap"]` is accepted.
+
+### Medium — Read-only IMAP gateway
+
+- New operator command `fastbuild mail:gateway` serves mailboxes to mail apps over implicit-TLS
+  IMAP (read-only: no APPEND, COPY, MOVE, or folder changes). It exits cleanly while
+  `MAIL_GATEWAY_IMAP_ADDR` is empty, so existing deployments are unaffected. Enabling it needs the
+  mailbox starter, `MAIL_APP_PASSWORD_PEPPER`, and `MAIL_GATEWAY_TLS_CERT_FILE` /
+  `MAIL_GATEWAY_TLS_KEY_FILE`; see `api/docs/CONFIGURATION.md` for the caps, the health address,
+  and `MAIL_GATEWAY_REVALIDATE_INTERVAL` (at most `30s`).
+- New dependency `github.com/emersion/go-imap/v2` pinned at `v2.0.0-beta.9` (MIT, with
+  `go-message` and `go-sasl`); only `internal/modules/mailbox/imapgateway` imports it.
+- `domain.MailClientStore` is new and `app.Application` gains `MailClients`, bound to the mailbox
+  service in its provider set. Run `make wire`.
 
 ### Medium — Migrations `2026_12_24_090000` to `2026_12_24_120000`
 

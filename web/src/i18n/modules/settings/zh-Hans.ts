@@ -240,7 +240,7 @@ const messages = {
       access: '访问范围',
       imap: '收信（IMAP）',
       smtp: '发信（SMTP）',
-      smtpHint: '先保存下来，等邮件 App 发信功能上线后生效。',
+      smtpHint: '即将支持：暂时还不能从邮件 App 发信。',
       currentPassword: '账户登录密码',
       currentPasswordHint: '客户端密码不经过两步验证，所以需要先确认是你本人。',
       totp: '验证码',

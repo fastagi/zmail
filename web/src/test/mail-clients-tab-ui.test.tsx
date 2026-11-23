@@ -147,6 +147,19 @@ describe('mail clients settings tab', () => {
     expect(cachedText(client)).not.toContain('"right"');
   });
 
+  it('offers sending from mail apps only as coming soon', async () => {
+    renderTab();
+
+    await screen.findByText("Alice's iPhone");
+    fireEvent.click(screen.getByRole('button', { name: 'Add device' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('checkbox', { name: /Read mail/ })).toBeChecked();
+    const smtp = within(dialog).getByRole('checkbox', { name: /Send mail/ });
+    expect(smtp).toBeDisabled();
+    expect(smtp).not.toBeChecked();
+    expect(within(dialog).getByText(/Coming soon/)).toBeInTheDocument();
+  });
+
   it('asks for the authenticator code when two-factor sign-in is on', async () => {
     state.totp.mockResolvedValue({ available: true, enabled: true, recovery_codes_remaining: 8 });
     renderTab();

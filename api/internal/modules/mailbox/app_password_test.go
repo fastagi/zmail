@@ -107,8 +107,7 @@ func newAppPasswordFixture(t *testing.T) *appPasswordFixture {
 func (f *appPasswordFixture) create(t *testing.T, viewer domain.OrganizationContext, name string) (*domain.MailAppPassword, string) {
 	t.Helper()
 	created, secret, err := f.service.CreateAppPassword(context.Background(), viewer, CreateAppPasswordInput{
-		Name: name, Scopes: []domain.MailClientProtocol{domain.MailClientProtocolIMAP, domain.MailClientProtocolSMTP},
-		CurrentPassword: "right",
+		Name: name, Scopes: []domain.MailClientProtocol{domain.MailClientProtocolIMAP}, CurrentPassword: "right",
 	})
 	if err != nil {
 		t.Fatalf("CreateAppPassword(%q): %v", name, err)
@@ -131,7 +130,7 @@ func TestCreateAppPasswordReturnsSecretOnce(t *testing.T) {
 		t.Fatalf("secret = %q", secret)
 	}
 	normalized := normalizeAppPassword(secret)
-	if created.Name != "Alice's iPhone" || created.Hint != normalized[12:] || !created.ScopeIMAP || !created.ScopeSMTP {
+	if created.Name != "Alice's iPhone" || created.Hint != normalized[12:] || !created.ScopeIMAP || created.ScopeSMTP {
 		t.Fatalf("created = %+v", created)
 	}
 	var row struct {
@@ -203,6 +202,29 @@ func TestCreateAppPasswordRequiresCurrentPasswordAndTOTP(t *testing.T) {
 	}
 	if _, _, err := f.service.CreateAppPassword(ctx, f.member, CreateAppPasswordInput{Scopes: nil, CurrentPassword: "right"}); !fieldErrorOf(err, "name") || !fieldErrorOf(err, "scopes") {
 		t.Fatalf("empty name and scopes = %v", err)
+	}
+}
+
+// TestCreateAppPasswordRefusesSMTP refuses the smtp scope until mail submission ships, before the
+// credentials are checked, so nothing is stored that a later release would have to honor.
+func TestCreateAppPasswordRefusesSMTP(t *testing.T) {
+	f := newAppPasswordFixture(t)
+	for _, scopes := range [][]domain.MailClientProtocol{
+		{domain.MailClientProtocolIMAP, domain.MailClientProtocolSMTP},
+		{domain.MailClientProtocolSMTP},
+	} {
+		_, _, err := f.service.CreateAppPassword(context.Background(), f.member, CreateAppPasswordInput{
+			Name: "Phone", Scopes: scopes, CurrentPassword: "right",
+		})
+		if !fieldErrorOf(err, "scopes") {
+			t.Fatalf("scopes %v = %v; want a scopes field error", scopes, err)
+		}
+	}
+	if f.reverifier.calls != 0 {
+		t.Fatalf("credentials were checked %d times for a refused scope", f.reverifier.calls)
+	}
+	if list, err := f.service.ListAppPasswords(context.Background(), f.member); err != nil || len(list.Items) != 0 {
+		t.Fatalf("a refused scope stored %+v, %v", list, err)
 	}
 }
 
@@ -424,6 +446,11 @@ func TestAppPasswordRoutesAnswerTheContract(t *testing.T) {
 		t.Fatalf("unknown scope = %d %v", recorder.Code, body)
 	}
 	recorder, body = do(http.MethodPost, "/mail-app-passwords", `{"name":"Phone","scopes":["imap","smtp"],"current_password":"right"}`)
+	errorsByField, _ = body["errors"].(map[string]any)
+	if recorder.Code != http.StatusUnprocessableEntity || errorsByField["scopes"] == nil {
+		t.Fatalf("smtp before mail submission ships = %d %v", recorder.Code, body)
+	}
+	recorder, body = do(http.MethodPost, "/mail-app-passwords", `{"name":"Phone","scopes":["imap"],"current_password":"right"}`)
 	data, _ := body["data"].(map[string]any)
 	if recorder.Code != http.StatusCreated || !appPasswordSecretPattern.MatchString(data["secret"].(string)) ||
 		recorder.Header().Get("Cache-Control") != "private, no-store" {

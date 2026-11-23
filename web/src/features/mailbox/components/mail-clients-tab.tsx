@@ -51,6 +51,7 @@ import {
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
+import { cn } from '@/utils';
 
 type CreateError =
   | 'nameRequired'
@@ -430,7 +431,7 @@ function CreateDeviceDialog({
       const result = await create.mutateAsync({
         name: trimmed,
         // In the order the dialog offers them.
-        scopes: (['imap', 'smtp'] as const).filter(scope => scopes.includes(scope)),
+        scopes: (['imap'] as const).filter(scope => scopes.includes(scope)),
         current_password: currentPassword,
         ...(showCode && totpCode.trim() ? { totp_code: totpCode.trim() } : {}),
       });
@@ -517,9 +518,17 @@ function CreateDeviceDialog({
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium">{t('create.access')}</legend>
                 {(['imap', 'smtp'] as const).map(scope => (
-                  <label key={scope} className="flex cursor-pointer items-start gap-3 text-sm">
+                  <label
+                    key={scope}
+                    className={cn(
+                      'flex items-start gap-3 text-sm',
+                      // Sending from mail apps is not offered yet; the API refuses the scope.
+                      scope === 'smtp' ? 'cursor-not-allowed' : 'cursor-pointer'
+                    )}
+                  >
                     <Checkbox
                       checked={scopes.includes(scope)}
+                      disabled={scope === 'smtp'}
                       className="mt-0.5"
                       onCheckedChange={value =>
                         setScopes(current =>

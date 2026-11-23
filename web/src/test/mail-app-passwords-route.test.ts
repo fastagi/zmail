@@ -52,6 +52,20 @@ describe('mail client password browser routes', () => {
     }
   });
 
+  it('refuses the smtp scope until mail submission ships', async () => {
+    const route = await loadRoute();
+    for (const scopes of [['imap', 'smtp'], ['smtp']]) {
+      const refused = await route.createMailAppPasswordRoute(
+        request('/api/mail-app-passwords', {
+          method: 'POST',
+          body: JSON.stringify({ name: 'Phone', scopes, current_password: 'admin123' }),
+        })
+      );
+      expect(refused.status).toBe(422);
+      expect((await refused.json()).errors).toMatchObject({ scopes: [expect.any(String)] });
+    }
+  });
+
   it('returns the secret once, lists without it, and revokes', async () => {
     const route = await loadRoute();
     const created = await route.createMailAppPasswordRoute(

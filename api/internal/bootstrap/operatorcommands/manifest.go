@@ -26,6 +26,7 @@ func Manifest() infracommands.Manifest {
 		infracommands.Registration{Command: NewMailTriageWorkCommand()},
 		infracommands.Registration{Command: NewMailExternalSyncCommand()},
 		infracommands.Registration{Command: NewMailAgentEventsPruneCommand()},
+		infracommands.Registration{Command: NewMailGatewayCommand()},
 		infracommands.Registration{Command: NewMailZoneReleaseCommand()},
 		infracommands.Registration{Command: NewMailboxImportCommand()},
 		infracommands.Registration{Command: NewOrganizationShowCommand()},

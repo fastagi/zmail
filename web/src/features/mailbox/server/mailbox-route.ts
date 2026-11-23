@@ -5796,6 +5796,9 @@ export async function createMailAppPasswordRoute(request: Request): Promise<Next
     new Set(protocols).size !== protocols.length
   ) {
     errors.scopes = ['must be one or both of imap and smtp'];
+  } else if (protocols.includes('smtp')) {
+    // Mail submission is not offered yet; the API refuses the scope the same way.
+    errors.scopes = ['smtp is not offered yet'];
   }
   if (typeof currentPassword !== 'string' || currentPassword === '') {
     errors.current_password = ['is required'];

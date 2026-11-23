@@ -2923,13 +2923,13 @@ own. These are unrelated to the outside provider's app password used under
 `POST /v1/mail-app-passwords` (session) creates one for the caller in the active organization:
 
 ```json
-{ "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "current_password": "...", "totp_code": "123456" }
+{ "name": "Alice's iPhone", "scopes": ["imap"], "current_password": "...", "totp_code": "123456" }
 ```
 
 | Field | Rule |
 |---|---|
 | `name` | Required, 1 to 64 characters after trimming, the device's name |
-| `scopes` | Required, one or both of `imap` and `smtp`, no repeats. `smtp` is stored for mail submission, which is not offered yet |
+| `scopes` | Required, no repeats. Only `imap` is accepted for now: mail submission is not offered yet, so `smtp` is a field error on `scopes` until it ships |
 | `current_password` | Required, the caller's account password |
 | `totp_code` | Required when the account has two-factor sign-in on: an authenticator or recovery code |
 
@@ -2943,7 +2943,7 @@ It answers `201` with the password and, only in this response, its `secret`:
 
 ```json
 {
-  "id": 12, "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "hint": "mnop",
+  "id": 12, "name": "Alice's iPhone", "scopes": ["imap"], "hint": "mnop",
   "created_at": "2026-12-24T09:00:00Z", "last_used_at": null, "last_used_protocol": null,
   "secret": "abcd efgh ijkl mnop"
 }
@@ -2965,7 +2965,7 @@ without secrets, and tells the console whether mail apps can sign in and where:
 
 ```json
 {
-  "items": [{ "id": 12, "name": "Alice's iPhone", "scopes": ["imap", "smtp"], "hint": "mnop",
+  "items": [{ "id": 12, "name": "Alice's iPhone", "scopes": ["imap"], "hint": "mnop",
     "created_at": "2026-12-24T09:00:00Z", "last_used_at": "2026-12-24T10:00:00Z", "last_used_protocol": "imap" }],
   "limit": 20,
   "access": { "enabled": false, "reason": "organization_disabled" },

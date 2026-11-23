@@ -246,7 +246,7 @@ const messages = {
       access: 'Access',
       imap: 'Read mail (IMAP)',
       smtp: 'Send mail (SMTP)',
-      smtpHint: 'Saved for when sending from mail apps arrives.',
+      smtpHint: 'Coming soon: sending from mail apps is not available yet.',
       currentPassword: 'Your account password',
       currentPasswordHint:
         'A mail client password skips two-factor sign-in, so confirm it is you first.',

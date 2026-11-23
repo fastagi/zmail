@@ -203,6 +203,7 @@ func InitApplication() (*app.Application, error) {
 		MailTriage:                 mailboxService,
 		ExternalMail:               mailboxService,
 		MailAgentEvents:            mailboxService,
+		MailClients:                mailboxService,
 	}
 	return application, nil
 }
@@ -374,6 +375,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		MailTriage:                 mailboxService,
 		ExternalMail:               mailboxService,
 		MailAgentEvents:            mailboxService,
+		MailClients:                mailboxService,
 	}
 	return application, nil
 }
