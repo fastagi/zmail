@@ -65,7 +65,12 @@ type Service interface {
 	ReplaceReadState(context.Context, uint, uint, bool) (*domain.Notification, error)
 	MarkReadThrough(context.Context, uint, uint) (int64, int64, error)
 	Preference(context.Context, uint) (*domain.NotificationPreference, error)
-	ReplacePreference(context.Context, uint, bool, bool) (*domain.NotificationPreference, error)
+	// ReplacePreference replaces the channel switches; a nil webPushEnabled keeps the stored value.
+	ReplacePreference(context.Context, uint, bool, bool, *bool) (*domain.NotificationPreference, error)
+	WebPushConfig() WebPushConfig
+	RegisterWebPushSubscription(context.Context, uint, WebPushSubscriptionInput) (*WebPushSubscription, error)
+	ListWebPushSubscriptions(context.Context, uint) ([]*WebPushSubscription, error)
+	DeleteWebPushSubscription(context.Context, uint, uint) error
 }
 
 type service struct {
@@ -73,7 +78,9 @@ type service struct {
 	store   notificationStore
 	mailer  emailSender
 	events  eventPublisher
-	now     func() time.Time
+	// push sends browser pushes; nil when web push is not configured.
+	push webPushSender
+	now  func() time.Time
 }
 
 var (
@@ -88,12 +95,14 @@ func NewService(
 	store notificationStore,
 	mailer emailSender,
 	events eventPublisher,
+	push webPushSender,
 ) *service {
 	return &service{
 		enabled: notificationStarterEnabled(cfg),
 		store:   store,
 		mailer:  mailer,
 		events:  events,
+		push:    push,
 		now:     func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -229,6 +238,7 @@ func (s *service) ReplacePreference(
 	userID uint,
 	inAppEnabled bool,
 	emailEnabled bool,
+	webPushEnabled *bool,
 ) (*domain.NotificationPreference, error) {
 	if err := s.available(); err != nil {
 		return nil, err
@@ -241,12 +251,17 @@ func (s *service) ReplacePreference(
 		return nil, err
 	}
 	now := s.now()
+	webPush := before.WebPushEnabled
+	if webPushEnabled != nil {
+		webPush = *webPushEnabled
+	}
 	preference := &domain.NotificationPreference{
-		UserID:       userID,
-		InAppEnabled: inAppEnabled,
-		EmailEnabled: emailEnabled,
-		CreatedAt:    before.CreatedAt,
-		UpdatedAt:    now,
+		UserID:         userID,
+		InAppEnabled:   inAppEnabled,
+		EmailEnabled:   emailEnabled,
+		WebPushEnabled: webPush,
+		CreatedAt:      before.CreatedAt,
+		UpdatedAt:      now,
 	}
 	if preference.CreatedAt.IsZero() {
 		preference.CreatedAt = now
@@ -261,8 +276,9 @@ func (s *service) ReplacePreference(
 		TargetID:   strconv.FormatUint(uint64(userID), 10),
 		Result:     domain.AuditResultSuccess,
 		Changes: map[string]domain.AuditValueChange{
-			"in_app_enabled": {Before: before.InAppEnabled, After: inAppEnabled},
-			"email_enabled":  {Before: before.EmailEnabled, After: emailEnabled},
+			"in_app_enabled":   {Before: before.InAppEnabled, After: inAppEnabled},
+			"email_enabled":    {Before: before.EmailEnabled, After: emailEnabled},
+			"web_push_enabled": {Before: before.WebPushEnabled, After: webPush},
 		},
 	})
 	return preference, nil
@@ -279,18 +295,46 @@ func (s *service) DispatchDue(ctx context.Context, limit int) (int, error) {
 	if _, err := s.store.FailExhausted(ctx, now, maxDeliveryAttempts); err != nil {
 		return 0, err
 	}
+	// Pushes are claimed first with half the batch: they are the latency-sensitive channel, and
+	// email keeps the rest so neither channel starves the other.
+	pushes, err := s.store.ClaimDueWebPush(
+		ctx,
+		now,
+		defaultDeliveryLease,
+		maxDeliveryAttempts,
+		(limit+1)/2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	completed := 0
+	for index := range pushes {
+		if err := ctx.Err(); err != nil {
+			return completed, err
+		}
+		ok, err := s.dispatchWebPush(ctx, pushes[index])
+		if err != nil {
+			return completed, err
+		}
+		if ok {
+			completed++
+		}
+	}
+	if limit-len(pushes) < 1 {
+		return completed, nil
+	}
+
 	deliveries, err := s.store.ClaimDueEmail(
 		ctx,
 		now,
 		defaultDeliveryLease,
 		maxDeliveryAttempts,
-		limit,
+		limit-len(pushes),
 	)
 	if err != nil {
-		return 0, err
+		return completed, err
 	}
 
-	completed := 0
 	for index := range deliveries {
 		if err := ctx.Err(); err != nil {
 			return completed, err
@@ -424,7 +468,8 @@ func canonicalChannels(channels []domain.NotificationChannel) ([]domain.Notifica
 	result := append([]domain.NotificationChannel(nil), channels...)
 	slices.Sort(result)
 	for index, channel := range result {
-		if channel != domain.NotificationChannelInApp && channel != domain.NotificationChannelEmail {
+		if channel != domain.NotificationChannelInApp && channel != domain.NotificationChannelEmail &&
+			channel != domain.NotificationChannelWebPush {
 			return nil, domain.ErrNotificationInvalidChannel
 		}
 		if index > 0 && result[index-1] == channel {
@@ -454,6 +499,9 @@ func selectPublicationChannels(
 			enabled = enabled || preference.InAppEnabled
 		case domain.NotificationChannelEmail:
 			enabled = enabled || preference.EmailEnabled
+		case domain.NotificationChannelWebPush:
+			// The repository also drops web_push when the user has no subscription.
+			enabled = enabled || preference.WebPushEnabled
 		default:
 			return nil, domain.ErrNotificationInvalidChannel
 		}

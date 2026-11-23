@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,8 +44,11 @@ type notificationStore interface {
 	ReplacePreference(context.Context, *domain.NotificationPreference) error
 	FailExhausted(context.Context, time.Time, uint8) (int64, error)
 	ClaimDueEmail(context.Context, time.Time, time.Duration, uint8, int) ([]claimedEmailDelivery, error)
+	ClaimDueWebPush(context.Context, time.Time, time.Duration, uint8, int) ([]claimedEmailDelivery, error)
 	BindEmailDestination(context.Context, uint, string, string) (bool, error)
+	// CompleteEmail completes a leased delivery of any channel.
 	CompleteEmail(context.Context, uint, string, deliveryCompletion) (bool, error)
+	webPushStore
 }
 
 type deliveryCompletion struct {
@@ -92,6 +96,17 @@ func (r *repository) CreatePublication(
 		channels, err := selectPublicationChannels(publication, preference)
 		if err != nil {
 			return err
+		}
+		if slices.Contains(channels, domain.NotificationChannelWebPush) {
+			subscribed, err := hasWebPushSubscription(tx, publication.UserID)
+			if err != nil {
+				return err
+			}
+			if !subscribed {
+				channels = slices.DeleteFunc(channels, func(channel domain.NotificationChannel) bool {
+					return channel == domain.NotificationChannelWebPush
+				})
+			}
 		}
 
 		po := NotificationPO{
@@ -292,11 +307,12 @@ func (r *repository) ReplacePreference(ctx context.Context, preference *domain.N
 	}
 
 	po := NotificationPreferencePO{
-		UserID:       preference.UserID,
-		InAppEnabled: preference.InAppEnabled,
-		EmailEnabled: preference.EmailEnabled,
-		CreatedAt:    preference.CreatedAt,
-		UpdatedAt:    preference.UpdatedAt,
+		UserID:         preference.UserID,
+		InAppEnabled:   preference.InAppEnabled,
+		EmailEnabled:   preference.EmailEnabled,
+		WebPushEnabled: preference.WebPushEnabled,
+		CreatedAt:      preference.CreatedAt,
+		UpdatedAt:      preference.UpdatedAt,
 	}
 	err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
@@ -304,10 +320,11 @@ func (r *repository) ReplacePreference(ctx context.Context, preference *domain.N
 			DoUpdates: clause.AssignmentColumns([]string{
 				"in_app_enabled",
 				"email_enabled",
+				"web_push_enabled",
 				"updated_at",
 			}),
 		}).
-		Select("user_id", "in_app_enabled", "email_enabled", "created_at", "updated_at").
+		Select("user_id", "in_app_enabled", "email_enabled", "web_push_enabled", "created_at", "updated_at").
 		Create(&po).Error
 	if err != nil {
 		return fmt.Errorf("replace notification preference: %w", err)
@@ -319,29 +336,62 @@ func (r *repository) FailExhausted(ctx context.Context, now time.Time, maxAttemp
 	if r == nil || r.db == nil {
 		return 0, domain.ErrServiceUnavailable
 	}
-	result := r.db.WithContext(ctx).Model(&NotificationDeliveryPO{}).
-		Where("channel = ? AND attempts >= ?", domain.NotificationChannelEmail, maxAttempts).
-		Where(
-			"status = ? OR (status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)",
-			deliveryStatusPending,
-			deliveryStatusProcessing,
-			now,
-		).
-		Updates(map[string]any{
-			"status":            deliveryStatusFailed,
-			"lease_token":       "",
-			"lease_expires_at":  nil,
-			"last_failure_code": failureRetryExhausted,
-			"updated_at":        now,
-		})
-	if result.Error != nil {
-		return 0, fmt.Errorf("fail exhausted notification deliveries: %w", result.Error)
+	exhausted := []struct {
+		channel domain.NotificationChannel
+		code    string
+	}{
+		{domain.NotificationChannelEmail, failureRetryExhausted},
+		{domain.NotificationChannelWebPush, failureWebPushRetryExhausted},
 	}
-	return result.RowsAffected, nil
+	var total int64
+	for _, entry := range exhausted {
+		result := r.db.WithContext(ctx).Model(&NotificationDeliveryPO{}).
+			Where("channel = ? AND attempts >= ?", entry.channel, maxAttempts).
+			Where(
+				"status = ? OR (status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)",
+				deliveryStatusPending,
+				deliveryStatusProcessing,
+				now,
+			).
+			Updates(map[string]any{
+				"status":            deliveryStatusFailed,
+				"lease_token":       "",
+				"lease_expires_at":  nil,
+				"last_failure_code": entry.code,
+				"updated_at":        now,
+			})
+		if result.Error != nil {
+			return 0, fmt.Errorf("fail exhausted notification deliveries: %w", result.Error)
+		}
+		total += result.RowsAffected
+	}
+	return total, nil
 }
 
 func (r *repository) ClaimDueEmail(
 	ctx context.Context,
+	now time.Time,
+	leaseDuration time.Duration,
+	maxAttempts uint8,
+	limit int,
+) ([]claimedEmailDelivery, error) {
+	return r.claimDue(ctx, domain.NotificationChannelEmail, now, leaseDuration, maxAttempts, limit)
+}
+
+// ClaimDueWebPush leases due web_push deliveries under the same rules as email.
+func (r *repository) ClaimDueWebPush(
+	ctx context.Context,
+	now time.Time,
+	leaseDuration time.Duration,
+	maxAttempts uint8,
+	limit int,
+) ([]claimedEmailDelivery, error) {
+	return r.claimDue(ctx, domain.NotificationChannelWebPush, now, leaseDuration, maxAttempts, limit)
+}
+
+func (r *repository) claimDue(
+	ctx context.Context,
+	channel domain.NotificationChannel,
 	now time.Time,
 	leaseDuration time.Duration,
 	maxAttempts uint8,
@@ -353,7 +403,7 @@ func (r *repository) ClaimDueEmail(
 
 	claimed := make([]claimedEmailDelivery, 0, limit)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("channel = ? AND attempts < ?", domain.NotificationChannelEmail, maxAttempts).
+		query := tx.Where("channel = ? AND attempts < ?", channel, maxAttempts).
 			Where(
 				"(status = ? AND available_at <= ?) OR (status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)",
 				deliveryStatusPending,
@@ -376,7 +426,7 @@ func (r *repository) ClaimDueEmail(
 			leaseToken := uuid.NewString()
 			leaseExpiresAt := now.Add(leaseDuration)
 			update := tx.Model(&NotificationDeliveryPO{}).
-				Where("id = ? AND channel = ? AND attempts = ? AND attempts < ?", row.ID, domain.NotificationChannelEmail, row.Attempts, maxAttempts).
+				Where("id = ? AND channel = ? AND attempts = ? AND attempts < ?", row.ID, channel, row.Attempts, maxAttempts).
 				Where(
 					"(status = ? AND available_at <= ?) OR (status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)",
 					deliveryStatusPending,
@@ -518,9 +568,10 @@ func findPreference(db *gorm.DB, userID uint) (*domain.NotificationPreference, e
 	if err := db.Where("user_id = ?", userID).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &domain.NotificationPreference{
-				UserID:       userID,
-				InAppEnabled: true,
-				EmailEnabled: true,
+				UserID:         userID,
+				InAppEnabled:   true,
+				EmailEnabled:   true,
+				WebPushEnabled: true,
 			}, nil
 		}
 		return nil, fmt.Errorf("find notification preference: %w", err)

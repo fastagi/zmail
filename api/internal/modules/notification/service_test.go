@@ -81,7 +81,7 @@ func TestPublishIsIdempotentAndRejectsConflictingReplay(t *testing.T) {
 func TestPublishAppliesPreferencesAndRequiredChannelPriority(t *testing.T) {
 	service, db, _, _ := newNotificationTestService(t)
 	userID := createNotificationTestUser(t, db, "alice")
-	_, err := service.ReplacePreference(context.Background(), userID, false, false)
+	_, err := service.ReplacePreference(context.Background(), userID, false, false, nil)
 	require.NoError(t, err)
 
 	optional := testPublication(userID, "optional")
@@ -319,10 +319,11 @@ func newNotificationTestService(
 		&NotificationPO{},
 		&NotificationDeliveryPO{},
 		&NotificationPreferencePO{},
+		&NotificationWebPushSubscriptionPO{},
 	)
 	mailer := &fakeEmailSender{configured: true}
 	cfg := &config.Config{Starters: config.StarterConfig{Optional: []string{"notification"}}}
-	service := NewService(cfg, NewRepository(db), mailer, nil)
+	service := NewService(cfg, NewRepository(db), mailer, nil, nil)
 	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return now }
 	return service, db, mailer, now
@@ -356,7 +357,7 @@ func testPublication(userID uint, key string) domain.NotificationPublication {
 }
 
 func TestDisabledServiceFailsClosed(t *testing.T) {
-	service := NewService(&config.Config{}, nil, nil, nil)
+	service := NewService(&config.Config{}, nil, nil, nil, nil)
 	_, err := service.Publish(context.Background(), domain.NotificationPublication{})
 	assert.True(t, errors.Is(err, domain.ErrServiceUnavailable))
 }

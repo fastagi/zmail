@@ -11,6 +11,9 @@ type NotificationChannel string
 const (
 	NotificationChannelInApp NotificationChannel = "in_app"
 	NotificationChannelEmail NotificationChannel = "email"
+	// NotificationChannelWebPush sends a browser push to every device the user subscribed. It is
+	// selected only while the user has at least one subscription.
+	NotificationChannelWebPush NotificationChannel = "web_push"
 )
 
 // Notification is one immutable user-facing application event plus mutable read state.
@@ -34,11 +37,13 @@ func (n *Notification) IsRead() bool {
 
 // NotificationPreference controls future non-required channel selection for one user.
 type NotificationPreference struct {
-	UserID       uint      `json:"user_id"`
-	InAppEnabled bool      `json:"in_app_enabled"`
-	EmailEnabled bool      `json:"email_enabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	UserID       uint `json:"user_id"`
+	InAppEnabled bool `json:"in_app_enabled"`
+	EmailEnabled bool `json:"email_enabled"`
+	// WebPushEnabled defaults to true; a push is still sent only to subscribed devices.
+	WebPushEnabled bool      `json:"web_push_enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // NotificationPublication is the reviewed internal command accepted by the optional starter.

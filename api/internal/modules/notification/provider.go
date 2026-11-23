@@ -16,6 +16,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(notificationStore), new(*repository)),
 	ProvideEmailSender,
 	ProvideEventPublisher,
+	ProvideWebPushSender,
 	NewService,
 	wire.Bind(new(Service), new(*service)),
 	wire.Bind(new(domain.NotificationPublisher), new(*service)),

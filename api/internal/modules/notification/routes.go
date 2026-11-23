@@ -14,5 +14,11 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.PUT("/notification-read-state", h.MarkReadThrough).Name("notification-read-state.update")
 		auth.GET("/notification-preferences", h.GetPreference).Name("notification-preferences.show")
 		auth.PUT("/notification-preferences", h.ReplacePreference).Name("notification-preferences.update")
+		auth.GET("/web-push-config", h.GetWebPushConfig).Name("web-push-config.show")
+		auth.GET("/web-push-subscriptions", h.ListWebPushSubscriptions).Name("web-push-subscriptions.index")
+		auth.PUT("/web-push-subscriptions", h.PutWebPushSubscription).Name("web-push-subscriptions.update")
+		auth.DELETE("/web-push-subscriptions/:id", h.DeleteWebPushSubscription).
+			Name("web-push-subscriptions.destroy").
+			WhereNumber("id")
 	})
 }
