@@ -19,6 +19,7 @@ Thumbs.db
 
 # Local tool caches. Keep dependency and scanner caches outside the repository.
 .cache/
+.wrangler/
 .ruff_cache/
 .pytest_cache/
 __pycache__/
