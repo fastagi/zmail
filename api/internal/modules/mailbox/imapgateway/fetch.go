@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapserver"
@@ -92,16 +93,30 @@ func (s *session) fetch(ctx context.Context, w *imapserver.FetchWriter, principa
 	return nil
 }
 
-func (s *session) source(ctx context.Context, principal *domain.MailClientPrincipal, selected *selection, message domain.MailClientMessage) ([]byte, error) {
+// source returns a message's source and the done func that frees its slot, which the caller
+// calls once it no longer holds the source. At most Config.MaxSourceFetches sources are held at
+// once; a source larger than domain.MailClientMaxSourceBytes is refused and never cached.
+func (s *session) source(ctx context.Context, principal *domain.MailClientPrincipal, selected *selection, message domain.MailClientMessage) ([]byte, func(), error) {
+	select {
+	case s.server.sourceSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, func() {}, ctx.Err()
+	}
+	var once sync.Once
+	done := func() { once.Do(func() { <-s.server.sourceSlots }) }
 	if raw, ok := s.server.cache.Get(message.MessageID); ok {
-		return raw, nil
+		return raw, done, nil
 	}
 	raw, err := s.server.store.ClientMessageSource(ctx, principal, selected.mailboxID, selected.key, message.UID)
+	if err == nil && len(raw) > domain.MailClientMaxSourceBytes {
+		err = domain.ErrMailClientMessageTooLarge
+	}
 	if err != nil {
-		return nil, err
+		done()
+		return nil, func() {}, err
 	}
 	s.server.cache.Add(message.MessageID, raw)
-	return raw, nil
+	return raw, done, nil
 }
 
 func (s *session) writeMessage(ctx context.Context, w *imapserver.FetchWriter, principal *domain.MailClientPrincipal,
@@ -109,8 +124,15 @@ func (s *session) writeMessage(ctx context.Context, w *imapserver.FetchWriter, p
 	var raw []byte
 	if needsSource(options) {
 		var err error
-		raw, err = s.source(ctx, principal, selected, message)
+		var done func()
+		raw, done, err = s.source(ctx, principal, selected, message)
+		defer done()
 		if errors.Is(err, domain.ErrMailClientMessageNotFound) {
+			return nil
+		}
+		if errors.Is(err, domain.ErrMailClientMessageTooLarge) {
+			// Skipped rather than failing the rest of the FETCH; the id lets an operator find it.
+			s.server.logger.Warn("imap_gateway.source_too_large", "connection_id", s.id, "message_id", message.MessageID)
 			return nil
 		}
 		if err != nil {

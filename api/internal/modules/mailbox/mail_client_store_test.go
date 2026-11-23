@@ -477,3 +477,13 @@ func TestRevalidateClients(t *testing.T) {
 	f.Exec(t, `DELETE FROM organization_memberships WHERE id = ?`, f.Bob.MembershipID)
 	check(false, false)
 }
+
+func TestClientMessageSourceRefusesOversizedComposed(t *testing.T) {
+	f := newMailClientFixture(t)
+	principal := f.Login(t, "alice@mail.example", f.AliceSecret)
+	message := f.StoreWithoutSource(t, f.AlicePersonal, "huge")
+	f.Exec(t, `UPDATE mail_messages SET text_body = repeat('x', ?) WHERE id = ?`, domain.MailClientMaxSourceBytes+1, message.ID)
+	if _, err := f.Service.ClientMessageSource(context.Background(), principal, f.AlicePersonal.ID, "inbox", 1); !errors.Is(err, domain.ErrMailClientMessageTooLarge) {
+		t.Fatalf("an oversized composed source = %v; want ErrMailClientMessageTooLarge", err)
+	}
+}

@@ -93,7 +93,14 @@ var (
 	ErrMailClientSearchUnsupported = errors.New("mail client search criterion is not supported")
 	// ErrMailClientMessageNotFound is a UID that no longer names a readable message.
 	ErrMailClientMessageNotFound = errors.New("mail client message not found")
+	// ErrMailClientMessageTooLarge is a message whose source is larger than
+	// MailClientMaxSourceBytes; it is not loaded.
+	ErrMailClientMessageTooLarge = errors.New("mail client message source is too large")
 )
+
+// MailClientMaxSourceBytes is the largest message source served to a mail app: the 5 MiB that
+// inbound mail is capped at when it is stored.
+const MailClientMaxSourceBytes = 5 << 20
 
 // MailClientFlag is a message flag a mail app may change.
 type MailClientFlag string

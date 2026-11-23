@@ -293,7 +293,8 @@ func (s *service) ClientMessages(ctx context.Context, p *domain.MailClientPrinci
 }
 
 // ClientMessageSource returns what a mail app downloads for one message: its stored source, or a
-// message rebuilt from its fields. It is never masked (see the gateway spec on verification codes).
+// message rebuilt from its fields. One larger than domain.MailClientMaxSourceBytes is refused
+// with domain.ErrMailClientMessageTooLarge before it is loaded. It is never masked (see the gateway spec on verification codes).
 func (s *service) ClientMessageSource(ctx context.Context, p *domain.MailClientPrincipal, mailboxID uint, key string, uid uint32) ([]byte, error) {
 	store, err := s.clientFolder(ctx, p, mailboxID, key)
 	if err != nil {
@@ -314,7 +315,7 @@ func (s *service) ClientMessageSource(ctx context.Context, p *domain.MailClientP
 	if err != nil {
 		return nil, err
 	}
-	return s.messageSource(ctx, message)
+	return s.messageSourceWithin(ctx, message, domain.MailClientMaxSourceBytes)
 }
 
 // SetClientFlag changes the member's read state or star through the same path as the web.

@@ -97,20 +97,41 @@ func composedMessageID(message *domain.MailMessage) string {
 // messageSource returns what a mail app downloads for a message: its stored source, or a message
 // rebuilt from its fields and attachments.
 func (s *service) messageSource(ctx context.Context, message *domain.MailMessage) ([]byte, error) {
+	return s.messageSourceWithin(ctx, message, 0)
+}
+
+// messageSourceWithin is messageSource that, when limit is positive, answers
+// domain.ErrMailClientMessageTooLarge instead of loading a source larger than limit bytes. Stored
+// sources are capped when they are stored; a rebuilt one is measured from its fields and its
+// attachments' recorded sizes before their contents are read.
+func (s *service) messageSourceWithin(ctx context.Context, message *domain.MailMessage, limit int) ([]byte, error) {
 	if store, ok := s.repo.(messageSourceStore); ok {
 		raw, err := store.FindMessageSource(ctx, message.ID)
 		if err == nil {
+			if limit > 0 && len(raw) > limit {
+				return nil, domain.ErrMailClientMessageTooLarge
+			}
 			return raw, nil
 		}
 		if !errors.Is(err, ErrMailMessageSourceNotFound) {
 			return nil, err
 		}
 	}
+	size := len(message.TextBody) + len(message.HTMLBody)
+	if limit > 0 && size > limit {
+		return nil, domain.ErrMailClientMessageTooLarge
+	}
 	var attachments []domain.MailAttachment
 	if message.AttachmentCount > 0 {
 		listed, err := s.repo.ListMessageAttachments(ctx, message.ID)
 		if err != nil {
 			return nil, err
+		}
+		for _, item := range listed {
+			size += item.Size
+		}
+		if limit > 0 && size > limit {
+			return nil, domain.ErrMailClientMessageTooLarge
 		}
 		for _, item := range listed {
 			file, err := s.repo.FindMessageAttachment(ctx, message.ID, item.ID)

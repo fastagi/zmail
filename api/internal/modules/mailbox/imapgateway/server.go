@@ -28,6 +28,8 @@ const (
 	DefaultIdlePoll         = 30 * time.Second
 	DefaultFetchBatch       = 500
 	DefaultSourceCacheBytes = 64 << 20
+	// DefaultMaxSourceFetches bounds the full message sources one process holds at once.
+	DefaultMaxSourceFetches = 32
 	// DefaultAuthTimeout is how long a connection may stay without signing in (spec §4, §6.4).
 	DefaultAuthTimeout = 60 * time.Second
 	// commandTimeout bounds the store calls of one command.
@@ -46,6 +48,9 @@ type Config struct {
 	// FetchBatch is how many messages one store read of a FETCH covers.
 	FetchBatch       int
 	SourceCacheBytes int64
+	// MaxSourceFetches is how many FETCH responses may hold a full message source at once across
+	// all sessions; the others wait for a slot within their command's time.
+	MaxSourceFetches int
 	// AuthTimeout closes a connection that has not signed in by then, however many commands it
 	// sends: go-imap's read timeout restarts with every command.
 	AuthTimeout time.Duration
@@ -78,6 +83,9 @@ func (c Config) withDefaults() Config {
 	if c.SourceCacheBytes <= 0 {
 		c.SourceCacheBytes = DefaultSourceCacheBytes
 	}
+	if c.MaxSourceFetches <= 0 {
+		c.MaxSourceFetches = DefaultMaxSourceFetches
+	}
 	if c.AuthTimeout <= 0 {
 		c.AuthTimeout = DefaultAuthTimeout
 	}
@@ -100,14 +108,16 @@ var capabilities = imap.CapSet{
 
 // Server is the IMAP gateway.
 type Server struct {
-	store    domain.MailClientStore
-	cfg      Config
-	logger   *slog.Logger
-	limiter  *authLimiter
-	cache    *sourceCache
-	registry *sessionRegistry
-	imap     *imapserver.Server
-	nextID   atomic.Uint64
+	store   domain.MailClientStore
+	cfg     Config
+	logger  *slog.Logger
+	limiter *authLimiter
+	cache   *sourceCache
+	// sourceSlots holds one token per message source a FETCH holds (Config.MaxSourceFetches).
+	sourceSlots chan struct{}
+	registry    *sessionRegistry
+	imap        *imapserver.Server
+	nextID      atomic.Uint64
 
 	mu      sync.Mutex
 	sweep   sweepState
@@ -126,10 +136,11 @@ func NewServer(store domain.MailClientStore, cfg Config, logger *slog.Logger) *S
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		store: store, cfg: cfg, logger: logger,
-		limiter:  newAuthLimiter(cfg.Limits, cfg.Now),
-		cache:    newSourceCache(cfg.SourceCacheBytes),
-		registry: newSessionRegistry(cfg.MaxConnections, cfg.MaxPerUser, cfg.MaxPerIP),
-		ctx:      ctx, cancel: cancel,
+		limiter:     newAuthLimiter(cfg.Limits, cfg.Now),
+		cache:       newSourceCache(cfg.SourceCacheBytes),
+		sourceSlots: make(chan struct{}, cfg.MaxSourceFetches),
+		registry:    newSessionRegistry(cfg.MaxConnections, cfg.MaxPerUser, cfg.MaxPerIP),
+		ctx:         ctx, cancel: cancel,
 		sweep: sweepState{failClosedAfter: revocationDeadline - defaultRevalidateInterval},
 	}
 	s.imap = imapserver.New(&imapserver.Options{
