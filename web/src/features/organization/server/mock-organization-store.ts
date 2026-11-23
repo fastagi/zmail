@@ -11,6 +11,7 @@ import type {
   OrganizationInvitation,
   OrganizationInvitationCreateResult,
   OrganizationInvitationPage,
+  OrganizationInvitationRole,
   OrganizationInvitationStatus,
   OrganizationMember,
   OrganizationMemberPage,
@@ -96,9 +97,17 @@ interface MockMembershipRecord {
 
 interface MockInvitationRecord extends OrganizationInvitation {
   token: string;
+  /** Grants a roster import chose; the membership starts with them on accept. */
+  features?: MemberFeatures;
   /** Epoch milliseconds of accepted resends, oldest first. */
   resends?: number[];
 }
+
+export type MockMemberJoinedListener = (
+  organizationId: number,
+  userId: number,
+  email: string
+) => void;
 
 export class MockOrganizationStore {
   private organizations: MockOrganizationRecord[];
@@ -109,6 +118,7 @@ export class MockOrganizationStore {
   private nextUserId = 4;
   private nextMembershipId = 4;
   private nextInvitationId = 1;
+  private joinListeners: MockMemberJoinedListener[] = [];
   private readonly dependencies: MockOrganizationStoreDependencies;
 
   constructor(dependencies: Partial<MockOrganizationStoreDependencies> = {}) {
@@ -473,6 +483,54 @@ export class MockOrganizationStore {
     };
   }
 
+  /** The pending invitation of `email` (lowercased) to the organization, or null. */
+  pendingInvitationIdFor(organizationId: number, email: string): number | null {
+    const now = this.dependencies.now();
+    return (
+      this.invitations.find(
+        (invitation) =>
+          invitation.organization_id === organizationId &&
+          invitation.email === email &&
+          invitationStatus(invitation, now) === 'pending'
+      )?.id ?? null
+    );
+  }
+
+  /**
+   * The roster import's invitation, as the API's `InviteRosterMember`: the caller checked the
+   * manager, member, and pending invitation first. The membership starts with `features`.
+   */
+  inviteRosterMember(
+    organizationId: number,
+    email: string,
+    role: OrganizationInvitationRole,
+    features: MemberFeatures
+  ): { id: number; email_send_status: 'not_configured' } {
+    const now = this.dependencies.now();
+    const timestamp = now.toISOString();
+    const invitation: MockInvitationRecord = {
+      id: this.nextInvitationId++,
+      organization_id: organizationId,
+      email,
+      role,
+      status: 'pending',
+      expires_at: new Date(now.getTime() + INVITATION_TTL_MS).toISOString(),
+      email_send_status: 'not_configured',
+      email_attempted_at: timestamp,
+      created_at: timestamp,
+      updated_at: timestamp,
+      token: this.dependencies.invitationToken(),
+      features: { ...features },
+    };
+    this.invitations = [invitation, ...this.invitations];
+    return { id: invitation.id, email_send_status: 'not_configured' };
+  }
+
+  /** Called after an invitation is accepted, like the API's `member_joined` event. */
+  onMemberJoined(listener: MockMemberJoinedListener): void {
+    this.joinListeners.push(listener);
+  }
+
   resendInvitation(
     actor: AuthUser,
     organizationId: number,
@@ -583,17 +641,20 @@ export class MockOrganizationStore {
     const timestamp = this.dependencies.now().toISOString();
     invitation.status = 'accepted';
     invitation.updated_at = timestamp;
-    this.memberships = [
-      ...this.memberships,
-      mockMembership(
-        this.nextMembershipId++,
-        invitation.organization_id,
-        actor.id,
-        invitation.role,
-        timestamp
-      ),
-    ];
-    return this.organizationView(organization, invitation.role, NEW_MEMBER_FEATURES);
+    const membership = mockMembership(
+      this.nextMembershipId++,
+      invitation.organization_id,
+      actor.id,
+      invitation.role,
+      timestamp
+    );
+    const features = invitation.features ?? NEW_MEMBER_FEATURES;
+    membership.features = { ...features };
+    this.memberships = [...this.memberships, membership];
+    for (const listener of this.joinListeners) {
+      listener(invitation.organization_id, user.id, user.email.toLowerCase());
+    }
+    return this.organizationView(organization, invitation.role, features);
   }
 
   private managerError(

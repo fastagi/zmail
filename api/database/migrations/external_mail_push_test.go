@@ -19,6 +19,7 @@ func TestExternalMailPushUpDown(t *testing.T) {
 	exec(`INSERT INTO external_mail_subscriptions (connection_id, provider, lookup_key, status, expires_at, renew_after, created_at, updated_at)
 		VALUES (1, 'gmail', 'owner@gmail.example', 'active', now() + interval '7 days', now(), now(), now())`)
 
+	require.NoError(t, (&addMailboxPendingOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Down(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
@@ -30,6 +31,7 @@ func TestExternalMailPushUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMailPush{}).Up(db))
 	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
 	require.NoError(t, (&addExternalMailReleaseOwner{}).Up(db))
+	require.NoError(t, (&addMailboxPendingOwner{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 	var trigger string
 	require.NoError(t, db.Raw(`SELECT triggered_by FROM external_mail_sync_runs WHERE connection_id = 1`).Scan(&trigger).Error)

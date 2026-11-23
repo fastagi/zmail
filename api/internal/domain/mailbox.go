@@ -273,6 +273,10 @@ type Mailbox struct {
 	// OwnerUserID is the owner of a personal mailbox; nil for a shared one, or when the owner's
 	// account was deleted.
 	OwnerUserID *uint
+	// PendingOwnerEmail reserves a personal mailbox without an owner for the person invited at that
+	// email, lowercased: the account that joins the organization with it becomes the owner. Empty
+	// for every other mailbox. Until then nobody reads the mailbox.
+	PendingOwnerEmail string
 	// OwnerLeftAt is when the owner of a personal mailbox left the organization; nil while the
 	// owner is a member. The mailbox then awaits handover.
 	OwnerLeftAt *time.Time
@@ -630,8 +634,40 @@ type MailBroadcast struct {
 	SafetyOverride bool
 	Counts         MailBroadcastCounts
 	CreatedBy      uint
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// StartedBy is who sent or scheduled the broadcast; notices about its outcome go to them.
+	StartedBy uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// MailBroadcastProgress is how fast a running broadcast sends and when it should end. Every
+// time is an estimate from data the API holds when it answers.
+type MailBroadcastProgress struct {
+	// RatePerMinute is the recipients finished per minute over the last RateWindow; nil when none
+	// finished in it, so there is no rate to measure.
+	RatePerMinute *float64
+	RateWindow    time.Duration
+	// EstimatedFinishAt is when the last pending recipient should be finished; nil when it cannot
+	// be told, such as while the broadcast is paused or before it has a rate.
+	EstimatedFinishAt *time.Time
+	// SendLimitPauses tells whether the organization's 24-hour broadcast limit will hold the
+	// broadcast, or holds it now, before every pending recipient is sent.
+	SendLimitPauses bool
+	// SendLimitResumesAt is when the limit has room again for a broadcast it holds or will hold.
+	SendLimitResumesAt *time.Time
+	ComputedAt         time.Time
+}
+
+// MailBroadcastNoticeDue is a broadcast whose state changed since its starter was last told.
+type MailBroadcastNoticeDue struct {
+	Broadcast *MailBroadcast
+	// State is what the broadcast is now, in notice terms: sent, failed, bounce_rate_high,
+	// complaint_rate_high, send_limit_reached, or empty for a state that needs no notice.
+	State string
+	// NoticedState and NoticeCount are the last state its starter was told about and how many
+	// notices it had.
+	NoticedState string
+	NoticeCount  int
 }
 
 // MailBroadcastRecipient is one contact of a broadcast, fixed when sending starts.
@@ -707,6 +743,19 @@ type MailBroadcastRepository interface {
 	// SuppressContactForMessage marks the contact a broadcast message went to as suppressed,
 	// unless it already is. It does nothing for a message that was not part of a broadcast.
 	SuppressContactForMessage(ctx context.Context, messageID uint, reason string) error
+
+	// CountRecipientsFinishedSince counts the broadcast's recipients that were sent, failed, or
+	// skipped since the given time.
+	CountRecipientsFinishedSince(ctx context.Context, broadcastID uint, since time.Time) (int64, error)
+	// NthBroadcastAttemptSince returns the n-th (0-based) oldest broadcast-lane send attempt of the
+	// organization since the given time, deleted messages included, or nil when there are fewer.
+	NthBroadcastAttemptSince(ctx context.Context, organizationID uint, since time.Time, n int64) (*time.Time, error)
+	// ListBroadcastNoticesDue lists, oldest first, broadcasts whose notice state differs from their
+	// current state, leaving out those that finished before finishedSince.
+	ListBroadcastNoticesDue(ctx context.Context, finishedSince time.Time, limit int) ([]*MailBroadcastNoticeDue, error)
+	// MarkBroadcastNoticed records that the broadcast's starter was told about state, when its
+	// notice state is still from. It reports whether this call recorded it.
+	MarkBroadcastNoticed(ctx context.Context, id uint, from, state string, count int) (bool, error)
 }
 
 // MailBroadcastDispatcher sends queued transactional mail, waiting sends, and due broadcast

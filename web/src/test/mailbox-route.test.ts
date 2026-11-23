@@ -2664,6 +2664,57 @@ describe('mailbox browser route boundary', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('forwards a roster import with only documented input and refuses a bad body here', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockResolvedValue(Response.json({ code: 0, message: 'success', data: {} }));
+    const route = await loadRoute();
+
+    await route.importMembersRoute(
+      request('/api/member-imports', {
+        method: 'POST',
+        body: JSON.stringify({
+          dry_run: true,
+          domain: ' news.example.com ',
+          rows: [{ email: 'a@b.co', mailbox: 'alice', extra: 'x' }],
+          extra: true,
+        }),
+      })
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(`${init?.method} ${new URL(String(url)).pathname}`).toBe('POST /v1/member-imports');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      dry_run: true,
+      domain: 'news.example.com',
+      features: { broadcasts: false, contacts: true, templates: true, api_keys: false },
+      rows: [{ email: 'a@b.co', name: '', role: '', mailbox: 'alice' }],
+    });
+
+    fetchMock.mockClear();
+    for (const body of [
+      { domain: 'news.example.com', rows: [{ email: 'a@b.co' }] },
+      { dry_run: true, rows: [{ email: 'a@b.co' }] },
+      { dry_run: true, domain: 'news.example.com', rows: [] },
+      {
+        dry_run: true,
+        domain: 'news.example.com',
+        features: { contacts: 'yes' },
+        rows: [{ email: 'a@b.co' }],
+      },
+    ]) {
+      await expectError(
+        await route.importMembersRoute(
+          request('/api/member-imports', { method: 'POST', body: JSON.stringify(body) })
+        ),
+        422,
+        'COMMON.VALIDATION_FAILED'
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('serves the directory, rename, import, and export from the mock to managers only', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     const route = await loadRoute();

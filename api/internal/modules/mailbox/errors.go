@@ -16,6 +16,13 @@ var (
 	ErrMailboxImportDuplicateRow = errors.New("mailbox import row repeats an earlier address")
 	// ErrMailboxImportMemberNotFound is an import row naming an email of no organization member.
 	ErrMailboxImportMemberNotFound = errors.New("mailbox import member is not in the organization")
+	// ErrMemberImportEmailInvalid is a roster row whose email is not one address of at most 100 characters.
+	ErrMemberImportEmailInvalid = errors.New("member import email is invalid")
+	// ErrMemberImportRoleInvalid is a roster row whose role is neither member nor admin.
+	ErrMemberImportRoleInvalid = errors.New("member import role must be member or admin")
+	// ErrMemberImportDomainRequired is a roster row whose mailbox would be on the shared domain
+	// rather than on a verified domain of the organization.
+	ErrMemberImportDomainRequired = errors.New("member import mailbox needs a verified organization domain")
 	// ErrMailboxAccessInvalid rejects a mailbox type, owner, member, or permission that cannot be applied.
 	ErrMailboxAccessInvalid = errors.New("mailbox access is invalid")
 	// ErrMailboxAccessConflict rejects an access change the mailbox's current type does not allow.

@@ -85,7 +85,12 @@ export function OrganizationDirectory() {
                 {query.data.items.map((organization) => (
                   <TableRow key={organization.id}>
                     <TableCell className="font-medium text-foreground">
-                      <span className="block">{organization.name}</span>
+                      <Link
+                        href={getOrganizationRoute(organization.id)}
+                        className="block rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {organization.name}
+                      </Link>
                       <span className="block font-mono text-xs font-normal text-muted-foreground sm:hidden">
                         {organization.slug}
                       </span>

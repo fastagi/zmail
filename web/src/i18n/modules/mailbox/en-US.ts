@@ -644,7 +644,53 @@ const messages = {
     settingUpToast: 'Setting up the domain in Cloudflare',
     pendingHint:
       'Mailboxes can use this domain once every record is in place. DNS changes can take a few minutes; check again afterwards.',
-    lastError: 'The last setup step failed: {error}',
+    setupErrorDetails: 'Technical details',
+    setupError: {
+      permissionDenied: {
+        title: 'Cloudflare did not allow this step',
+        action:
+          'The Cloudflare connection lacks a permission. Reconnect Cloudflare with DNS and Email Routing edit permissions, then choose Set up again.',
+      },
+      providerUnavailable: {
+        title: 'Cloudflare is busy or unreachable right now',
+        action: 'Nothing is wrong with your domain. Wait a few minutes, then choose Set up again.',
+      },
+      routingRefused: {
+        title: 'Cloudflare would not turn on receiving for this domain',
+        action:
+          'Another mail service usually still receives mail for it. Remove its MX records in Cloudflare, or connect a subdomain such as mail.yourcompany.com, then choose Set up again.',
+      },
+      sendingRefused: {
+        title: 'Cloudflare would not turn on sending for this domain',
+        action:
+          'Check that Email Sending is available for this Cloudflare account, then choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+      },
+      dnsRecordRefused: {
+        title: 'A required DNS record could not be added',
+        action:
+          'A record with the same name probably exists already. Compare the records below with your zone in Cloudflare, remove the one marked as a conflict, then choose Set up again.',
+      },
+      routingRuleRefused: {
+        title: "A mailbox's receiving rule could not be created",
+        action:
+          'Choose Set up again. If it keeps failing, check the Email Routing rules of this zone in Cloudflare.',
+      },
+      providerRefused: {
+        title: 'Cloudflare refused a setup step',
+        action:
+          'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+      },
+      zoneNotFound: {
+        title: "This domain's Cloudflare zone is no longer reachable",
+        action:
+          'The zone may have been removed, or the Cloudflare connection no longer covers it. Reconnect Cloudflare with access to this zone.',
+      },
+      setupFailed: {
+        title: 'A setup step did not finish',
+        action:
+          'Choose Set up again. If it keeps failing, contact Zmail support with the details below.',
+      },
+    },
     stepsLabel: 'Setup progress',
     stepConnect: 'Connect the domain',
     stepNameservers: 'Point nameservers to Cloudflare',
@@ -949,6 +995,7 @@ const messages = {
       connectionRevokedOnLeave: 'Disconnected because {subject} left the organization',
       agentGranted: "{actor} let an agent key of {subject} receive this mailbox's mail",
       agentRevoked: '{actor} revoked an agent key of {subject}',
+      ownerAssigned: '{subject} accepted the invitation and now owns this reserved mailbox',
       agentEnded: 'An agent key of {subject} lost access',
     },
     conflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
@@ -1124,6 +1171,7 @@ const messages = {
   },
   messages: {
     mailboxCreated: 'Mailbox created',
+    mailboxReceivingSoon: 'It starts receiving mail in a minute or two.',
     mailboxDeleted: 'Mailbox deleted',
     sent: 'Message sent',
     queued: 'Send limit reached. Your message is queued and will be sent automatically.',
@@ -1381,9 +1429,9 @@ const messages = {
     emptyTitle: 'No broadcasts yet',
     emptyDescription:
       'Pick a mailbox, a template, and a contact list, then send now or at a set time.',
-    disabledTitle: 'Broadcasts are not set up',
+    disabledTitle: "Broadcasts aren't available yet",
     disabledDescription:
-      'Broadcasts need unsubscribe links. Set MAILBOX_INBOUND_SECRET and MAILBOX_PUBLIC_URL on the API, then reload this page.',
+      'Every broadcast must carry an unsubscribe link, and your Zmail administrator still needs to turn those on. Ask them to finish broadcast setup. You can prepare drafts in the meantime.',
     needsSetup: 'Create a mailbox, a template, and a contact list first.',
     name: 'Name',
     status: 'Status',
@@ -1494,7 +1542,23 @@ const messages = {
     deleteDescription:
       '"{name}" and its recipient list are deleted. Messages already sent are kept.',
     limitPaused:
-      'Paused: the organization reached its 24-hour send limit. Sending continues when the window has room.',
+      'Waiting for the daily send limit. Your organization has sent as many broadcast messages as it may in 24 hours. {pending, plural, one {# recipient is} other {# recipients are}} waiting and nothing is lost: sending continues on its own at about {time}. You can still pause or cancel.',
+    limitPausedNoTime:
+      'Waiting for the daily send limit. Your organization has sent as many broadcast messages as it may in 24 hours. {pending, plural, one {# recipient is} other {# recipients are}} waiting and nothing is lost: sending continues on its own once the 24-hour window has room. You can still pause or cancel.',
+    limitAhead:
+      'The daily send limit will pause this broadcast before it finishes. It continues on its own at about {time}, so the last messages go out later.',
+    rateLabel: 'Send rate',
+    rateValue: '{rate} per minute',
+    rateMeasuring: 'Measuring',
+    etaLabel: 'Estimated finish',
+    etaValue: '{time} ({relative})',
+    etaPaused: 'None while paused',
+    etaNotStarted: 'Shown once sending starts',
+    etaMeasuring: 'Calculating',
+    etaHint:
+      'Estimated from the last {minutes} minutes and the daily send limit. Other broadcasts sending at the same time can make it later.',
+    noticeHint: 'You get an in-app notice and an email when it finishes or pauses on its own.',
+    filterAll: 'All',
     total: 'Recipients',
     sent: 'Sent',
     failed: 'Failed',
@@ -1511,10 +1575,22 @@ const messages = {
     reason: 'Reason',
     noRecipients: 'No recipients with this status.',
     reasonNotSubscribed: 'Unsubscribed before their turn',
-    reasonDeleted: 'Contact deleted',
-    reasonVariables: 'A template variable had no value',
-    reasonBounce: 'Bounced',
-    reasonSuppressed: 'On the provider suppression list',
+    reasonDeleted: 'The contact was deleted',
+    reasonSuppressedList: 'On your suppression list after an earlier bounce or spam report',
+    reasonVariables: "The template needs a value this contact doesn't have",
+    reasonMailbox: 'The sending mailbox was deleted',
+    reasonMessage: "The message couldn't be built for this address",
+    reasonBounce: "The address doesn't exist or refuses mail",
+    reasonSuppressed: 'The mail provider blocks this address after earlier bounces or complaints',
+    reasonUnreachable:
+      "The mail provider couldn't be reached, so this message may not have gone out",
+    reasonProviderResponse: 'The mail provider gave an answer Zmail could not read',
+    reasonUnavailable:
+      'Sending was unavailable. Ask your Zmail administrator to check mail sending.',
+    reasonUnverified: "The sending domain isn't verified",
+    reasonCanceled: 'Canceled before it was sent',
+    reasonExpired: 'Waited too long and was not sent',
+    reasonOther: 'Not sent',
   },
   unsubscribe: {
     title: 'Unsubscribe',
@@ -1692,6 +1768,93 @@ const messages = {
         unreadable: 'The file could not be read.',
       },
     },
+    rosterImport: {
+      open: 'Import roster',
+      title: 'Import a roster',
+      description:
+        'Invite people in bulk. Each person gets an invitation, a personal mailbox reserved on your domain, and the features you pick. They own the mailbox once they accept with the same email.',
+      file: 'CSV file',
+      chooseFile: 'Choose file',
+      noFile: 'No file chosen',
+      template: 'Download template',
+      paste: 'Or paste rows',
+      columnsHint:
+        'Columns: email (required), name, role (member or admin), mailbox (a prefix such as alice, or a full address). An empty mailbox uses the part of the email before @. Up to 500 rows; you can paste cells copied from a spreadsheet.',
+      domain: 'Mailbox domain',
+      domainHint: 'A row with only a prefix gets an address on {domain}.',
+      features: 'Features for invited members',
+      featuresHint: 'Admins always have every feature. Existing members keep what they have.',
+      check: 'Check rows',
+      checking: 'Checking the rows…',
+      importing: 'Importing {count, plural, one {# row} other {# rows}}…',
+      back: 'Back to edit',
+      confirm: 'Import {count, plural, one {# row} other {# rows}}',
+      previewSummary:
+        '{total} rows: {ready} ready, {noop} need no change, {attention} need attention',
+      doneSummary:
+        '{total} rows: {invited} invited with {reserved, plural, one {# mailbox} other {# mailboxes}} reserved, {created} mailboxes created for existing members, {noop} need no change, {attention} need attention',
+      doneToast:
+        'Invited {invited, plural, one {# person} other {# people}} and reserved {reserved, plural, one {# mailbox} other {# mailboxes}} for them. {created} existing members got a mailbox; {attention, plural, one {# row needs} other {# rows need}} attention.',
+      retryToast:
+        'Retried: {invited} invited, {reserved, plural, one {# mailbox} other {# mailboxes}} reserved, {created} created, {attention} still need attention.',
+      retryFailed:
+        'Retry {count, plural, one {# row that needs} other {# rows that need}} attention',
+      downloadFailed: 'Download rows that need attention',
+      done: 'Done',
+      close: 'Close',
+      retryLoad: 'Try again',
+      noDomainTitle: 'Connect a domain first',
+      noDomainDescription:
+        'Personal mailboxes are created on a verified domain of your organization. Connect and verify one, then come back to import your roster.',
+      connectDomain: 'Connect a domain',
+      newPrefixLabel: 'New mailbox prefix for {email}',
+      newPrefixPlaceholder: 'New prefix',
+      roles: {
+        member: 'Member',
+        admin: 'Admin',
+      },
+      columns: {
+        row: 'Row',
+        role: 'Role',
+        email: 'Email',
+        address: 'Mailbox',
+        status: 'Status',
+        note: 'Details',
+      },
+      status: {
+        valid: 'Ready',
+        invited: 'Invited',
+        created: 'Created',
+        skipped: 'Skipped',
+        failed: 'Failed',
+        taken: 'Address taken',
+      },
+      skip: {
+        already_member: 'Already a member with a personal mailbox.',
+        already_invited: 'Already invited, and the mailbox is reserved.',
+        mailbox_taken:
+          'Someone else or a shared mailbox holds this address, so no invitation goes out. Enter another prefix.',
+      },
+      notes: {
+        valid: 'Will invite them and reserve {address}.',
+        invited: 'Invitation sent; the mailbox is reserved for them.',
+        invitedNoEmail:
+          'Invitation created, but no email went out. Resend it from the Invitations tab.',
+        created: 'Existing member; their personal mailbox is ready.',
+      },
+      rowErrors: {
+        emailInvalid: 'Enter a valid email of up to 100 characters.',
+        roleInvalid: 'Role must be member or admin.',
+        domainRequired: 'Use a verified domain of your organization, not the shared domain.',
+        duplicate: 'An earlier row has the same email or mailbox.',
+      },
+      errors: {
+        empty: 'There are no rows to import.',
+        missing_columns: 'The first line needs an email column.',
+        too_many_rows: 'There are more than 500 rows. Split them and import each part.',
+        unreadable: 'The file could not be read.',
+      },
+    },
   },
   errors: {
     platformAccountTaken: 'This platform already has an account with this handle.',
@@ -1706,7 +1869,7 @@ const messages = {
     broadcastNotEditable: 'The broadcast changed state. Reload to see where it stands.',
     broadcastNoRecipients: 'The list has no subscribed contacts, so there is no one to send to.',
     broadcastDisabled:
-      'Broadcasts are not set up on this server. Set MAILBOX_INBOUND_SECRET and MAILBOX_PUBLIC_URL.',
+      "Broadcasts aren't available yet. Ask your Zmail administrator to finish broadcast setup.",
     contactNotFound: 'This contact does not exist or was deleted.',
     contactExists: 'A contact with this address already exists.',
     contactInvalid:

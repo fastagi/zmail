@@ -166,11 +166,14 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 type MailboxAccessEventType string
 
 const (
-	MailboxAccessCreated         MailboxAccessEventType = "created"
-	MailboxAccessMemberSet       MailboxAccessEventType = "member_set"
-	MailboxAccessMemberRemoved   MailboxAccessEventType = "member_removed"
-	MailboxAccessOwnerLeft       MailboxAccessEventType = "owner_left"
-	MailboxAccessOwnerReturned   MailboxAccessEventType = "owner_returned"
+	MailboxAccessCreated       MailboxAccessEventType = "created"
+	MailboxAccessMemberSet     MailboxAccessEventType = "member_set"
+	MailboxAccessMemberRemoved MailboxAccessEventType = "member_removed"
+	MailboxAccessOwnerLeft     MailboxAccessEventType = "owner_left"
+	MailboxAccessOwnerReturned MailboxAccessEventType = "owner_returned"
+	// MailboxAccessOwnerAssigned records that the person a roster import reserved a personal
+	// mailbox for joined and became its owner.
+	MailboxAccessOwnerAssigned   MailboxAccessEventType = "owner_assigned"
 	MailboxAccessHandedOver      MailboxAccessEventType = "handed_over"
 	MailboxAccessSealedDeleted   MailboxAccessEventType = "sealed_deleted"
 	MailboxAccessWebhooksChanged MailboxAccessEventType = "webhooks_changed"

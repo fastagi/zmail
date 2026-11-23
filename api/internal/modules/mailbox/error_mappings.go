@@ -126,6 +126,9 @@ var mailboxErrorCodes = []struct {
 	{ErrMailSearchTooBroad, http.StatusUnprocessableEntity, domain.CodeMailSearchTooBroad},
 	{ErrMailboxImportDuplicateRow, http.StatusUnprocessableEntity, domain.CodeMailboxImportDuplicateRow},
 	{ErrMailboxImportMemberNotFound, http.StatusUnprocessableEntity, domain.CodeMailboxImportMemberNotFound},
+	{ErrMemberImportEmailInvalid, http.StatusUnprocessableEntity, domain.CodeMemberImportEmailInvalid},
+	{ErrMemberImportRoleInvalid, http.StatusUnprocessableEntity, domain.CodeMemberImportRoleInvalid},
+	{ErrMemberImportDomainRequired, http.StatusUnprocessableEntity, domain.CodeMemberImportDomainRequired},
 }
 
 // RegisterErrorMappings maps this starter's own domain errors to public status and error codes.

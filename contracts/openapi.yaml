@@ -6133,6 +6133,47 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/member-imports:
+    post:
+      operationId: importMembers
+      summary: Invite a roster, reserve each person a personal mailbox, and set their feature grants
+      description: Needs the `owner` or `admin` organization role. Each row reconciles toward an invited person
+        with a personal mailbox on a verified organization domain, so sending a file again changes nothing;
+        with `dry_run` nothing is written. A reserved mailbox has no owner and nobody reads it until the
+        person whose email it is reserved for joins the organization.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberImportRequest'
+      responses:
+        '200':
+          description: The outcome of every row, in request order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberImportResultResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailbox-exports:
     get:
       operationId: exportMailboxes
@@ -11649,6 +11690,9 @@ components:
         - MAILBOX.LIMIT_REACHED
         - MAILBOX.IMPORT_DUPLICATE_ROW
         - MAILBOX.IMPORT_MEMBER_NOT_FOUND
+        - MAILBOX.IMPORT_EMAIL_INVALID
+        - MAILBOX.IMPORT_ROLE_INVALID
+        - MAILBOX.IMPORT_DOMAIN_REQUIRED
         - MAILBOX.ACCESS_INVALID
         - MAILBOX.ACCESS_CONFLICT
         - MAILBOX.MESSAGE_NOT_FOUND
@@ -15294,6 +15338,7 @@ components:
         - member_removed
         - owner_left
         - owner_returned
+        - owner_assigned
         - handed_over
         - sealed_deleted
         - webhooks_changed
@@ -16008,6 +16053,192 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailboxImportResult'
+    MemberImportRow:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          description: The address the person signs in and accepts the invitation with.
+          minLength: 1
+          maxLength: 320
+        name:
+          type: string
+          description: The mailbox display name.
+          maxLength: 480
+        role:
+          type: string
+          description: '`member` (the default when empty) or `admin`, ignoring case.'
+          maxLength: 16
+        mailbox:
+          type: string
+          description: A local part on `domain`, or a whole address on a verified organization domain. Empty
+            uses the email's local part without a `+tag`.
+          maxLength: 320
+    MemberImportFeatures:
+      type: object
+      description: The grants every invitation of the import starts the membership with.
+      additionalProperties: false
+      properties:
+        broadcasts:
+          type: boolean
+        contacts:
+          type: boolean
+        templates:
+          type: boolean
+        api_keys:
+          type: boolean
+    MemberImportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - dry_run
+        - domain
+        - rows
+      properties:
+        dry_run:
+          type: boolean
+          description: True only validates; false invites and reserves every row that passes.
+        domain:
+          type: string
+          description: The verified organization domain mailboxes default to.
+          minLength: 1
+          maxLength: 253
+        features:
+          description: Absent means the new-member defaults, contacts and templates.
+          $ref: '#/components/schemas/MemberImportFeatures'
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/MemberImportRow'
+    MemberImportRowStatus:
+      type: string
+      enum:
+        - valid
+        - invited
+        - created
+        - skipped
+        - failed
+    MemberImportSkipReason:
+      type: string
+      enum:
+        - already_member
+        - already_invited
+        - mailbox_taken
+    MemberImportRowResult:
+      type: object
+      additionalProperties: false
+      required:
+        - row
+        - email
+        - address
+        - status
+        - skip_reason
+        - error_code
+        - mailbox_id
+        - invitation_id
+        - email_send_status
+      properties:
+        row:
+          type: integer
+          description: One-based index into the request's rows.
+          minimum: 1
+          maximum: 500
+        email:
+          type: string
+          description: The email lowercased, after the formula guard is removed.
+          maxLength: 320
+        address:
+          type: string
+          description: The mailbox address the row resolves to; empty when the row failed before it was known.
+          maxLength: 320
+        status:
+          $ref: '#/components/schemas/MemberImportRowStatus'
+        skip_reason:
+          description: Why nothing changed; null unless `status` is `skipped`.
+          oneOf:
+            - $ref: '#/components/schemas/MemberImportSkipReason'
+            - type: 'null'
+        error_code:
+          description: Why the row failed; null unless `status` is `failed`.
+          oneOf:
+            - $ref: '#/components/schemas/ErrorCode'
+            - type: 'null'
+        mailbox_id:
+          description: The mailbox the row created, reserved, or found.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        invitation_id:
+          description: The pending invitation the row created or found.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        email_send_status:
+          description: The invitation email outcome when the row sent one.
+          oneOf:
+            - type: string
+              enum:
+                - accepted_by_provider
+                - failed
+                - not_configured
+            - type: 'null'
+    MemberImportResult:
+      type: object
+      additionalProperties: false
+      required:
+        - dry_run
+        - total
+        - valid
+        - invited
+        - created
+        - skipped
+        - failed
+        - rows
+      properties:
+        dry_run:
+          type: boolean
+        total:
+          type: integer
+          minimum: 0
+        valid:
+          type: integer
+          minimum: 0
+        invited:
+          type: integer
+          minimum: 0
+        created:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        rows:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/MemberImportRowResult'
+    MemberImportResultResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MemberImportResult'
     MailboxResponse:
       type: object
       additionalProperties: false
@@ -18770,6 +19001,7 @@ components:
         - resume_at
         - safety_override
         - counts
+        - progress
         - created_at
         - updated_at
       properties:
@@ -18839,10 +19071,57 @@ components:
             automatically again.
         counts:
           $ref: '#/components/schemas/MailBroadcastCounts'
+        progress:
+          description: Send rate and estimated finish, set when one scheduled, sending, or paused broadcast
+            is read; null in the listing, in answers to writes, and for any other status.
+          oneOf:
+            - $ref: '#/components/schemas/MailBroadcastProgress'
+            - type: 'null'
         created_at:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+    MailBroadcastProgress:
+      type: object
+      additionalProperties: false
+      required:
+        - rate_per_minute
+        - rate_window_minutes
+        - estimated_finish_at
+        - send_limit_pauses
+        - send_limit_resumes_at
+        - computed_at
+      properties:
+        rate_per_minute:
+          description: Recipients finished per minute over the rate window, two decimals; null when none
+            finished in it or the broadcast is not sending.
+          type:
+            - number
+            - 'null'
+          minimum: 0
+        rate_window_minutes:
+          type: integer
+          const: 10
+        estimated_finish_at:
+          description: When the last pending recipient should be finished; null when it cannot be told,
+            such as while a person or the health check holds the broadcast.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        send_limit_pauses:
+          type: boolean
+          description: The organization's 24-hour broadcast limit holds the broadcast now or will before
+            every pending recipient is sent.
+        send_limit_resumes_at:
+          description: When the broadcast limit has room again; null when send_limit_pauses is false.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        computed_at:
           type: string
           format: date-time
     MailBroadcastResponse:
@@ -19271,6 +19550,21 @@ components:
           type: string
           description: The provider's explanation of the last failed setup step, while the domain is pending.
           maxLength: 500
+        last_error_code:
+          type: string
+          description: Stable classification of last_error that clients translate into what went wrong and
+            what the owner can do. Present with last_error; codes may be added, and clients treat an unknown
+            code like domain.setup_failed.
+          enum:
+            - domain.permission_denied
+            - domain.provider_unavailable
+            - domain.routing_refused
+            - domain.sending_refused
+            - domain.dns_record_refused
+            - domain.routing_rule_refused
+            - domain.provider_refused
+            - domain.zone_not_found
+            - domain.setup_failed
         checked_at:
           type:
             - string

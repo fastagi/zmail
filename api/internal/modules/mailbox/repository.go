@@ -77,6 +77,8 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 			Type:           string(mailbox.Type),
 			Origin:         string(mailboxOriginOf(string(mailbox.Origin))),
 			OwnerUserID:    mailbox.OwnerUserID,
+			// Only a personal mailbox without an owner is reserved; the schema checks it too.
+			PendingOwnerEmail: optionalPendingEmail(mailbox.PendingOwnerEmail),
 			// Only a connected mailbox comes from a tenant; the schema checks it too.
 			ExternalMailTenantID: mailbox.ExternalTenantID,
 		}

@@ -128,7 +128,7 @@ function TeamGuide({ organizationId }: { organizationId: number }) {
   };
   const sharedName = shared?.domain ?? '';
   const verifiedName = progress.phase === 'verified' ? progress.domain?.name : undefined;
-  const newMailbox = `${ROUTES.CONSOLE.MAILBOXES}?org=${organizationId}&new=mailbox`;
+  const newMailbox = `${ROUTES.CONSOLE.MAILBOXES}?org=${organizationId}&new=mailbox&type=personal`;
   const invitationsHref = `${getOrganizationRoute(organizationId)}?tab=invitations`;
 
   const body: Record<StepKey, (state: StepState) => ReactNode> = {

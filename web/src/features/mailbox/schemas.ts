@@ -35,6 +35,13 @@ export const MAILBOX_IMPORT_MAX_ROWS = 500;
 export const MAILBOX_IMPORT_ADDRESS_MAX_LENGTH = 320;
 export const MAILBOX_IMPORT_DISPLAY_NAME_MAX_LENGTH = 480;
 export const MAILBOX_IMPORT_MEMBERS_MAX_LENGTH = 8192;
+/** Roster import (`POST /v1/member-imports`) bounds, as the contract states them. */
+export const MEMBER_IMPORT_MAX_ROWS = 500;
+export const MEMBER_IMPORT_EMAIL_MAX_LENGTH = 320;
+export const MEMBER_IMPORT_NAME_MAX_LENGTH = 480;
+export const MEMBER_IMPORT_ROLE_MAX_LENGTH = 16;
+export const MEMBER_IMPORT_MAILBOX_MAX_LENGTH = 320;
+export const MEMBER_IMPORT_DOMAIN_MAX_LENGTH = 253;
 /** 5000 rows of 100 members each fit well within it. */
 export const MAILBOX_EXPORT_MAX_BYTES = 24 * 1024 * 1024;
 export const MAILBOX_LIST_SCOPES = ['usable'] as const;
@@ -212,6 +219,8 @@ export const mailDomainSchema = strictObject({
   // Cloudflare refused to look for the pending zone's name servers now; check again later.
   zone_check_limited: boolean(),
   last_error: optional(string()),
+  // Stable class of last_error; an unknown code reads like domain.setup_failed.
+  last_error_code: optional(string()),
   checked_at: nullable(timestampSchema),
   verified_at: nullable(timestampSchema),
   created_at: timestampSchema,
@@ -668,6 +677,7 @@ export const mailboxAccessEventTypeSchema = union([
   literal('connection_revoked_on_leave'),
   literal('agent_granted'),
   literal('agent_revoked'),
+  literal('owner_assigned'),
 ]);
 
 export const mailboxAccessEventSchema = strictObject({
@@ -913,6 +923,16 @@ export const mailBroadcastStatusOnlySchema = strictObject({
   status: mailBroadcastStatusSchema,
 });
 
+/** How fast a running broadcast sends and when it should finish, estimated by the API. */
+export const mailBroadcastProgressSchema = strictObject({
+  rate_per_minute: nullable(number().check(nonnegative())),
+  rate_window_minutes: positiveIntegerSchema,
+  estimated_finish_at: nullable(timestampSchema),
+  send_limit_pauses: boolean(),
+  send_limit_resumes_at: nullable(timestampSchema),
+  computed_at: timestampSchema,
+});
+
 export const mailBroadcastSchema = strictObject({
   id: safeIdSchema,
   name: string(),
@@ -944,6 +964,9 @@ export const mailBroadcastSchema = strictObject({
     bounced: nonnegativeIntegerSchema,
     complained: nonnegativeIntegerSchema,
   }),
+  // Send rate and estimated finish of one running broadcast; null in the listing. Optional so the
+  // console keeps working against an API that predates it.
+  progress: optional(nullable(mailBroadcastProgressSchema)),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });
@@ -1197,6 +1220,45 @@ export const mailboxImportResultSchema = strictObject({
   succeeded: nonnegativeIntegerSchema,
   failed: nonnegativeIntegerSchema,
   rows: array(mailboxImportRowResultSchema),
+});
+
+export const memberImportRowStatusSchema = union([
+  literal('valid'),
+  literal('invited'),
+  literal('created'),
+  literal('skipped'),
+  literal('failed'),
+]);
+
+export const memberImportSkipReasonSchema = union([
+  literal('already_member'),
+  literal('already_invited'),
+  literal('mailbox_taken'),
+]);
+
+export const memberImportRowResultSchema = strictObject({
+  row: positiveIntegerSchema,
+  email: string(),
+  address: string(),
+  status: memberImportRowStatusSchema,
+  skip_reason: nullable(memberImportSkipReasonSchema),
+  error_code: nullable(string()),
+  mailbox_id: nullable(safeIdSchema),
+  invitation_id: nullable(safeIdSchema),
+  email_send_status: nullable(
+    union([literal('accepted_by_provider'), literal('failed'), literal('not_configured')])
+  ),
+});
+
+export const memberImportResultSchema = strictObject({
+  dry_run: boolean(),
+  total: nonnegativeIntegerSchema,
+  valid: nonnegativeIntegerSchema,
+  invited: nonnegativeIntegerSchema,
+  created: nonnegativeIntegerSchema,
+  skipped: nonnegativeIntegerSchema,
+  failed: nonnegativeIntegerSchema,
+  rows: array(memberImportRowResultSchema),
 });
 
 /** A calendar day `YYYY-MM-DD` the unified inbox accepts as `since` or `until`: 1970 or later. */

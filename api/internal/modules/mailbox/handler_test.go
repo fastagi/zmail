@@ -44,7 +44,7 @@ func newHandlerFixtureWith(t *testing.T, organization *domain.OrganizationContex
 	gin.SetMode(gin.TestMode)
 	inbox := newInboxRecorder()
 	repo := inbox.fakeRepository
-	svc := NewService(inbox, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, settings, nil, nil, nil)
+	svc := NewService(inbox, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, settings, nil, nil, nil, nil)
 	handler := NewHandler(svc)
 	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)

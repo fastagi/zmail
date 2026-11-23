@@ -96,6 +96,12 @@ type OrganizationInvitationPO struct {
 	// Latest invitation email attempt; NULL when unknown.
 	EmailSendStatus  *string `gorm:"size:32"`
 	EmailAttemptedAt *time.Time
+
+	// Grants the membership starts with when the invitation is accepted.
+	CanUseBroadcasts bool `gorm:"not null;default:false"`
+	CanUseContacts   bool `gorm:"not null;default:true"`
+	CanUseTemplates  bool `gorm:"not null;default:true"`
+	CanUseAPIKeys    bool `gorm:"column:can_use_api_keys;not null;default:false"`
 }
 
 // TableName returns the stable organization invitation table name.
@@ -149,6 +155,10 @@ func newInvitationPO(invitation *domain.OrganizationInvitation) *OrganizationInv
 		RevokedBy:        invitation.RevokedBy,
 		EmailSendStatus:  optionalString(invitation.EmailSendStatus),
 		EmailAttemptedAt: invitation.EmailAttemptedAt,
+		CanUseBroadcasts: invitation.Features.Broadcasts,
+		CanUseContacts:   invitation.Features.Contacts,
+		CanUseTemplates:  invitation.Features.Templates,
+		CanUseAPIKeys:    invitation.Features.APIKeys,
 		CreatedAt:        invitation.CreatedAt,
 		UpdatedAt:        invitation.UpdatedAt,
 	}
@@ -218,8 +228,14 @@ func (po *OrganizationInvitationPO) toDomain() *domain.OrganizationInvitation {
 		RevokedBy:        po.RevokedBy,
 		EmailSendStatus:  derefString(po.EmailSendStatus),
 		EmailAttemptedAt: po.EmailAttemptedAt,
-		CreatedAt:        po.CreatedAt,
-		UpdatedAt:        po.UpdatedAt,
+		Features: domain.MemberFeatures{
+			Broadcasts: po.CanUseBroadcasts,
+			Contacts:   po.CanUseContacts,
+			Templates:  po.CanUseTemplates,
+			APIKeys:    po.CanUseAPIKeys,
+		},
+		CreatedAt: po.CreatedAt,
+		UpdatedAt: po.UpdatedAt,
 	}
 }
 

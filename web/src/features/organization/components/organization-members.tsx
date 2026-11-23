@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale } from 'next-intl';
 import {
@@ -73,7 +73,14 @@ type PendingMemberAction =
   | { kind: 'remove'; member: OrganizationMember }
   | { kind: 'transfer'; member: OrganizationMember };
 
-export function OrganizationMembers({ context }: { context: OrganizationContext }) {
+export function OrganizationMembers({
+  context,
+  headerAction,
+}: {
+  context: OrganizationContext;
+  /** An optional action beside the heading, such as the mailbox roster import. */
+  headerAction?: ReactNode;
+}) {
   const t = useT('organization');
   const common = useT('common');
   const locale = useLocale();
@@ -127,13 +134,16 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
 
   return (
     <section className="py-6" aria-labelledby="organization-members-heading">
-      <div className="mb-5">
-        <h2 id="organization-members-heading" className="text-base font-semibold">
-          {t('membersTitle')}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('membersDescription')}
-        </p>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="organization-members-heading" className="text-base font-semibold">
+            {t('membersTitle')}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('membersDescription')}
+          </p>
+        </div>
+        {headerAction}
       </div>
 
       {mutationError && !pendingAction ? (
@@ -175,7 +185,7 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
                 <TableHead>{t('member')}</TableHead>
                 <TableHead>{t('role')}</TableHead>
                 <TableHead className="hidden sm:table-cell">{t('featuresColumn')}</TableHead>
-                <TableHead className="hidden lg:table-cell">{t('joinedAt')}</TableHead>
+                <TableHead className="hidden 2xl:table-cell">{t('joinedAt')}</TableHead>
                 <TableHead className="w-14 text-right">
                   <span className="sr-only">{t('actions')}</span>
                 </TableHead>
@@ -259,7 +269,7 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
                       className="min-w-56"
                     />
                   </TableCell>
-                  <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
+                  <TableCell className="hidden text-sm text-muted-foreground 2xl:table-cell">
                     {formatOrganizationDate(member.joined_at, locale)}
                   </TableCell>
                   <TableCell className="text-right">

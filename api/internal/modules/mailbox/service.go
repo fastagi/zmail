@@ -165,6 +165,9 @@ type Service interface {
 	RenameMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, displayName string) (*domain.Mailbox, error)
 	// ImportMailboxes checks or creates shared mailboxes row by row; only owners and admins may.
 	ImportMailboxes(ctx context.Context, viewer domain.OrganizationContext, rows []MailboxImportRow, dryRun bool) (*MailboxImportResult, error)
+	// ImportMembers invites roster rows, reserves each a personal mailbox, and sets their grants;
+	// only owners and admins may.
+	ImportMembers(ctx context.Context, viewer domain.OrganizationContext, input MemberImportInput) (*MemberImportResult, error)
 	// ExportMailboxes reads every mailbox of one type with members' emails; only owners and admins may.
 	ExportMailboxes(ctx context.Context, viewer domain.OrganizationContext, mailboxType domain.MailboxType) ([]MailboxExportRow, error)
 	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
@@ -216,6 +219,8 @@ type Service interface {
 	// ListBroadcasts lists the broadcasts of the mailboxes the viewer may read.
 	ListBroadcasts(ctx context.Context, viewer domain.OrganizationContext, page, perPage int) ([]*domain.MailBroadcast, int64, error)
 	GetBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, error)
+	// BroadcastProgress estimates the send rate and finish of a broadcast the caller already read.
+	BroadcastProgress(ctx context.Context, broadcast *domain.MailBroadcast) (*domain.MailBroadcastProgress, error)
 	CreateBroadcast(ctx context.Context, viewer domain.OrganizationContext, input BroadcastInput) (*domain.MailBroadcast, error)
 	UpdateBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint, input BroadcastInput) (*domain.MailBroadcast, error)
 	DeleteBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) error
@@ -349,8 +354,12 @@ type service struct {
 	repo domain.MailboxRepository
 	// memberships validates owners and members against the organization's current members.
 	memberships membershipDirectory
-	templates   domain.MailTemplateRepository
-	contacts    domain.MailContactRepository
+	// inviter sends roster import invitations through the organization starter; nil when not wired.
+	inviter domain.OrganizationRosterInviter
+	// roster reserves and claims roster import mailboxes; nil when repo does not implement it.
+	roster    domain.MailboxRosterRepository
+	templates domain.MailTemplateRepository
+	contacts  domain.MailContactRepository
 	// broadcasts is the broadcast store; nil until NewService wires it.
 	broadcasts domain.MailBroadcastRepository
 	// organize stores folders, labels, placements, and stars; nil when a test does not need them.
@@ -383,8 +392,11 @@ type service struct {
 	setupClaimHook func()
 	transport      mailtransport.Transport
 	notifier       mailNotifier
-	settings       Settings
-	now            func() time.Time
+	// notices tells the person who started a broadcast how it ended or why it stopped; nil sends
+	// no notices.
+	notices  broadcastNoticeSender
+	settings Settings
+	now      func() time.Time
 	// recordAudit enriches the request's audit entry; tests capture it.
 	recordAudit func(context.Context, auditstarter.Change)
 	// transactional stores transactional messages and suppressions; nil when a test does not
@@ -456,6 +468,7 @@ func NewService(
 	transactional domain.TransactionalMailRepository,
 	limits *ratelimit.Stores,
 	accounts accountDirectory,
+	notices broadcastNoticeSender,
 ) *service {
 	var inbox domain.MailInboxRepository
 	if seam, ok := repo.(domain.MailInboxRepository); ok {
@@ -509,6 +522,10 @@ func NewService(
 	if seam, ok := repo.(domain.ExternalMailPushRepository); ok {
 		pushStore = seam
 	}
+	var roster domain.MailboxRosterRepository
+	if seam, ok := repo.(domain.MailboxRosterRepository); ok {
+		roster = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -516,6 +533,7 @@ func NewService(
 		fingerprintKey = transactionalFingerprintKey(settings.SecretEncryptionKey)
 	}
 	return &service{
+		notices:       notices,
 		transactional: transactional, accounts: accounts, transactionalLimits: newTransactionalLimits(limits, settings),
 		encryptor: encryptor, fingerprintKey: fingerprintKey,
 		repo: repo, inbox: inbox, roles: roles, directory: directory, ledger: ledger, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
@@ -534,6 +552,7 @@ func NewService(
 		pushLimits:   newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
 		pushRefusals: newExternalMailPushRefusals(), pushHandshakes: newExternalMailPushHandshakes(),
 		pushRefusalLog: &pushRefusalLog{}, releases: releases,
+		roster: roster,
 	}
 }
 

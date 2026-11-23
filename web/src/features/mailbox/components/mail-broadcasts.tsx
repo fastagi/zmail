@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useLocale } from 'next-intl';
 import {
   AlertCircle,
   ArrowLeft,
   Clock,
+  Gauge,
   Megaphone,
   Pause,
   Play,
@@ -52,7 +55,9 @@ import {
   MailHtmlFrame,
   mailEventKey,
   nativeSelectClassName,
+  relativeTime,
   useDateTimeFormat,
+  useRelativeTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import {
   useCancelMailBroadcast,
@@ -119,13 +124,29 @@ const recipientStatuses: readonly MailRecipientStatus[] = [
   'canceled',
 ];
 
-/** Short codes the API reports for recipients, with readable copy; others are shown as codes. */
+/**
+ * Codes the API reports for failed and skipped recipients, in plain words. Any other code is a
+ * provider's own refusal: it shows as "Not sent" with the code beside it for support.
+ */
 const reasonKey = {
   contact_not_subscribed: 'broadcasts.reasonNotSubscribed',
   contact_deleted: 'broadcasts.reasonDeleted',
+  contact_suppressed: 'broadcasts.reasonSuppressedList',
   'template.variables_missing': 'broadcasts.reasonVariables',
+  mailbox_not_found: 'broadcasts.reasonMailbox',
+  message_invalid: 'broadcasts.reasonMessage',
   'transport.permanent_bounce': 'broadcasts.reasonBounce',
   'transport.suppressed': 'broadcasts.reasonSuppressed',
+  'transport.unreachable': 'broadcasts.reasonUnreachable',
+  'transport.unknown_outcome': 'broadcasts.reasonUnreachable',
+  'transport.invalid_response': 'broadcasts.reasonProviderResponse',
+  'transport.response_too_large': 'broadcasts.reasonProviderResponse',
+  'transport.not_configured': 'broadcasts.reasonUnavailable',
+  'transport.unavailable': 'broadcasts.reasonUnavailable',
+  'provider.unavailable': 'broadcasts.reasonUnavailable',
+  'send.sender_unverified': 'broadcasts.reasonUnverified',
+  'send.canceled': 'broadcasts.reasonCanceled',
+  'send.expired': 'broadcasts.reasonExpired',
 } as const;
 
 function knownReason(code: string): code is keyof typeof reasonKey {
@@ -172,11 +193,21 @@ export function MailBroadcasts() {
 
 type View = { kind: 'list' } | { kind: 'new' } | { kind: 'open'; broadcastId: number };
 
+/** Query parameter a broadcast notice uses to open one broadcast. */
+const OPEN_BROADCAST_PARAM = 'open';
+const openBroadcastPattern = /^[1-9]\d{0,15}$/u;
+
 /** Members draft broadcasts; only owners and admins start, stop, pause, and resume them. */
 function BroadcastWorkspace({ canManage }: { canManage: boolean }) {
   const t = useT('mailbox');
   const domains = useMailboxDomains(useMailOrganizationId());
-  const [view, setView] = useState<View>({ kind: 'list' });
+  // A notice links to one broadcast with `open`; the organization stays in `org`.
+  const openParam = useSearchParams().get(OPEN_BROADCAST_PARAM) ?? '';
+  const [view, setView] = useState<View>(() =>
+    openBroadcastPattern.test(openParam)
+      ? { kind: 'open', broadcastId: Number(openParam) }
+      : { kind: 'list' }
+  );
   const enabled = domains.data?.[0]?.broadcasts_enabled ?? true;
   const back = () => setView({ kind: 'list' });
 
@@ -1211,7 +1242,7 @@ function BroadcastDetail({
     paused &&
     (broadcast.stop_reason === 'bounce_rate_high' ||
       broadcast.stop_reason === 'complaint_rate_high');
-  const { counts } = broadcast;
+  const { counts, progress } = broadcast;
 
   const doPause = async () => {
     try {
@@ -1335,9 +1366,25 @@ function BroadcastDetail({
         <p className="text-sm text-muted-foreground">{when(broadcast)}</p>
       </div>
       {broadcast.stop_reason === 'send_limit_reached' && running ? (
-        <Alert>
-          <AlertCircle className="size-4" aria-hidden="true" />
-          <AlertDescription>{t('broadcasts.limitPaused')}</AlertDescription>
+        <Alert data-testid="broadcast-limit">
+          <Clock className="size-4" aria-hidden="true" />
+          <AlertDescription>
+            {progress?.send_limit_resumes_at
+              ? t('broadcasts.limitPaused', {
+                  pending: counts.pending,
+                  time: formatter.format(new Date(progress.send_limit_resumes_at)),
+                })
+              : t('broadcasts.limitPausedNoTime', { pending: counts.pending })}
+          </AlertDescription>
+        </Alert>
+      ) : progress?.send_limit_pauses && progress.send_limit_resumes_at && !paused ? (
+        <Alert data-testid="broadcast-limit-ahead">
+          <Clock className="size-4" aria-hidden="true" />
+          <AlertDescription>
+            {t('broadcasts.limitAhead', {
+              time: formatter.format(new Date(progress.send_limit_resumes_at)),
+            })}
+          </AlertDescription>
         </Alert>
       ) : null}
       {paused && knownPause(broadcast.stop_reason) ? (
@@ -1378,8 +1425,9 @@ function BroadcastDetail({
           </div>
         ))}
       </dl>
+      {running ? <ProgressSummary broadcast={broadcast} /> : null}
       <Progress broadcast={broadcast} />
-      <RecipientTable broadcastId={broadcast.id} live={running} />
+      <RecipientTable broadcastId={broadcast.id} counts={counts} live={running} />
       {confirm === 'cancel' ? (
         <ConfirmDialog
           title={t('broadcasts.cancelTitle')}
@@ -1418,8 +1466,78 @@ function BroadcastDetail({
   );
 }
 
-function RecipientTable({ broadcastId, live }: { broadcastId: number; live: boolean }) {
+/** Send rate and estimated finish of a running broadcast, as the API estimates them. */
+function ProgressSummary({ broadcast }: { broadcast: MailBroadcast }) {
   const t = useT('mailbox');
+  const locale = useLocale();
+  const formatter = useDateTimeFormat();
+  const relative = useRelativeTimeFormat();
+  const { progress, status } = broadcast;
+  const rate = progress?.rate_per_minute;
+  const finish = progress?.estimated_finish_at;
+  const waitingToStart =
+    status === 'scheduled' || (status === 'paused' && broadcast.stop_reason === 'test_wave_complete');
+  const eta = finish
+    ? t('broadcasts.etaValue', {
+        time: formatter.format(new Date(finish)),
+        relative: relativeTime(
+          relative,
+          new Date(finish).getTime(),
+          new Date(progress.computed_at).getTime()
+        ),
+      })
+    : status === 'paused' && !waitingToStart
+      ? t('broadcasts.etaPaused')
+      : waitingToStart
+        ? t('broadcasts.etaNotStarted')
+        : t('broadcasts.etaMeasuring');
+  return (
+    <section className="space-y-2" aria-label={t('broadcasts.etaLabel')}>
+      <dl className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-md border px-3 py-2">
+          <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Gauge className="size-3.5" aria-hidden="true" />
+            {t('broadcasts.rateLabel')}
+          </dt>
+          <dd className="text-base font-semibold tabular-nums" data-testid="broadcast-rate">
+            {rate != null
+              ? t('broadcasts.rateValue', {
+                  rate: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(rate),
+                })
+              : status === 'sending'
+                ? t('broadcasts.rateMeasuring')
+                : '—'}
+          </dd>
+        </div>
+        <div className="rounded-md border px-3 py-2">
+          <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="size-3.5" aria-hidden="true" />
+            {t('broadcasts.etaLabel')}
+          </dt>
+          <dd className="text-base font-semibold tabular-nums" data-testid="broadcast-eta">
+            {eta}
+          </dd>
+        </div>
+      </dl>
+      <p className="text-xs text-muted-foreground">
+        {t('broadcasts.etaHint', { minutes: progress?.rate_window_minutes ?? 10 })}{' '}
+        {t('broadcasts.noticeHint')}
+      </p>
+    </section>
+  );
+}
+
+function RecipientTable({
+  broadcastId,
+  counts,
+  live,
+}: {
+  broadcastId: number;
+  counts: MailBroadcast['counts'];
+  live: boolean;
+}) {
+  const t = useT('mailbox');
+  const locale = useLocale();
   const [status, setStatus] = useState<MailRecipientStatus | undefined>(undefined);
   const [page, setPage] = useState(1);
   const recipients = useMailBroadcastRecipients(
@@ -1429,35 +1547,34 @@ function RecipientTable({ broadcastId, live }: { broadcastId: number; live: bool
     page,
     live
   );
-  const filterId = useId();
-
   return (
     <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="space-y-2">
         <h3 className="font-medium">{t('broadcasts.recipients')}</h3>
-        <div>
-          <Label htmlFor={filterId} className="sr-only">
-            {t('broadcasts.recipientFilter')}
-          </Label>
-          <select
-            id={filterId}
-            className={nativeSelectClassName}
-            value={status ?? ''}
-            onChange={event => {
-              setStatus(
-                event.target.value === '' ? undefined : (event.target.value as MailRecipientStatus)
-              );
-              setPage(1);
-            }}
-          >
-            <option value="">{t('broadcasts.allRecipients')}</option>
-            {recipientStatuses.map(value => (
-              <option key={value} value={value}>
-                {t(recipientKey[value])}
-              </option>
-            ))}
-          </select>
-        </div>
+        <Tabs
+          value={status ?? 'all'}
+          onValueChange={value => {
+            setStatus(value === 'all' ? undefined : (value as MailRecipientStatus));
+            setPage(1);
+          }}
+        >
+          <div className="-mx-1 overflow-x-auto px-1 pb-1">
+            <TabsList aria-label={t('broadcasts.recipientFilter')}>
+              {(['all', ...recipientStatuses] as const)
+                .filter(value => value === 'all' || value !== 'canceled' || counts.canceled > 0)
+                .map(value => (
+                  <TabsTrigger key={value} value={value} className="gap-1.5">
+                    {t(value === 'all' ? 'broadcasts.filterAll' : recipientKey[value])}
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {new Intl.NumberFormat(locale).format(
+                        value === 'all' ? counts.total : counts[value]
+                      )}
+                    </span>
+                  </TabsTrigger>
+                ))}
+            </TabsList>
+          </div>
+        </Tabs>
       </div>
       {recipients.isPending ? (
         <Skeleton className="h-32 w-full" aria-hidden="true" />
@@ -1514,7 +1631,10 @@ function RecipientTable({ broadcastId, live }: { broadcastId: number; live: bool
                         {knownReason(code) ? (
                           t(reasonKey[code])
                         ) : code ? (
-                          <code className="text-xs">{code}</code>
+                          <span className="flex flex-wrap items-baseline gap-x-1.5">
+                            {t('broadcasts.reasonOther')}
+                            <code className="text-xs">{code}</code>
+                          </span>
                         ) : null}
                       </TableCell>
                     </TableRow>

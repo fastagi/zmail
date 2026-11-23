@@ -517,16 +517,18 @@ func TestDomainSetupKeepsExistingRecordsAndReportsConflicts(t *testing.T) {
 
 func TestDomainSetupFailureKeepsTheDomainPendingWithTheReason(t *testing.T) {
 	fixture := newDomainFixture(t)
-	fixture.zones.routingErr = &mailtransport.DomainError{Operation: "enable email routing", Message: "Authentication error"}
+	fixture.zones.routingErr = &mailtransport.DomainError{
+		Operation: "enable email routing", Status: 403, Code: 10000, Message: "Authentication error"}
 
 	mailDomain := fixture.connect(t, "news.example.com")
-	if mailDomain.Status != domain.MailDomainStatusPending || !strings.Contains(mailDomain.LastError, "Authentication error") {
-		t.Fatalf("domain = %s / %q", mailDomain.Status, mailDomain.LastError)
+	if mailDomain.Status != domain.MailDomainStatusPending || !strings.Contains(mailDomain.LastError, "Authentication error") ||
+		mailDomain.LastErrorCode != DomainErrorPermissionDenied {
+		t.Fatalf("domain = %s / %q / %q", mailDomain.Status, mailDomain.LastError, mailDomain.LastErrorCode)
 	}
 
 	fixture.zones.routingErr = nil
 	fixed, err := fixture.service.SetUpMailDomain(context.Background(), 7, mailDomain.ID)
-	if err != nil || fixed.Status != domain.MailDomainStatusVerified || fixed.LastError != "" {
+	if err != nil || fixed.Status != domain.MailDomainStatusVerified || fixed.LastError != "" || fixed.LastErrorCode != "" {
 		t.Fatalf("after retry = %+v, %v", fixed, err)
 	}
 }

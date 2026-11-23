@@ -852,6 +852,8 @@ function useEventText(nameOf: (userId: number | null) => string) {
         return event.actor_user_id === null
           ? t('access.history.agentEnded', { subject })
           : t('access.history.agentRevoked', { actor, subject });
+      case 'owner_assigned':
+        return t('access.history.ownerAssigned', { subject });
     }
   };
 }
