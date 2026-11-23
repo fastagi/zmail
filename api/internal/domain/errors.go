@@ -55,6 +55,7 @@ var (
 	ErrOrganizationOwnershipTransferRequired      = errors.New("organization ownership must be transferred first")
 	ErrOrganizationOwnershipTransferTargetInvalid = errors.New("organization ownership transfer target is invalid")
 	ErrOrganizationMembershipExitRequired         = errors.New("organization memberships must be exited before account deletion")
+	ErrOrganizationSuspended                      = errors.New("organization suspended by the platform operator")
 	ErrOrganizationMemberNotFound                 = errors.New("organization member not found")
 	ErrOrganizationInvitationNotFound             = errors.New("organization invitation not found")
 	ErrOrganizationInvitationInvalid              = errors.New("organization invitation is invalid")

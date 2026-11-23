@@ -159,3 +159,101 @@ func TestOperatorHandlerRequireStopsUnknownOrganizations(t *testing.T) {
 	require.Equal(t, http.StatusOK, members.Code)
 	assert.Contains(t, members.Body.String(), `"email":"owner@example.com"`)
 }
+
+func TestOperatorControlsSuspendRestoreAndLimitAnOrganization(t *testing.T) {
+	db := newOrganizationRepositoryTestDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	ownerID := createOrganizationTestUser(t, db, "owner")
+	acme := &domain.Organization{Name: "Acme", Slug: "acme", CreatedBy: ownerID}
+	require.NoError(t, repo.CreateWithOwner(ctx, acme, &domain.OrganizationMembership{UserID: ownerID, Role: domain.OrganizationRoleOwner}))
+
+	suspend, restore := true, false
+	before, after, err := repo.operatorUpdate(ctx, acme.ID, operatorChange{suspend: &suspend, reason: "spam"})
+	require.NoError(t, err)
+	assert.Nil(t, before.SuspendedAt)
+	require.NotNil(t, after.SuspendedAt)
+	assert.Equal(t, "spam", after.SuspensionReason)
+	first := *after.SuspendedAt
+
+	_, err = repo.ResolveContext(ctx, acme.ID, ownerID)
+	require.ErrorIs(t, err, domain.ErrOrganizationSuspended, "a suspended organization gives its members no context")
+
+	_, again, err := repo.operatorUpdate(ctx, acme.ID, operatorChange{suspend: &suspend, reason: "phishing"})
+	require.NoError(t, err)
+	assert.True(t, first.Equal(*again.SuspendedAt), "suspending again keeps the first suspension time")
+	assert.Equal(t, "phishing", again.SuspensionReason)
+
+	limit := 5000
+	limitPointer := &limit
+	_, limited, err := repo.operatorUpdate(ctx, acme.ID, operatorChange{dailySendLimit: &limitPointer})
+	require.NoError(t, err)
+	require.NotNil(t, limited.DailySendLimit)
+	assert.Equal(t, 5000, *limited.DailySendLimit)
+	assert.NotNil(t, limited.SuspendedAt, "a limit change leaves the suspension alone")
+
+	_, restored, err := repo.operatorUpdate(ctx, acme.ID, operatorChange{suspend: &restore})
+	require.NoError(t, err)
+	assert.Nil(t, restored.SuspendedAt)
+	assert.Empty(t, restored.SuspensionReason)
+	_, err = repo.ResolveContext(ctx, acme.ID, ownerID)
+	require.NoError(t, err)
+
+	var cleared *int
+	_, unlimited, err := repo.operatorUpdate(ctx, acme.ID, operatorChange{dailySendLimit: &cleared})
+	require.NoError(t, err)
+	assert.Nil(t, unlimited.DailySendLimit)
+
+	_, _, err = repo.operatorUpdate(ctx, acme.ID+1000, operatorChange{suspend: &suspend, reason: "x"})
+	require.ErrorIs(t, err, domain.ErrOrganizationNotFound)
+}
+
+func TestOperatorControlHandlersValidateTheirBodies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &OperatorHandler{store: operatorStoreStub{}}
+	cases := []struct {
+		name, method, path, body string
+		handle                   gin.HandlerFunc
+		status                   int
+		code                     string
+	}{
+		{"suspend needs a reason", http.MethodPost, "/1/suspend", `{"reason":"  "}`, h.Suspend, 422, response.ErrorCodeValidationFailed},
+		{"suspend rejects control characters", http.MethodPost, "/1/suspend", `{"reason":"a\u0007b"}`, h.Suspend, 422, response.ErrorCodeValidationFailed},
+		{"suspend rejects a long reason", http.MethodPost, "/1/suspend", `{"reason":"` + strings.Repeat("x", 501) + `"}`, h.Suspend, 422, response.ErrorCodeValidationFailed},
+		{"suspend", http.MethodPost, "/1/suspend", `{"reason":"spam"}`, h.Suspend, 200, ""},
+		{"limit is required", http.MethodPut, "/1/send-limit", `{}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
+		{"limit rejects negatives", http.MethodPut, "/1/send-limit", `{"daily_send_limit":-1}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
+		{"limit rejects fractions", http.MethodPut, "/1/send-limit", `{"daily_send_limit":1.5}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
+		{"limit rejects past the maximum", http.MethodPut, "/1/send-limit", `{"daily_send_limit":1000001}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
+		{"limit rejects a non-object", http.MethodPut, "/1/send-limit", `[]`, h.SetSendLimit, 400, response.ErrorCodeInvalidInput},
+		{"limit rejects a null body", http.MethodPut, "/1/send-limit", `null`, h.SetSendLimit, 400, response.ErrorCodeInvalidInput},
+		{"limit rejects zero", http.MethodPut, "/1/send-limit", `{"daily_send_limit":0}`, h.SetSendLimit, 422, response.ErrorCodeValidationFailed},
+		{"limit set", http.MethodPut, "/1/send-limit", `{"daily_send_limit":5000}`, h.SetSendLimit, 200, ""},
+		{"limit cleared", http.MethodPut, "/1/send-limit", `{"daily_send_limit":null}`, h.SetSendLimit, 200, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := gin.New()
+			engine.Handle(tc.method, "/:id/"+strings.Split(tc.path, "/")[2], tc.handle)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			engine.ServeHTTP(recorder, request)
+			require.Equal(t, tc.status, recorder.Code, recorder.Body.String())
+			if tc.code != "" {
+				var body struct {
+					ErrorCode string `json:"error_code"`
+				}
+				require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+				assert.Equal(t, tc.code, body.ErrorCode)
+			}
+		})
+	}
+}
+
+// operatorStoreStub answers every update with an empty organization.
+type operatorStoreStub struct{ operatorStore }
+
+func (operatorStoreStub) operatorUpdate(context.Context, uint, operatorChange) (*OperatorOrganizationResponse, *OperatorOrganizationResponse, error) {
+	return &OperatorOrganizationResponse{}, &OperatorOrganizationResponse{}, nil
+}

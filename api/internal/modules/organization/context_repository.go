@@ -21,6 +21,7 @@ type organizationContextRow struct {
 	CanUseTemplates   bool   `gorm:"column:can_use_templates"`
 	CanUseAPIKeys     bool   `gorm:"column:can_use_api_keys"`
 	CanUseMailClients bool   `gorm:"column:can_use_mail_clients"`
+	Suspended         bool   `gorm:"column:suspended"`
 }
 
 func (r *repository) ResolveContext(
@@ -49,7 +50,8 @@ func (r *repository) ResolveContext(
 			memberships.can_use_contacts,
 			memberships.can_use_templates,
 			memberships.can_use_api_keys,
-			memberships.can_use_mail_clients
+			memberships.can_use_mail_clients,
+			organizations.suspended_at IS NOT NULL AS suspended
 		`).
 		Joins("JOIN organizations ON organizations.id = memberships.organization_id").
 		Where("memberships.organization_id = ? AND memberships.user_id = ?", organizationID, userID).
@@ -59,6 +61,9 @@ func (r *repository) ResolveContext(
 	}
 	if err != nil {
 		return nil, err
+	}
+	if row.Suspended {
+		return nil, domain.ErrOrganizationSuspended
 	}
 
 	resolved := &domain.OrganizationContext{

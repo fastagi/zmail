@@ -1053,8 +1053,9 @@ type MailboxRepository interface {
 	// CountPersonalOutcomesSince counts the organization's personal-lane attempts since the given
 	// time and, of those, the messages with a bounce and with a spam complaint.
 	CountPersonalOutcomesSince(ctx context.Context, organizationID uint, since time.Time) (attempted, bounced, complained int64, err error)
-	// OrganizationCreatedAt returns when the organization was created; zero when it is unknown.
-	OrganizationCreatedAt(ctx context.Context, organizationID uint) (time.Time, error)
+	// OrganizationSendPolicy returns what bounds the organization's sending; the zero policy when
+	// the organization is unknown.
+	OrganizationSendPolicy(ctx context.Context, organizationID uint) (OrganizationSendPolicy, error)
 	// CountWaitingSends counts the organization's messages waiting for room in the send limit.
 	CountWaitingSends(ctx context.Context, organizationID uint) (int64, error)
 	// WaitingSendOrganizations lists the organizations that have messages waiting for the send limit.
@@ -1113,4 +1114,15 @@ type MailboxRepository interface {
 	// StatsForOrganization counts messages of the given mailboxes per UTC day from since, for days
 	// that have any. No mailbox ids count nothing.
 	StatsForOrganization(ctx context.Context, organizationID uint, mailboxIDs []uint, since time.Time) ([]MailDayStats, error)
+}
+
+// OrganizationSendPolicy is what an organization's own record says about its sending.
+type OrganizationSendPolicy struct {
+	// CreatedAt is when the organization was created; zero when it is unknown.
+	CreatedAt time.Time
+	// Suspended is true while a platform operator has suspended the organization; it sends nothing.
+	Suspended bool
+	// DailySendLimit, when set by a platform operator, replaces the instance limit of every lane and
+	// the new-organization cap.
+	DailySendLimit *int
 }

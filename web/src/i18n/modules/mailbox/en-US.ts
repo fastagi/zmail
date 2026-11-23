@@ -1953,6 +1953,8 @@ const messages = {
     messageNotFound: 'This message does not exist or was deleted.',
     organizationNotFound:
       'This organization does not exist or you are no longer a member of it. Choose another organization.',
+    organizationSuspended:
+      'This organization is suspended and cannot send or receive here. Contact Zmail support to restore it, or choose another organization.',
     permissionDenied:
       "You don't have permission for this mailbox. Refresh to see your current access.",
     createDenied: 'Only owners and admins of the organization can create mailboxes.',

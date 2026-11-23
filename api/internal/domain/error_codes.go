@@ -58,6 +58,7 @@ const (
 	CodeOrganizationOwnershipTransferRequired      = "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED"
 	CodeOrganizationOwnershipTransferTargetInvalid = "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID"
 	CodeOrganizationMembershipExitRequired         = "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED"
+	CodeOrganizationSuspended                      = "ORGANIZATION.SUSPENDED"
 	CodeOrganizationMemberNotFound                 = "ORGANIZATION.MEMBER_NOT_FOUND"
 	CodeOrganizationInvitationNotFound             = "ORGANIZATION.INVITATION.NOT_FOUND"
 	CodeOrganizationInvitationInvalid              = "ORGANIZATION.INVITATION.INVALID"
