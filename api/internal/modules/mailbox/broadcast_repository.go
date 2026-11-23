@@ -679,7 +679,7 @@ func (r *repository) ListBroadcastNoticesDue(ctx context.Context, finishedSince 
 	due := make([]*domain.MailBroadcastNoticeDue, 0, len(rows))
 	broadcasts := make([]*domain.MailBroadcast, 0, len(rows))
 	for i := range rows {
-		broadcast := rows[i].MailBroadcastPO.toDomain()
+		broadcast := rows[i].toDomain()
 		broadcasts = append(broadcasts, broadcast)
 		due = append(due, &domain.MailBroadcastNoticeDue{
 			Broadcast: broadcast, State: rows[i].State,

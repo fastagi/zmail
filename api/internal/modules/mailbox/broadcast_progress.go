@@ -169,9 +169,9 @@ func (s *service) BroadcastProgress(ctx context.Context, broadcast *domain.MailB
 		limit:   int64(limit),
 		used:    used,
 		slotFreesAt: func(n int64) (*time.Time, error) {
-			at, err := s.broadcasts.NthBroadcastAttemptSince(ctx, broadcast.OrganizationID, since, n)
-			if err != nil || at == nil {
-				return nil, err
+			at, lookupErr := s.broadcasts.NthBroadcastAttemptSince(ctx, broadcast.OrganizationID, since, n)
+			if lookupErr != nil || at == nil {
+				return nil, lookupErr
 			}
 			freed := at.Add(sendLimitWindow)
 			return &freed, nil
