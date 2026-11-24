@@ -1,0 +1,39 @@
+{
+  "name": "@zmail/mail-ui",
+  "version": "0.1.0",
+  "description": "Shared cross-platform MailMaster-style UI primitives, provider presets, and pure selectors for Zmail Web and Electron.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./providers": {
+      "types": "./src/providers.ts",
+      "default": "./src/providers.ts"
+    },
+    "./selectors": {
+      "types": "./src/selectors.ts",
+      "default": "./src/selectors.ts"
+    },
+    "./components/MailShell": {
+      "types": "./src/components/MailShell.tsx",
+      "default": "./src/components/MailShell.tsx"
+    }
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test tests/*.test.ts"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0"
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
+  }
+}
