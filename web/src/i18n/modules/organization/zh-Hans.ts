@@ -22,6 +22,11 @@ const messages = {
   emptyTitle: '还没有组织',
   emptyDescription: '创建第一个组织后，即可开始管理成员和组织级资源。',
   setup: {
+    personalTitle: '个人邮箱模式（一键开启）',
+    personalDescription:
+      '直接接管你的 Gmail、Outlook、163、QQ、iCloud 等最多 30 个个人邮箱，统一收发管理，无需创建企业团队。',
+    personalSubmit: '开启个人模式并接入邮箱',
+    orTeam: '或者，创建企业团队空间',
     title: '给你的团队起个名字',
     description: '邮箱和成员都归团队所有，接下来就为它开第一个邮箱地址。',
     name: '团队名称',

@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LucideIcon,
   Settings,
@@ -41,6 +41,7 @@ import { useLogout } from '@/features/auth/hooks/use-auth';
 import { useAuthStore } from '@/features/auth/store/auth-store';
 import { isWebFeatureEnabled } from '@/config/features';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
+import { WorkspaceModeToggle } from '@/features/mailbox/components/workspace-mode-toggle';
 import type { MemberFeature } from '@/features/organization/types';
 
 import type { ConsoleNavItem } from './_components/console-mobile-nav';
@@ -77,6 +78,7 @@ interface NavItem {
 
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const compactNav = isNavigationItemActive(pathname, ROUTES.CONSOLE.MAILBOXES);
   const navLabelClass = cn(
     'whitespace-nowrap',
@@ -328,6 +330,22 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             )}
           >
             <div className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto py-2">
+              {!compactNav ? (
+                <div className="px-2 pb-2">
+                  <WorkspaceModeToggle
+                    size="sm"
+                    className="w-full"
+                    onChange={mode => {
+                      if (
+                        mode === 'personal' &&
+                        !isNavigationItemActive(pathname, ROUTES.CONSOLE.MAILBOXES)
+                      ) {
+                        router.push(ROUTES.CONSOLE.MAILBOXES);
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
               <nav className="grid items-start px-2 text-sm font-medium">
                 {mainNavItems.map(item => {
                   const IconComponent = item.icon;

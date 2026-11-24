@@ -21,6 +21,11 @@ const messages = {
   emptyDescription:
     'Create the first organization to start managing members and organization-owned resources.',
   setup: {
+    personalTitle: 'Personal Email Mode',
+    personalDescription:
+      'Take over up to 30 personal mailboxes (Gmail, Outlook, 163, QQ, iCloud) in one unified inbox — no team setup needed.',
+    personalSubmit: 'Start in Personal Mode',
+    orTeam: 'Or set up a team workspace',
     title: 'Name your team',
     description: "Your team owns its mailboxes and members. Next you'll create its first address.",
     name: 'Team name',
