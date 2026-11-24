@@ -10,6 +10,7 @@ import {
   EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
   EXTERNAL_MAIL_HOST_MAX_LENGTH,
   EXTERNAL_MAIL_IMAP_PORT,
+  EXTERNAL_MAIL_MAX_BACKFILL_DAYS,
   EXTERNAL_MAIL_SMTP_PORTS,
   EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
   EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
@@ -102,9 +103,9 @@ export async function startExternalMailAuthorizationRoute(request: Request): Pro
     (typeof backfillDays !== 'number' ||
       !Number.isSafeInteger(backfillDays) ||
       backfillDays < 1 ||
-      backfillDays > 90)
+      backfillDays > EXTERNAL_MAIL_MAX_BACKFILL_DAYS)
   ) {
-    errors.backfill_days = ['must be between 1 and 90'];
+    errors.backfill_days = [`must be between 1 and ${EXTERNAL_MAIL_MAX_BACKFILL_DAYS}`];
   }
   if (connectionId !== undefined && !positiveId(connectionId)) {
     errors.connection_id = ['must be a positive id'];
@@ -326,9 +327,9 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
     (typeof backfillDays !== 'number' ||
       !Number.isSafeInteger(backfillDays) ||
       backfillDays < 1 ||
-      backfillDays > 90)
+      backfillDays > EXTERNAL_MAIL_MAX_BACKFILL_DAYS)
   ) {
-    errors.backfill_days = ['must be between 1 and 90'];
+    errors.backfill_days = [`must be between 1 and ${EXTERNAL_MAIL_MAX_BACKFILL_DAYS}`];
   }
   if (connectionId !== undefined && !positiveId(connectionId)) {
     errors.connection_id = ['must be a positive id'];

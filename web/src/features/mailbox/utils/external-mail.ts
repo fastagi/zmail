@@ -27,6 +27,53 @@ export function providerName(id: string): string {
     : words.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
+const DOMAIN_PROVIDER_LABELS: Readonly<Record<string, string>> = {
+  '163.com': '163',
+  'vip.163.com': '163',
+  '126.com': '126',
+  'vip.126.com': '126',
+  'qq.com': 'QQ',
+  'foxmail.com': 'QQ',
+  'vip.qq.com': 'QQ',
+  'icloud.com': 'iCloud',
+  'me.com': 'iCloud',
+  'mac.com': 'iCloud',
+  'gmail.com': 'Gmail',
+  'googlemail.com': 'Gmail',
+  'outlook.com': 'Outlook',
+  'hotmail.com': 'Outlook',
+  'live.com': 'Outlook',
+  'msn.com': 'Outlook',
+  'fastmail.com': 'Fastmail',
+  'fastmail.fm': 'Fastmail',
+  'yahoo.com': 'Yahoo',
+};
+
+const CONNECTOR_BADGE_LABELS: Readonly<Record<string, string>> = {
+  gmail: 'Gmail',
+  outlook: 'Outlook',
+};
+
+/**
+ * Compact badge label for a synced external message row. Prefers the specific email provider
+ * inferred from the connected account's domain (so `@163.com` over generic `imap` shows `163`),
+ * then known connector names (`gmail` -> `Gmail`, `outlook` -> `Outlook`), falling back to `provider`.
+ */
+export function displayExternalProviderLabel(
+  provider: string,
+  address?: string | null
+): string {
+  if (address) {
+    const trimmed = address.trim();
+    const at = trimmed.lastIndexOf('@');
+    if (at > 0) {
+      const domainLabel = DOMAIN_PROVIDER_LABELS[trimmed.slice(at + 1).toLowerCase()];
+      if (domainLabel) return domainLabel;
+    }
+  }
+  return CONNECTOR_BADGE_LABELS[provider.toLowerCase()] ?? provider;
+}
+
 /** The status dot: green while syncing, amber when the grant is lost, grey once unbound. */
 export function statusDotClassName(status: ExternalMailConnectionStatus): string {
   if (status === 'active') return 'bg-success';

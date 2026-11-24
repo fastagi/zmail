@@ -201,7 +201,7 @@ describe('external mail browser routes', () => {
       'COMMON.VALIDATION_FAILED'
     );
     await expectError(
-      await start(route, { provider: 'gmail', backfill_days: 91 }),
+      await start(route, { provider: 'gmail', backfill_days: 3651 }),
       422,
       'COMMON.VALIDATION_FAILED'
     );

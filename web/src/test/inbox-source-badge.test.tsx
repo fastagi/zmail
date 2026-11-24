@@ -5,17 +5,23 @@ import { describe, expect, it } from 'vitest';
 import { InboxList } from '@/features/mailbox/components/inbox-list';
 import { inboxItemSchema } from '@/features/mailbox/schemas';
 import type { InboxItem, MailRole } from '@/features/mailbox/types';
+import { displayExternalProviderLabel } from '@/features/mailbox/utils/external-mail';
 import { messages } from '@/i18n/modules';
 import zhHansMailbox from '@/i18n/modules/mailbox/zh-Hans';
 
-function row(id: number, subject: string, source?: string): InboxItem {
+function row(
+  id: number,
+  subject: string,
+  source?: string,
+  mailboxAddress = 'me@example.com'
+): InboxItem {
   return inboxItemSchema.parse({
     id,
     mailbox_id: 1,
     direction: 'inbound',
     status: 'received',
     from: { address: 'bob@example.com', name: 'Bob' },
-    to: ['me@example.com'],
+    to: [mailboxAddress],
     cc: [],
     subject,
     read: true,
@@ -32,7 +38,7 @@ function row(id: number, subject: string, source?: string): InboxItem {
     starred: false,
     thread_id: id,
     trashed_at: null,
-    mailbox_address: 'me@example.com',
+    mailbox_address: mailboxAddress,
     role_id: 7,
     snippet: '',
   });
@@ -113,6 +119,37 @@ describe('inbox source badge', () => {
     const badge = within(option('From IMAP')).getByText('imap');
     expect(badge).toHaveAttribute('data-source', 'imap');
     expect(badge).toHaveAttribute('title', 'Synced from a bound imap account (read-only)');
+  });
+
+  it('shows specific provider badges for IMAP-synced accounts by domain', () => {
+    renderList([
+      row(1, 'NetEase 163 mail', 'imap', 'starkland@163.com'),
+      row(2, 'QQ mail', 'imap', 'member@qq.com'),
+      row(3, 'iCloud mail', 'imap', 'member@icloud.com'),
+    ]);
+    const badge163 = within(option('NetEase 163 mail')).getByText('163');
+    expect(badge163).toHaveAttribute('data-source', 'imap');
+    expect(badge163).toHaveAttribute('title', 'Synced from a bound 163 account (read-only)');
+    expect(within(option('QQ mail')).getByText('QQ')).toHaveAttribute('data-source', 'imap');
+    expect(within(option('iCloud mail')).getByText('iCloud')).toHaveAttribute('data-source', 'imap');
+  });
+
+  it('resolves displayExternalProviderLabel across domains and connectors', () => {
+    expect(displayExternalProviderLabel('imap', 'starkland@163.com')).toBe('163');
+    expect(displayExternalProviderLabel('imap', 'user@126.com')).toBe('126');
+    expect(displayExternalProviderLabel('imap', 'user@qq.com')).toBe('QQ');
+    expect(displayExternalProviderLabel('imap', 'user@foxmail.com')).toBe('QQ');
+    expect(displayExternalProviderLabel('imap', 'user@icloud.com')).toBe('iCloud');
+    expect(displayExternalProviderLabel('imap', 'user@me.com')).toBe('iCloud');
+    expect(displayExternalProviderLabel('imap', 'user@gmail.com')).toBe('Gmail');
+    expect(displayExternalProviderLabel('gmail', 'user@company.com')).toBe('Gmail');
+    expect(displayExternalProviderLabel('imap', 'user@outlook.com')).toBe('Outlook');
+    expect(displayExternalProviderLabel('imap', 'user@hotmail.com')).toBe('Outlook');
+    expect(displayExternalProviderLabel('outlook', null)).toBe('Outlook');
+    expect(displayExternalProviderLabel('imap', 'user@fastmail.com')).toBe('Fastmail');
+    expect(displayExternalProviderLabel('imap', 'user@yahoo.com')).toBe('Yahoo');
+    expect(displayExternalProviderLabel('imap', 'user@selfhosted.org')).toBe('imap');
+    expect(displayExternalProviderLabel('imap')).toBe('imap');
   });
 
   it('refuses a malformed source', () => {

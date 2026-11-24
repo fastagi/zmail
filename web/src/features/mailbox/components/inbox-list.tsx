@@ -28,6 +28,7 @@ import {
   MAIL_SEARCH_MAX_LENGTH,
 } from '@/features/mailbox/schemas';
 import type { InboxAssignment, InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
+import { displayExternalProviderLabel } from '@/features/mailbox/utils/external-mail';
 
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -37,8 +38,6 @@ type DateRange = (typeof INBOX_DATE_RANGES)[number];
 
 /** How far below the visible rows the next page starts loading. */
 const loadAheadMargin = '240px';
-/** Display names of connector ids; an id without one is shown as it is. */
-const SOURCE_NAMES: Record<string, string | undefined> = { gmail: 'Gmail', outlook: 'Outlook' };
 
 /**
  * The time of a row in the inbox's zone: `HH:mm` for today, the month and day for this year, the
@@ -474,11 +473,11 @@ export function InboxList({
                     <span
                       data-source={item.source}
                       title={t('inbox.sourceTitle', {
-                        name: SOURCE_NAMES[item.source] ?? item.source,
+                        name: displayExternalProviderLabel(item.source, item.mailbox_address),
                       })}
                       className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
                     >
-                      {SOURCE_NAMES[item.source] ?? item.source}
+                      {displayExternalProviderLabel(item.source, item.mailbox_address)}
                     </span>
                   ) : null}
                   {role ? (

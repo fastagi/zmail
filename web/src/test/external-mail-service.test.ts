@@ -104,7 +104,7 @@ describe('external mail service: app passwords, sync runs, purges, directory', (
     ['another port', { port: 143 }],
     ['an empty password', { password: '' }],
     ['a control character', { username: 'me\u0007' }],
-    ['a backfill out of range', { backfill_days: 91 }],
+    ['a backfill out of range', { backfill_days: 3651 }],
     ['an invalid connector id', { provider: 'IMAP!' }],
   ])('refuses %s before any request', async (_name, change) => {
     const post = vi.spyOn(request, 'post');

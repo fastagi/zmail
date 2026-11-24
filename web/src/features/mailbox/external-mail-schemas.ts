@@ -22,10 +22,11 @@ import { safeIdSchema, timestampSchema } from '@/features/mailbox/schemas';
  * they read.
  */
 
-/** How far back a new binding first reads; the contract allows 1 to 90 and defaults to 14. */
-export const EXTERNAL_MAIL_BACKFILL_CHOICES = [14, 30, 90] as const;
+/** How far back a new binding first reads; the contract allows 1 to 3650 and defaults to 14. */
+export const EXTERNAL_MAIL_BACKFILL_CHOICES = [14, 30, 90, 365, 3650] as const;
 export type ExternalMailBackfillDays = (typeof EXTERNAL_MAIL_BACKFILL_CHOICES)[number];
 export const EXTERNAL_MAIL_DEFAULT_BACKFILL_DAYS: ExternalMailBackfillDays = 14;
+export const EXTERNAL_MAIL_MAX_BACKFILL_DAYS = 3650;
 
 /** Connector ids match this pattern; new connectors add ids without a contract change. */
 export const EXTERNAL_MAIL_CONNECTOR_ID_PATTERN = /^[a-z][a-z0-9_]{1,15}$/u;

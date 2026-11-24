@@ -8,6 +8,7 @@ import {
   EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
   EXTERNAL_MAIL_HOST_MAX_LENGTH,
   EXTERNAL_MAIL_IMAP_PORT,
+  EXTERNAL_MAIL_MAX_BACKFILL_DAYS,
   EXTERNAL_MAIL_SMTP_PORTS,
   EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
   EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
@@ -85,7 +86,10 @@ export const externalMailService = {
     } else {
       if (!EXTERNAL_MAIL_CONNECTOR_ID_PATTERN.test(input.provider)) throw invalidRequest();
       const days = input.backfill_days;
-      if (days !== undefined && (!Number.isSafeInteger(days) || days < 1 || days > 90)) {
+      if (
+        days !== undefined &&
+        (!Number.isSafeInteger(days) || days < 1 || days > EXTERNAL_MAIL_MAX_BACKFILL_DAYS)
+      ) {
         throw invalidRequest();
       }
     }
@@ -287,7 +291,8 @@ function validCredentials(input: BindExternalMailCredentialsInput): boolean {
       (EXTERNAL_MAIL_SMTP_PORTS as readonly number[]).includes(input.smtp_port)) &&
     (input.connection_id === undefined ||
       (Number.isSafeInteger(input.connection_id) && input.connection_id > 0)) &&
-    (days === undefined || (Number.isSafeInteger(days) && days >= 1 && days <= 90))
+    (days === undefined ||
+      (Number.isSafeInteger(days) && days >= 1 && days <= EXTERNAL_MAIL_MAX_BACKFILL_DAYS))
   );
 }
 
