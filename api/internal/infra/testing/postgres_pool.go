@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -36,8 +35,6 @@ type pooledSchema struct {
 	name        string
 	maintenance *gorm.DB
 	fingerprint string
-	// structureParts keeps the digested lines when FASTBUILD_TEST_POOL_DEBUG asks what changed.
-	structureParts []string
 	// seeded lists the tables the preparation filled; their rows live in the snapshot schema.
 	seeded []string
 	// deleteOrder lists every table with referencing tables before the tables they reference.
@@ -93,9 +90,7 @@ func openPooled(tb testing.TB, gormConfig *gorm.Config, key string, prepare func
 	key = fmt.Sprintf("%s|%#v", key, namingStrategy(gormConfig))
 	schema := takePooledSchema(key)
 	if schema == nil {
-		started := time.Now()
 		schema = preparePooledSchema(tb, parsed, gormConfig, prepare)
-		poolDebug("prepare %s for %s in %s", key[:min(len(key), 40)], tb.Name(), time.Since(started).Round(time.Millisecond))
 	}
 	if gormConfig == nil {
 		gormConfig = &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
@@ -106,14 +101,12 @@ func openPooled(tb testing.TB, gormConfig *gorm.Config, key string, prepare func
 		once.Do(func() {
 			closePostgres(tb, db)
 			if err := schema.reset(); err != nil {
-				poolDebug("drop %s after %s: %v", schema.name, tb.Name(), err)
 				schema.drop()
 				return
 			}
 			schemaPool.mu.Lock()
 			schemaPool.free[key] = append(schemaPool.free[key], schema)
 			schemaPool.mu.Unlock()
-			poolDebug("return %s after %s", schema.name, tb.Name())
 		})
 	}
 }
@@ -324,21 +317,6 @@ func (s *pooledSchema) structureOn(db *gorm.DB) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if os.Getenv("FASTBUILD_TEST_POOL_DEBUG") != "" {
-		if s.structureParts == nil {
-			s.structureParts = parts
-		} else {
-			seen := map[string]bool{}
-			for _, part := range s.structureParts {
-				seen[part] = true
-			}
-			for _, part := range parts {
-				if !seen[part] {
-					poolDebug("structure of %s gained: %s", s.name, part)
-				}
-			}
-		}
-	}
 	digest := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return hex.EncodeToString(digest[:]), nil
 }
@@ -401,11 +379,4 @@ func poolEnabled() bool {
 	schemaPool.mu.Lock()
 	defer schemaPool.mu.Unlock()
 	return schemaPool.enabled
-}
-
-// FASTBUILD_TEST_POOL_DEBUG=1 reports every preparation and every schema the pool gives up.
-func poolDebug(format string, args ...any) {
-	if os.Getenv("FASTBUILD_TEST_POOL_DEBUG") != "" {
-		fmt.Fprintf(os.Stderr, "testpool: "+format+"\n", args...)
-	}
 }
