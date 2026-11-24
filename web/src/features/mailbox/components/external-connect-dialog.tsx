@@ -2,12 +2,13 @@
 
 import { lazy, Suspense, useId, useState, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Eye, KeyRound, Lock, LogOut } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, KeyRound, Lock, LogOut, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogBody,
@@ -25,6 +26,11 @@ import {
   type ExternalMailCompletion,
   type ExternalMailConnector,
 } from '@/features/mailbox/external-mail-schemas';
+import {
+  detectPersonalProvider,
+  type PersonalProviderPreset,
+} from '@/features/mailbox/components/personal-provider-picker';
+import type { ExternalPasswordInitialPreset } from '@/features/mailbox/components/external-password-form';
 import { ProviderMark } from '@/features/mailbox/components/provider-mark';
 import { useDialogReturnFocus } from '@/features/mailbox/hooks/use-dialog-return-focus';
 import { useBeginExternalAuthorization } from '@/features/mailbox/hooks/use-external-mail-actions';
@@ -105,13 +111,54 @@ export function ExternalConnectDialog({
   // A password connector shows its statement first, then the form.
   const [formShown, setFormShown] = useState(presetConnector !== null);
   const [days, setDays] = useState<ExternalMailBackfillDays>(EXTERNAL_MAIL_DEFAULT_BACKFILL_DAYS);
+  const [quickEmail, setQuickEmail] = useState('');
+  const [passwordInitialPreset, setPasswordInitialPreset] =
+    useState<ExternalPasswordInitialPreset | null>(null);
   const authorization = useBeginExternalAuthorization(organizationId);
   const backfillName = useId();
+
+  const detectedPreset: PersonalProviderPreset | null = detectPersonalProvider(quickEmail);
+  const oauthMatch = (preset: PersonalProviderPreset) =>
+    connectors.find(
+      item =>
+        isSupported(item) &&
+        item.auth_kind === 'oauth2' &&
+        ((preset.id === 'gmail' && (item.id === 'google' || item.id === 'gmail')) ||
+          (preset.id === 'outlook' && (item.id === 'microsoft' || item.id === 'outlook')))
+    ) ?? null;
+  const passwordConnector =
+    connectors.find(item => isSupported(item) && isPasswordConnector(item)) ?? null;
+  const canQuickConnect =
+    detectedPreset !== null &&
+    (oauthMatch(detectedPreset) !== null || passwordConnector !== null);
+
+  const handleQuickContinue = () => {
+    if (!detectedPreset) return;
+    const oauth = oauthMatch(detectedPreset);
+    if (oauth) {
+      setPasswordInitialPreset(null);
+      setChosen(oauth);
+      setFormShown(false);
+      return;
+    }
+    if (passwordConnector) {
+      setPasswordInitialPreset({
+        email: quickEmail.trim(),
+        imapHost: detectedPreset.imapHost || undefined,
+        smtpHost: detectedPreset.smtpHost || undefined,
+        smtpPort: detectedPreset.smtpPort,
+      });
+      setChosen(passwordConnector);
+      setFormShown(true);
+    }
+  };
 
   const reset = () => {
     setChosen(null);
     setFormShown(false);
     setDays(EXTERNAL_MAIL_DEFAULT_BACKFILL_DAYS);
+    setQuickEmail('');
+    setPasswordInitialPreset(null);
     authorization.reset();
   };
   const connected = ({ outcome, connection }: ExternalMailCompletion, backfillDays: number) => {
@@ -149,9 +196,50 @@ export function ExternalConnectDialog({
               <DialogTitle>{t('external.connect.title')}</DialogTitle>
               <DialogDescription>{t('external.connect.description')}</DialogDescription>
             </DialogHeader>
-            <DialogBody>
-              <p className="mb-2 text-xs text-text-muted">{t('external.connect.choose')}</p>
-              <ul className="flex flex-col gap-2">
+            <DialogBody className="space-y-4">
+              {connectors.some(isSupported) ? (
+                <div className="space-y-2 rounded-lg border border-border-main bg-bg-subtle/40 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-text-main">
+                      <Sparkles className="size-3.5 text-brand" aria-hidden="true" />
+                      Quick detect by email
+                    </span>
+                    {detectedPreset ? (
+                      <Badge variant="secondary" className="text-[11px]">
+                        {detectedPreset.label} · {oauthMatch(detectedPreset) ? 'OAuth 2.0' : 'IMAP / SMTP'}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="email"
+                      value={quickEmail}
+                      onChange={event => setQuickEmail(event.target.value)}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter' && canQuickConnect) {
+                          event.preventDefault();
+                          handleQuickContinue();
+                        }
+                      }}
+                      placeholder="name@gmail.com, qq.com, icloud.com, 163.com..."
+                      aria-label="Quick detect email address"
+                      className="h-8 text-xs"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 shrink-0 px-2.5 text-xs"
+                      disabled={!canQuickConnect}
+                      onClick={handleQuickContinue}
+                    >
+                      <ArrowRight className="size-3.5" aria-hidden="true" />
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              <div>
+                <p className="mb-2 text-xs text-text-muted">{t('external.connect.choose')}</p>
+                <ul className="flex flex-col gap-2">
                 {connectors.map(connector => {
                   const supported = isSupported(connector);
                   return (
@@ -193,7 +281,8 @@ export function ExternalConnectDialog({
                     </li>
                   );
                 })}
-              </ul>
+                </ul>
+              </div>
             </DialogBody>
           </>
         ) : password && formShown ? (
@@ -212,7 +301,11 @@ export function ExternalConnectDialog({
                     ? { address: preset.address, connectionId: preset.connectionId }
                     : null
                 }
-                onBack={() => setFormShown(false)}
+                initialPreset={passwordInitialPreset}
+                onBack={() => {
+                  setPasswordInitialPreset(null);
+                  setFormShown(false);
+                }}
                 onConnected={connected}
               />
             </Suspense>

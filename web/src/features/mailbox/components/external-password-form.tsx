@@ -102,11 +102,19 @@ export function suggestedSmtpHost(imapHost: string): string {
  * the backfill. The password lives in this component's state only until it is submitted, and is
  * cleared then, on Back, and when the dialog closes (which unmounts this form).
  */
+export interface ExternalPasswordInitialPreset {
+  email?: string;
+  imapHost?: string;
+  smtpHost?: string;
+  smtpPort?: ExternalMailSmtpPort;
+}
+
 export function ExternalPasswordForm({
   organizationId,
   provider,
   providerLabel,
   reconnect = null,
+  initialPreset = null,
   onBack,
   onConnected,
 }: {
@@ -115,20 +123,24 @@ export function ExternalPasswordForm({
   providerLabel: string;
   /** The connection being restored, when this binds an existing account again. */
   reconnect?: { address: string; connectionId: number } | null;
+  /** Optional auto-detected server & address preset from the quick-connect picker. */
+  initialPreset?: ExternalPasswordInitialPreset | null;
   onBack: (() => void) | null;
   onConnected: (completion: ExternalMailCompletion, backfillDays: number) => void;
 }) {
   const t = useT('mailbox');
   const bind = useBindExternalMailCredentials(organizationId);
-  const [host, setHost] = useState('');
+  const [host, setHost] = useState(initialPreset?.imapHost ?? '');
   // The IMAP server Zmail filled in itself; an address change may replace it, a typed one never.
-  const [autoHost, setAutoHost] = useState('');
-  const [username, setUsername] = useState('');
+  const [autoHost, setAutoHost] = useState(initialPreset?.imapHost ?? '');
+  const [username, setUsername] = useState(initialPreset?.email ?? '');
   const [password, setPassword] = useState('');
-  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpHost, setSmtpHost] = useState(initialPreset?.smtpHost ?? '');
   // Once edited, the SMTP server no longer follows the IMAP server.
   const [smtpEdited, setSmtpEdited] = useState(false);
-  const [smtpPort, setSmtpPort] = useState<ExternalMailSmtpPort>(EXTERNAL_MAIL_DEFAULT_SMTP_PORT);
+  const [smtpPort, setSmtpPort] = useState<ExternalMailSmtpPort>(
+    initialPreset?.smtpPort ?? EXTERNAL_MAIL_DEFAULT_SMTP_PORT
+  );
   const smtpPortName = `${useId()}-smtp-port`;
   const [days, setDays] = useState<ExternalMailBackfillDays>(EXTERNAL_MAIL_DEFAULT_BACKFILL_DAYS);
   const [errors, setErrors] = useState<FieldErrors>({});

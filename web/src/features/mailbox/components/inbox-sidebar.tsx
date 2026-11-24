@@ -430,6 +430,29 @@ export function InboxSidebar({
       </nav>
       ) : null}
 
+      {isPersonalMode && external && external.onAdd && mine.length === 0 ? (
+        <div
+          className={cn(
+            'mx-1 mt-3 rounded-xl border border-dashed border-border-main bg-bg-surface/60 p-3 text-left',
+            rail && 'hidden lg:block'
+          )}
+        >
+          <p className="text-xs font-medium text-text-main">Personal Mailboxes</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+            Connect Gmail, Outlook, iCloud, QQ, 163, or any IMAP mailbox in one click.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="mt-2.5 h-7 w-full text-xs"
+            onClick={() => external.onAdd?.()}
+          >
+            Connect personal email
+          </Button>
+        </div>
+      ) : null}
+
       {external && showConnected ? (
         <Suspense fallback={null}>
           <ConnectedMailboxes
