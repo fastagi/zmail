@@ -163,8 +163,11 @@ export function InboxReadingPane({
   const reported = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!readable || marked.current === item.id || !rowUnread(item)) return;
+    if (!readable || marked.current === item.id) return;
+    // Check read state once per open item so marking a read message unread while the pane is still
+    // mounted does not immediately re-mark it read.
     marked.current = item.id;
+    if (!rowUnread(item)) return;
     const rollback = markInboxRowRead(queryClient, organizationId, item.id);
     const onError = (failure: unknown) => {
       rollback();
