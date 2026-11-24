@@ -14,9 +14,6 @@ import (
 func openZoneRepository(t *testing.T) *repository {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&MailZonePO{}, &MailDomainPO{}); err != nil {
-		t.Fatalf("migrate mail zones: %v", err)
-	}
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
 	return repo

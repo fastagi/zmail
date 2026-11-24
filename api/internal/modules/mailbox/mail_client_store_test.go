@@ -11,11 +11,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/fastagi/zmail/api/database/migrations"
 	"github.com/fastagi/zmail/api/internal/domain"
-	"github.com/fastagi/zmail/api/internal/infra/migration"
 	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
-	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 // Organization 10 of the mail client scenarios: the owner, Alice, and Bob, with the membership ids
@@ -45,12 +42,7 @@ type mailClientFixture struct {
 // newMailClientFixture migrates a disposable schema and seeds the scenario.
 func newMailClientFixture(t *testing.T) *mailClientFixture {
 	t.Helper()
-	db := testplatform.OpenPostgres(t, &gorm.Config{TranslateError: true})
-	migrator := migration.NewMigrator(migration.NewDatabaseRepository(db, "migrations"), db, nil)
-	migrator.RegisterMany(migrations.All())
-	if _, err := migrator.Run(migration.MigratorOptions{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := openMigratedPostgres(t)
 	m := func(user uint) uint { return membershipIDOf(clientOrg, user) }
 	for _, statement := range []string{
 		`INSERT INTO users (id, username, email, password, created_at, updated_at) VALUES

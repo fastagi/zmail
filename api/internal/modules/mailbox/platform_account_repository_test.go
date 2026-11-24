@@ -20,18 +20,9 @@ const (
 func newLedgerRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	repo, db := openRepository(t)
-	migrateLedger(t, db)
 	createOwner(t, db, ledgerOrg)
 	createOwner(t, db, otherLedgerOrg)
 	return repo, db
-}
-
-// migrateLedger adds the ledger tables to a test schema.
-func migrateLedger(t *testing.T, db *gorm.DB) {
-	t.Helper()
-	if err := db.AutoMigrate(&PlatformAccountPO{}, &PlatformAccountEventPO{}); err != nil {
-		t.Fatalf("migrate the ledger: %v", err)
-	}
 }
 
 func ledgerMailbox(t *testing.T, repo *repository, address string) *domain.Mailbox {
@@ -153,9 +144,6 @@ func TestPlatformAccountRepositorySearchAndFilters(t *testing.T) {
 	design := ledgerMailbox(t, repo, "design-desk@mail.example")
 	sales := ledgerMailbox(t, repo, "sales@mail.example")
 	role := uint(9)
-	if err := db.AutoMigrate(&MailRolePO{}); err != nil {
-		t.Fatalf("migrate roles: %v", err)
-	}
 	if err := db.Exec(`INSERT INTO mail_roles (id, organization_id, name, color, description, created_at, updated_at) VALUES (9, ?, 'Design', 'gray', '', now(), now())`, ledgerOrg).Error; err != nil {
 		t.Fatalf("seed a role: %v", err)
 	}

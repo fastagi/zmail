@@ -387,10 +387,6 @@ func TestInboundDeliveryNeverReachesExternalMailbox(t *testing.T) {
 // inbound mail, so it reaches AI triage once its owner switched triage on, and only then.
 func TestSyncedMailIsQueuedForTriage(t *testing.T) {
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
-	db := f.repo.(*repository).db
-	if err := db.AutoMigrate(&MailTriagePO{}, &MailTriageSettingsPO{}); err != nil {
-		t.Fatalf("migrate triage tables: %v", err)
-	}
 	f.service.settings.Triage = config.AITriageConfig{Provider: config.AITriageProviderFake, DailyCap: 100}
 	ctx := context.Background()
 

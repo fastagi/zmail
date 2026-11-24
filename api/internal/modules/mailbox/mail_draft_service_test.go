@@ -12,9 +12,6 @@ import (
 func newDraftFixture(t *testing.T) *accessFixture {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&MailDraftPO{}); err != nil {
-		t.Fatalf("migrate drafts: %v", err)
-	}
 	createOwner(t, db, accessOrg)
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()

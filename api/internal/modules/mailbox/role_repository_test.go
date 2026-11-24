@@ -19,18 +19,13 @@ const (
 	otherRoleOrg = 2
 )
 
-// newRoleRepository opens a repository with two organizations. The test schema gets the
-// mailboxes.role_id foreign key of the migration, so deletes and assignments meet it as in
-// production.
+// newRoleRepository opens a repository with two organizations. The schema has the migration's
+// mailboxes.role_id foreign key, so deletes and assignments meet it as in production.
 func newRoleRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	repo, db := openRepository(t)
 	createOwner(t, db, roleOrg)
 	createOwner(t, db, otherRoleOrg)
-	if err := db.Exec(`ALTER TABLE mailboxes ADD CONSTRAINT fk_mailboxes_role
-		FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL`).Error; err != nil {
-		t.Fatalf("add the role foreign key: %v", err)
-	}
 	return repo, db
 }
 

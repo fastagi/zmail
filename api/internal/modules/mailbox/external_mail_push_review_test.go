@@ -244,7 +244,6 @@ func TestExternalMailPushProviderCallsAfterCommit(t *testing.T) {
 	ctx := context.Background()
 	t.Run("mailbox deleted", func(t *testing.T) {
 		tf := newTenantFixture(t)
-		migratePushTable(t, tf.externalFixture)
 		tf.service.settings.ExternalMail.Push = config.ExternalMailPushConfig{Enabled: true}
 		recording := &txRecordingSource{FakeExternalMailSource: tf.source}
 		tf.service.externalConnectors = fakeExternalMailRegistry(recording)
@@ -341,7 +340,6 @@ func (s unsupportedTenantSource) Subscribe(ctx context.Context, request External
 // polled every two minutes, and the provider is asked again only a day later.
 func TestExternalMailPushUnsupportedForTenantMailboxes(t *testing.T) {
 	tf := newTenantFixture(t)
-	migratePushTable(t, tf.externalFixture)
 	tf.service.settings.ExternalMail.Push = config.ExternalMailPushConfig{Enabled: true}
 	registry := fakeExternalMailRegistry(tf.source)
 	registry.connectors[0].Push = unsupportedTenantSource{tf.source}

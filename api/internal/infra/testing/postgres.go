@@ -23,7 +23,8 @@ const TestPostgresDSNEnv = "FASTBUILD_TEST_POSTGRES_DSN"
 
 var postgresResourceSequence atomic.Uint64
 
-// OpenPostgres opens an isolated PostgreSQL schema and migrates the requested models.
+// OpenPostgres opens an isolated PostgreSQL schema and migrates the requested models. Under
+// RunWithPostgresPool a schema with models comes from the pool (see postgres_pool.go).
 func OpenPostgres(tb testing.TB, gormConfig *gorm.Config, models ...any) *gorm.DB {
 	tb.Helper()
 	db, cleanup := OpenPostgresWithCleanup(tb, gormConfig, models...)
@@ -39,6 +40,9 @@ func OpenPostgresWithCleanup(
 	models ...any,
 ) (*gorm.DB, func()) {
 	tb.Helper()
+	if len(models) > 0 && poolEnabled() {
+		return openAutoMigrated(tb, gormConfig, models)
+	}
 	parsed := testPostgresURL(tb)
 	admin := openPostgres(tb, parsed.String(), &gorm.Config{
 		Logger:               logger.Default.LogMode(logger.Silent),

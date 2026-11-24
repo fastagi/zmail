@@ -12,9 +12,6 @@ import (
 func openDomainRepository(t *testing.T) *repository {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&MailDomainPO{}); err != nil {
-		t.Fatalf("migrate mail domains: %v", err)
-	}
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
 	return repo
