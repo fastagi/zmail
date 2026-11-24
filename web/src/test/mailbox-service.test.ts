@@ -135,6 +135,42 @@ describe('mailbox service boundary', () => {
     );
   });
 
+  it('chunks shared mailbox commits over 5 rows into sequential batches of 5', async () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      address: `team${index + 1}@mail.example.com`,
+      display_name: `Team ${index + 1}`,
+      members: 'a@b.co:manage',
+    }));
+    const post = vi
+      .spyOn(request, 'post')
+      .mockImplementation(async (_url, body) => {
+        const payload = body as { dry_run: boolean; rows: typeof rows };
+        return {
+          dry_run: payload.dry_run,
+          succeeded: payload.rows.length,
+          failed: 0,
+          rows: payload.rows.map((row, index) => ({
+            row: index + 1,
+            address: row.address,
+            status: 'created',
+            mailbox_id: index + 1,
+            error_code: null,
+            missing_emails: [],
+          })),
+        };
+      });
+
+    const result = await mailboxAdminService.importMailboxes(7, rows, false);
+
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(
+      post.mock.calls.map(call => (call[1] as { rows: unknown[] }).rows.length)
+    ).toEqual([5, 5, 2]);
+    expect(result.succeeded).toBe(12);
+    expect(result.failed).toBe(0);
+    expect(result.rows.map(row => row.row)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  });
+
   it('names the organization in a header on every call', async () => {
     const pageEnvelope = {
       code: 0 as const,

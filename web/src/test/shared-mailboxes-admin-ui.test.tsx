@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AuthStoreContext, createAuthStore } from '@/features/auth/store/auth-store';
 import { SharedMailboxesAdmin } from '@/features/mailbox';
 import { messages } from '@/i18n/modules';
 
@@ -105,16 +106,24 @@ function directoryPage(items: ReturnType<typeof entry>[], nextCursor: string | n
   };
 }
 
-function renderPage() {
+function renderPage(adminEmail?: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const content = (
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
         <SharedMailboxesAdmin />
       </NextIntlClientProvider>
     </QueryClientProvider>
+  );
+  if (!adminEmail) return render(content);
+  const authStore = createAuthStore({
+    status: 'authenticated',
+    user: { id: '1', email: adminEmail, name: 'Admin' },
+  });
+  return render(
+    <AuthStoreContext.Provider value={authStore}>{content}</AuthStoreContext.Provider>
   );
 }
 
@@ -360,6 +369,133 @@ describe('shared mailbox admin', () => {
       '\ufeffaddress,display_name,members,error\r\n' +
         'bad@mail.example.com,Bad,ghost@people.test,Not in the organization. Invite them first: ghost@people.test\r\n'
     );
+  });
+
+  it('defaults blank members to the signed-in admin with :manage', async () => {
+    service.importMailboxes.mockImplementation(
+      async (_id: number, rows: Array<{ address: string }>, dryRun: boolean) => ({
+        dry_run: dryRun,
+        succeeded: rows.length,
+        failed: 0,
+        rows: rows.map((row, index) => ({
+          row: index + 1,
+          address: row.address,
+          status: dryRun ? 'valid' : 'created',
+          mailbox_id: dryRun ? null : 20 + index,
+          error_code: null,
+          missing_emails: [],
+        })),
+      })
+    );
+    renderPage('admin@zgi.im');
+    fireEvent.click(await screen.findByRole('button', { name: 'Import' }));
+    await screen.findByRole('dialog');
+    uploadFile(
+      'address,display_name,members\r\nsupport@zgi.im,Support,\r\nsales@zgi.im,Sales,alice@zgi.im:send\r\n'
+    );
+
+    expect(await screen.findByText('2 ready, 0 with errors')).toBeInTheDocument();
+    expect(
+      screen.getByText('1 row with empty members defaulted to admin@zgi.im:manage.')
+    ).toBeInTheDocument();
+    const expectedRows = [
+      { address: 'support@zgi.im', display_name: 'Support', members: 'admin@zgi.im:manage' },
+      { address: 'sales@zgi.im', display_name: 'Sales', members: 'alice@zgi.im:send' },
+    ];
+    expect(service.importMailboxes).toHaveBeenCalledWith(1, expectedRows, true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create 2 mailboxes' }));
+    expect(await screen.findByText('2 created, 0 failed')).toBeInTheDocument();
+    expect(service.importMailboxes).toHaveBeenLastCalledWith(1, expectedRows, false);
+  });
+
+  it('chunks 12-row commits into 5 + 5 + 2 batches and preserves original row numbers', async () => {
+    const csvRows = Array.from(
+      { length: 12 },
+      (_, index) => `m${index + 1}@mail.example.com,Box ${index + 1},member@people.test`
+    );
+    let commitCall = 0;
+    const resolvers: Array<() => void> = [];
+
+    service.importMailboxes.mockImplementation(
+      async (_id: number, rows: Array<{ address: string }>, dryRun: boolean) => {
+        if (dryRun) {
+          return {
+            dry_run: true,
+            succeeded: rows.length,
+            failed: 0,
+            rows: rows.map((row, index) => ({
+              row: index + 1,
+              address: row.address,
+              status: 'valid',
+              mailbox_id: null,
+              error_code: null,
+              missing_emails: [],
+            })),
+          };
+        }
+        commitCall += 1;
+        const currentCall = commitCall;
+        await new Promise<void>(resolve => {
+          resolvers.push(resolve);
+        });
+        return {
+          dry_run: false,
+          succeeded: currentCall === 2 ? rows.length - 1 : rows.length,
+          failed: currentCall === 2 ? 1 : 0,
+          rows: rows.map((row, index) =>
+            currentCall === 2 && index === 1
+              ? {
+                  row: index + 1,
+                  address: row.address,
+                  status: 'failed',
+                  mailbox_id: null,
+                  error_code: 'MAILBOX.IMPORT_MEMBER_NOT_FOUND',
+                  missing_emails: ['ghost@people.test'],
+                }
+              : {
+                  row: index + 1,
+                  address: row.address,
+                  status: 'created',
+                  mailbox_id: currentCall * 100 + index,
+                  error_code: null,
+                  missing_emails: [],
+                }
+          ),
+        };
+      }
+    );
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Import' }));
+    await screen.findByRole('dialog');
+    uploadFile(`address,display_name,members\n${csvRows.join('\n')}\n`);
+
+    expect(await screen.findByText('12 ready, 0 with errors')).toBeInTheDocument();
+    expect(service.importMailboxes).toHaveBeenCalledTimes(1);
+    expect(service.importMailboxes.mock.calls[0]?.[1]).toHaveLength(12);
+    expect(service.importMailboxes.mock.calls[0]?.[2]).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create 12 mailboxes' }));
+    expect(await screen.findByText('Importing 0 / 12…')).toBeInTheDocument();
+    await waitFor(() => expect(resolvers).toHaveLength(1));
+    resolvers[0]?.();
+
+    expect(await screen.findByText('Importing 5 / 12…')).toBeInTheDocument();
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+    resolvers[1]?.();
+
+    expect(await screen.findByText('Importing 10 / 12…')).toBeInTheDocument();
+    await waitFor(() => expect(resolvers).toHaveLength(3));
+    resolvers[2]?.();
+
+    expect(await screen.findByText('11 created, 1 failed')).toBeInTheDocument();
+    expect(screen.getByText('Row 7 · m7@mail.example.com')).toBeInTheDocument();
+
+    const commitCalls = service.importMailboxes.mock.calls.slice(1);
+    expect(commitCalls).toHaveLength(3);
+    expect(commitCalls.map(call => (call[1] as unknown[]).length)).toEqual([5, 5, 2]);
+    expect(commitCalls.every(call => call[2] === false)).toBe(true);
   });
 
   it('rejects a file over 500 rows before upload', async () => {

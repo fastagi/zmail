@@ -92,15 +92,22 @@ export const mailboxAdminService = {
   ): Promise<MailboxImportResult> {
     const headers = organizationHeaders(organizationId);
     if (rows.length === 0 || rows.length > MAILBOX_IMPORT_MAX_ROWS) throw invalidResponse();
-    const parsed = mailboxImportResultSchema.safeParse(
-      await request.post<unknown, { dry_run: boolean; rows: MailboxImportRowInput[] }>(
-        '/mailbox-imports',
-        { dry_run: dryRun, rows },
-        { headers }
-      )
-    );
-    if (!parsed.success || parsed.data.rows.length !== rows.length) throw invalidResponse();
-    return parsed.data;
+    if (dryRun || rows.length <= MAILBOX_IMPORT_CHUNK_SIZE) {
+      return postMailboxImportChunk(headers, rows, dryRun);
+    }
+    let succeeded = 0;
+    let failed = 0;
+    const aggregatedRows: MailboxImportResult['rows'] = [];
+    for (let offset = 0; offset < rows.length; offset += MAILBOX_IMPORT_CHUNK_SIZE) {
+      const chunk = rows.slice(offset, offset + MAILBOX_IMPORT_CHUNK_SIZE);
+      const chunkResult = await postMailboxImportChunk(headers, chunk, false);
+      succeeded += chunkResult.succeeded;
+      failed += chunkResult.failed;
+      for (const row of chunkResult.rows) {
+        aggregatedRows.push({ ...row, row: offset + row.row });
+      }
+    }
+    return { dry_run: false, succeeded, failed, rows: aggregatedRows };
   },
 
   /**
@@ -136,6 +143,24 @@ export const mailboxAdminService = {
     };
   },
 };
+
+const MAILBOX_IMPORT_CHUNK_SIZE = 5;
+
+async function postMailboxImportChunk(
+  headers: Record<string, string>,
+  rows: MailboxImportRowInput[],
+  dryRun: boolean
+): Promise<MailboxImportResult> {
+  const parsed = mailboxImportResultSchema.safeParse(
+    await request.post<unknown, { dry_run: boolean; rows: MailboxImportRowInput[] }>(
+      '/mailbox-imports',
+      { dry_run: dryRun, rows },
+      { headers }
+    )
+  );
+  if (!parsed.success || parsed.data.rows.length !== rows.length) throw invalidResponse();
+  return parsed.data;
+}
 
 interface MemberImportBody {
   dry_run: boolean;

@@ -2,6 +2,7 @@
 
 import { useId, useState, type ChangeEvent } from 'react';
 import { AlertCircle, Download, FileSpreadsheet } from 'lucide-react';
+import { useLocale } from 'next-intl';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useAuthStore } from '@/features/auth/store/auth-store';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { saveFile, useImportMailboxes } from '@/features/mailbox/hooks/use-mailbox-admin';
 import type {
@@ -30,11 +32,47 @@ import { useT } from '@/i18n';
 
 /** Lets spreadsheet programs read the file as UTF-8. */
 const BYTE_ORDER_MARK = '\ufeff';
+/** Commits larger batches in sequential chunks so slow server provisioning never hits 503 timeouts. */
+const COMMIT_CHUNK_SIZE = 5;
 
 type Step =
   | { kind: 'choose' }
-  | { kind: 'preview'; rows: MailboxImportRowInput[]; result: MailboxImportResult }
+  | {
+      kind: 'preview';
+      rows: MailboxImportRowInput[];
+      result: MailboxImportResult;
+      defaultedMembersCount: number;
+    }
   | { kind: 'done'; rows: MailboxImportRowInput[]; result: MailboxImportResult };
+
+interface CommitProgress {
+  completed: number;
+  total: number;
+}
+
+function useOptionalCurrentUserEmail(): string | null {
+  try {
+    const email = useAuthStore.use.user()?.email?.trim();
+    return email || null;
+  } catch {
+    return null;
+  }
+}
+
+function applyDefaultMembers(
+  rows: MailboxImportRowInput[],
+  currentUserEmail: string | null
+): { rows: MailboxImportRowInput[]; defaultedCount: number } {
+  if (!currentUserEmail) return { rows, defaultedCount: 0 };
+  let defaultedCount = 0;
+  const defaultMember = `${currentUserEmail}:manage`;
+  const normalized = rows.map(row => {
+    if (row.members.trim() !== '') return row;
+    defaultedCount += 1;
+    return { ...row, members: defaultMember };
+  });
+  return { rows: normalized, defaultedCount };
+}
 
 function saveCsv(text: string, filename: string) {
   saveFile(new Blob([BYTE_ORDER_MARK, text], { type: 'text/csv;charset=utf-8' }), filename);
@@ -62,11 +100,14 @@ export function ImportMailboxesDialog({ open, onClose }: { open: boolean; onClos
 
 function ImportBody({ onClose }: { onClose: () => void }) {
   const t = useT('mailbox');
+  const isZh = useLocale().startsWith('zh');
+  const currentUserEmail = useOptionalCurrentUserEmail();
   const importMailboxes = useImportMailboxes(useMailOrganizationId());
   const fileId = useId();
   const [step, setStep] = useState<Step>({ kind: 'choose' });
   const [error, setError] = useState<string | null>(null);
-  const pending = importMailboxes.isPending;
+  const [progress, setProgress] = useState<CommitProgress | null>(null);
+  const pending = importMailboxes.isPending || progress !== null;
 
   const reason = (row: MailboxImportRowResult) =>
     t(importRowErrorKey(row.error_code), { emails: row.missing_emails.join(', ') });
@@ -88,9 +129,15 @@ function ImportBody({ onClose }: { onClose: () => void }) {
       setError(t(`admin.importDialog.errors.${read.error}`));
       return;
     }
+    const { rows: preparedRows, defaultedCount } = applyDefaultMembers(read.rows, currentUserEmail);
     try {
-      const result = await importMailboxes.mutateAsync({ rows: read.rows, dryRun: true });
-      setStep({ kind: 'preview', rows: read.rows, result });
+      const result = await importMailboxes.mutateAsync({ rows: preparedRows, dryRun: true });
+      setStep({
+        kind: 'preview',
+        rows: preparedRows,
+        result,
+        defaultedMembersCount: defaultedCount,
+      });
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
     }
@@ -99,11 +146,35 @@ function ImportBody({ onClose }: { onClose: () => void }) {
   const confirm = async (rows: MailboxImportRowInput[]) => {
     setError(null);
     try {
-      const result = await importMailboxes.mutateAsync({ rows, dryRun: false });
+      let result: MailboxImportResult;
+      if (rows.length <= COMMIT_CHUNK_SIZE) {
+        result = await importMailboxes.mutateAsync({ rows, dryRun: false });
+      } else {
+        setProgress({ completed: 0, total: rows.length });
+        let succeeded = 0;
+        let failed = 0;
+        const aggregatedRows: MailboxImportRowResult[] = [];
+        for (let offset = 0; offset < rows.length; offset += COMMIT_CHUNK_SIZE) {
+          const chunk = rows.slice(offset, offset + COMMIT_CHUNK_SIZE);
+          const chunkResult = await importMailboxes.mutateAsync({ rows: chunk, dryRun: false });
+          succeeded += chunkResult.succeeded;
+          failed += chunkResult.failed;
+          for (const row of chunkResult.rows) {
+            aggregatedRows.push({ ...row, row: offset + row.row });
+          }
+          setProgress({
+            completed: Math.min(offset + chunk.length, rows.length),
+            total: rows.length,
+          });
+        }
+        result = { dry_run: false, succeeded, failed, rows: aggregatedRows };
+      }
       setStep({ kind: 'done', rows, result });
       toast.success(t('admin.importDialog.result', countsOf(result)));
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
+    } finally {
+      setProgress(null);
     }
   };
 
@@ -151,9 +222,13 @@ function ImportBody({ onClose }: { onClose: () => void }) {
 
       {pending ? (
         <p role="status" className="text-sm text-muted-foreground">
-          {t(
-            step.kind === 'preview' ? 'admin.importDialog.creating' : 'admin.importDialog.checking'
-          )}
+          {progress
+            ? isZh
+              ? `正在导入 ${progress.completed} / ${progress.total}…`
+              : `Importing ${progress.completed} / ${progress.total}…`
+            : t(
+                step.kind === 'preview' ? 'admin.importDialog.creating' : 'admin.importDialog.checking'
+              )}
         </p>
       ) : null}
 
@@ -169,6 +244,14 @@ function ImportBody({ onClose }: { onClose: () => void }) {
           {step.kind === 'preview'
             ? t('admin.importDialog.preview', { valid: counts.created, failed: counts.failed })
             : t('admin.importDialog.result', counts)}
+        </p>
+      ) : null}
+
+      {step.kind === 'preview' && step.defaultedMembersCount > 0 && currentUserEmail ? (
+        <p className="text-xs text-muted-foreground">
+          {isZh
+            ? `未填写成员的 ${step.defaultedMembersCount} 行已默认设为当前管理员（${currentUserEmail}:manage）。`
+            : `${step.defaultedMembersCount} ${step.defaultedMembersCount === 1 ? 'row' : 'rows'} with empty members defaulted to ${currentUserEmail}:manage.`}
         </p>
       ) : null}
 
