@@ -267,7 +267,7 @@ jobs:
 
       # A pull request stops before the production build: the deploy builds the image and aborts
       # before any switch if it fails. A manual run adds the build (tier 2).
-      - name: Verification — type-check + lint + test, plus the build on a manual run
+      - name: Verification — type-check, lint, and test in parallel, plus the build on a manual run
         env:
           TIER: ${{ github.event_name == 'workflow_dispatch' && '2' || '1' }}
         run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh "$TIER"
