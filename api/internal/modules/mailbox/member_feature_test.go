@@ -86,18 +86,6 @@ type featureRoute struct {
 
 // featureGatedRoutes lists, per feature, every route a member needs that feature for.
 var featureGatedRoutes = map[domain.MemberFeature][]featureRoute{
-	domain.MemberFeatureBroadcasts: {
-		{http.MethodGet, "/mail-broadcasts", ""},
-		{http.MethodPost, "/mail-broadcasts", `{}`},
-		{http.MethodGet, "/mail-broadcasts/1", ""},
-		{http.MethodPut, "/mail-broadcasts/1", `{}`},
-		{http.MethodDelete, "/mail-broadcasts/1", ""},
-		{http.MethodPost, "/mail-broadcasts/1/sends", `{}`},
-		{http.MethodPost, "/mail-broadcasts/1/cancellations", ""},
-		{http.MethodPost, "/mail-broadcasts/1/pauses", ""},
-		{http.MethodPost, "/mail-broadcasts/1/resumptions", ""},
-		{http.MethodGet, "/mail-broadcasts/1/recipients", ""},
-	},
 	domain.MemberFeatureTemplates: {
 		{http.MethodPost, "/mail-templates", `{}`},
 		{http.MethodPut, "/mail-templates/1", `{}`},

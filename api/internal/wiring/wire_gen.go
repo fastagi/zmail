@@ -20,6 +20,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/modules/apikey"
 	"github.com/fastagi/zmail/api/internal/modules/asset"
 	"github.com/fastagi/zmail/api/internal/modules/audit"
+	"github.com/fastagi/zmail/api/internal/modules/broadcast"
 	"github.com/fastagi/zmail/api/internal/modules/mailbox"
 	"github.com/fastagi/zmail/api/internal/modules/notification"
 	"github.com/fastagi/zmail/api/internal/modules/operator"
@@ -159,6 +160,7 @@ func InitApplication() (*app.Application, error) {
 	triageHandler := triage.NewHandler(mailboxService)
 	agentgrantHandler := agentgrant.NewHandler(mailboxService)
 	transactionalHandler := transactional.NewHandler(mailboxService)
+	broadcastHandler := broadcast.NewHandler(mailboxService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:         handler,
@@ -176,6 +178,7 @@ func InitApplication() (*app.Application, error) {
 		Triage:        triageHandler,
 		AgentGrant:    agentgrantHandler,
 		Transactional: transactionalHandler,
+		Broadcast:     broadcastHandler,
 		Mailbox:       mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(configConfig, migrator, handlers)
@@ -343,6 +346,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	triageHandler := triage.NewHandler(mailboxService)
 	agentgrantHandler := agentgrant.NewHandler(mailboxService)
 	transactionalHandler := transactional.NewHandler(mailboxService)
+	broadcastHandler := broadcast.NewHandler(mailboxService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:         handler,
@@ -360,6 +364,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		Triage:        triageHandler,
 		AgentGrant:    agentgrantHandler,
 		Transactional: transactionalHandler,
+		Broadcast:     broadcastHandler,
 		Mailbox:       mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(cfg, migrator, handlers)

@@ -19,7 +19,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		// reads them too; a template read also serves the developer pages an API key grant opens.
 		// A developer writes transactional templates inside the grant's sending domains; the
 		// service decides which kind and sender each caller may write.
-		broadcasts := requireFeature(domain.MemberFeatureBroadcasts)
 		templates := requireFeature(domain.MemberFeatureTemplates)
 		templateWrites := requireFeature(domain.MemberFeatureTemplates, domain.MemberFeatureDeveloper)
 		templateReads := requireFeature(
@@ -131,22 +130,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.POST("/mail-templates/:template_id/tests", h.SendTemplateTest).
 			Name("mail_templates.tests.store").WhereNumber("template_id").Middleware(templates)
 		auth.POST("/mail-template-previews", h.PreviewTemplate).Name("mail_template_previews.store").Middleware(templateReads)
-
-		auth.GET("/mail-broadcasts", h.ListBroadcasts).Name("mail_broadcasts.index").Middleware(broadcasts)
-		auth.POST("/mail-broadcasts", h.CreateBroadcast).Name("mail_broadcasts.store").Middleware(broadcasts)
-		auth.GET("/mail-broadcasts/:broadcast_id", h.GetBroadcast).Name("mail_broadcasts.show").WhereNumber("broadcast_id").Middleware(broadcasts)
-		auth.PUT("/mail-broadcasts/:broadcast_id", h.UpdateBroadcast).Name("mail_broadcasts.update").WhereNumber("broadcast_id").Middleware(broadcasts)
-		auth.DELETE("/mail-broadcasts/:broadcast_id", h.DeleteBroadcast).Name("mail_broadcasts.destroy").WhereNumber("broadcast_id").Middleware(broadcasts)
-		auth.POST("/mail-broadcasts/:broadcast_id/sends", h.SendBroadcast).
-			Name("mail_broadcasts.sends.store").WhereNumber("broadcast_id").Middleware(broadcasts)
-		auth.POST("/mail-broadcasts/:broadcast_id/cancellations", h.CancelBroadcast).
-			Name("mail_broadcasts.cancellations.store").WhereNumber("broadcast_id").Middleware(broadcasts)
-		auth.POST("/mail-broadcasts/:broadcast_id/pauses", h.PauseBroadcast).
-			Name("mail_broadcasts.pauses.store").WhereNumber("broadcast_id").Middleware(broadcasts)
-		auth.POST("/mail-broadcasts/:broadcast_id/resumptions", h.ResumeBroadcast).
-			Name("mail_broadcasts.resumptions.store").WhereNumber("broadcast_id").Middleware(broadcasts)
-		auth.GET("/mail-broadcasts/:broadcast_id/recipients", h.ListBroadcastRecipients).
-			Name("mail_broadcasts.recipients.index").WhereNumber("broadcast_id").Middleware(broadcasts)
 
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
@@ -286,6 +269,4 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		Middleware(middleware.BodyLimit(maxExternalMailPushBodyBytes))
 	r.POST("/external-mail-notifications/outlook", h.ReceiveOutlookPush).Name("external_mail_notifications.outlook.store").
 		Middleware(middleware.BodyLimit(maxExternalMailPushBodyBytes))
-	// A signed token authenticates an unsubscribe; recipients and mail clients have no session.
-	r.POST("/mail-unsubscribes/:token", h.Unsubscribe).Name("mail_unsubscribes.store")
 }
