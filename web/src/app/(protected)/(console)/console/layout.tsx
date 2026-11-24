@@ -42,7 +42,10 @@ import { useAuthStore } from '@/features/auth/store/auth-store';
 import { isWebFeatureEnabled } from '@/config/features';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
 import { WorkspaceModeToggle } from '@/features/mailbox/components/workspace-mode-toggle';
-import { useIsPersonalMode } from '@/features/mailbox/stores/workspace-mode';
+import {
+  useIsPersonalMode,
+  type WorkspaceMode,
+} from '@/features/mailbox/stores/workspace-mode';
 import type { MemberFeature } from '@/features/organization/types';
 
 import type { ConsoleNavItem } from './_components/console-mobile-nav';
@@ -201,6 +204,15 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
     ...item,
     active: isNavigationItemActive(pathname, item.href),
   });
+  const workspaceModeLabels = {
+    personal: t('common.workspaceMode.personal'),
+    work: t('common.workspaceMode.work'),
+  };
+  const handleWorkspaceModeChange = (mode: WorkspaceMode) => {
+    if (mode === 'personal' && !isNavigationItemActive(pathname, ROUTES.CONSOLE.MAILBOXES)) {
+      router.push(ROUTES.CONSOLE.MAILBOXES);
+    }
+  };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-canvas text-text-main">
@@ -239,7 +251,14 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
               <AdminEntryLink />
             </Suspense>
           ) : null}
-          {isPersonalMode && compactNav ? <WorkspaceModeToggle size="sm" /> : null}
+          {isPersonalMode && compactNav ? (
+            <WorkspaceModeToggle
+              size="sm"
+              className="hidden sm:inline-flex"
+              ariaLabel={t('common.workspaceMode.label')}
+              labels={workspaceModeLabels}
+            />
+          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
@@ -321,6 +340,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             secondaryItems={secondaryNavItems.map(toMobileItem)}
             returnHref={ROUTES.SITE.HOME}
             triggerRef={mobileNavTriggerRef}
+            onWorkspaceModeChange={handleWorkspaceModeChange}
           />
         </Suspense>
       ) : null}
@@ -344,14 +364,9 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                   <WorkspaceModeToggle
                     size="sm"
                     className="w-full"
-                    onChange={mode => {
-                      if (
-                        mode === 'personal' &&
-                        !isNavigationItemActive(pathname, ROUTES.CONSOLE.MAILBOXES)
-                      ) {
-                        router.push(ROUTES.CONSOLE.MAILBOXES);
-                      }
-                    }}
+                    ariaLabel={t('common.workspaceMode.label')}
+                    labels={workspaceModeLabels}
+                    onChange={handleWorkspaceModeChange}
                   />
                 </div>
               ) : null}

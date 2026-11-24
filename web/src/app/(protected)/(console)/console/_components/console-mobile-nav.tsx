@@ -6,6 +6,8 @@ import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { WorkspaceModeToggle } from '@/features/mailbox/components/workspace-mode-toggle';
+import type { WorkspaceMode } from '@/features/mailbox/stores/workspace-mode';
 import { useT, type AllTranslationKeys } from '@/i18n';
 
 export interface ConsoleNavItem {
@@ -23,6 +25,7 @@ interface ConsoleMobileNavProps {
   returnHref: string;
   /** The header menu button; it lives outside the lazy sheet, so focus is returned by hand. */
   triggerRef: RefObject<HTMLButtonElement | null>;
+  onWorkspaceModeChange?: (mode: WorkspaceMode) => void;
 }
 
 /**
@@ -36,6 +39,7 @@ export function ConsoleMobileNav({
   secondaryItems,
   returnHref,
   triggerRef,
+  onWorkspaceModeChange,
 }: ConsoleMobileNavProps) {
   const t = useT();
   const close = () => onOpenChange(false);
@@ -59,6 +63,18 @@ export function ConsoleMobileNav({
           aria-label={t('console.navigation')}
           className="flex flex-1 flex-col overflow-y-auto p-2 text-sm font-medium"
         >
+          <div className="px-1 pb-2">
+            <WorkspaceModeToggle
+              size="sm"
+              className="w-full"
+              ariaLabel={t('common.workspaceMode.label')}
+              labels={{
+                personal: t('common.workspaceMode.personal'),
+                work: t('common.workspaceMode.work'),
+              }}
+              onChange={onWorkspaceModeChange}
+            />
+          </div>
           <ul className="grid gap-0.5">
             {mainItems.map(item => (
               <MobileNavLink key={item.href} item={item} onNavigate={close} />

@@ -5,6 +5,7 @@ import { ROUTES } from '@/constants/routes';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { SendQuotaCard } from '@/features/mailbox/components/send-quota-card';
 import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
+import { useIsPersonalMode } from '@/features/mailbox/stores/workspace-mode';
 import { useT } from '@/i18n';
 
 /** The other mail pages, linked from the sidebar footer. */
@@ -26,6 +27,7 @@ export default function InboxSidebarFooter({
   onShortcuts: () => void;
 }) {
   const organizationId = useMailOrganizationId();
+  const isPersonalMode = useIsPersonalMode();
   const t = useT('mailbox');
   return (
     <>
@@ -34,15 +36,17 @@ export default function InboxSidebarFooter({
         aria-label={t('inbox.footer.label')}
         className="flex flex-wrap gap-x-2.5 gap-y-1 px-2 pt-2.5 text-text-muted"
       >
-        {footerLinks.map(([key, path]) => (
-          <Link
-            key={key}
-            href={mailOrganizationHref(path, organizationId)}
-            className="rounded-sm transition-colors focus-ring first:mr-auto hover:text-text-main motion-reduce:transition-none"
-          >
-            {t(`inbox.footer.${key}`)}
-          </Link>
-        ))}
+        {!isPersonalMode
+          ? footerLinks.map(([key, path]) => (
+              <Link
+                key={key}
+                href={mailOrganizationHref(path, organizationId)}
+                className="rounded-sm transition-colors focus-ring first:mr-auto hover:text-text-main motion-reduce:transition-none"
+              >
+                {t(`inbox.footer.${key}`)}
+              </Link>
+            ))
+          : null}
         <button
           type="button"
           className="rounded-sm transition-colors focus-ring hover:text-text-main motion-reduce:transition-none"

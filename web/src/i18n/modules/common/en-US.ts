@@ -44,6 +44,11 @@ const messages = {
   themeLight: 'Light',
   themeDark: 'Dark',
   themeSystem: 'System',
+  workspaceMode: {
+    label: 'Workspace mode',
+    personal: 'Personal',
+    work: 'Work',
+  },
 } as const;
 
 export default messages;

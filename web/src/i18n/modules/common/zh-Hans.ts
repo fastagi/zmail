@@ -47,6 +47,11 @@ const messages = {
   themeLight: '浅色',
   themeDark: '深色',
   themeSystem: '跟随系统',
+  workspaceMode: {
+    label: '工作区模式',
+    personal: '个人',
+    work: '企业',
+  },
 } as const satisfies LocaleMessageShape<CommonMessages>;
 
 export default messages;

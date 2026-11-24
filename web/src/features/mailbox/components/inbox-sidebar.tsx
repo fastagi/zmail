@@ -130,6 +130,7 @@ export function InboxSidebar({
   drafts?: { count: number | undefined; onOpen: () => void } | null;
 }) {
   const t = useT('mailbox');
+  const tCommon = useT('common');
   const isPersonalMode = useIsPersonalMode();
   const views = counts?.views;
   const viewNumber: Record<InboxView, number | undefined> = {
@@ -211,7 +212,14 @@ export function InboxSidebar({
       </div>
 
       <div className={cn('px-1 pb-2.5', rail && 'hidden lg:block')}>
-        <WorkspaceModeToggle className="w-full" />
+        <WorkspaceModeToggle
+          className="w-full"
+          ariaLabel={tCommon('workspaceMode.label')}
+          labels={{
+            personal: tCommon('workspaceMode.personal'),
+            work: tCommon('workspaceMode.work'),
+          }}
+        />
       </div>
 
       {onCompose ? (
