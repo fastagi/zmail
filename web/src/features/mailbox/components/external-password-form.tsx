@@ -224,7 +224,7 @@ export function ExternalPasswordForm({
 
   return (
     <form noValidate onSubmit={submit} aria-describedby={`${ids}-intro`}>
-      <DialogBody className="space-y-4">
+      <DialogBody className="max-h-[62vh] space-y-3 overflow-y-auto pr-1">
         <p id={`${ids}-intro`} className="text-[13px] text-text-subtle">
           {reconnect
             ? t('external.password.reconnectIntro', { address: reconnect.address })
@@ -330,16 +330,18 @@ export function ExternalPasswordForm({
           {t('external.password.portHint', { port: EXTERNAL_MAIL_IMAP_PORT })}
         </p>
         {activePreset ? (
-          <Alert className="py-3">
+          <Alert className="border-amber-500/40 bg-amber-500/10 py-2.5 text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-100">
             <AlertDescription className="space-y-1 text-[13px]">
-              <p className="font-medium text-text">{t('external.password.codeTitle')}</p>
-              <p>{t(`external.password.codeSteps.${activePreset.id}`)}</p>
+              <p className="font-semibold">{t('external.password.codeTitle')}</p>
+              <p className="leading-relaxed opacity-90">
+                {t(`external.password.codeSteps.${activePreset.id}`)}
+              </p>
               {appPasswordPage ? (
                 <a
                   href={appPasswordPage}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block text-primary underline-offset-4 hover:underline"
+                  className="inline-block font-medium text-primary underline underline-offset-4 hover:opacity-80"
                 >
                   {t(`external.password.codeLinks.${activePreset.id as 'gmail' | 'icloud'}`)}
                 </a>

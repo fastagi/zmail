@@ -271,7 +271,7 @@ export function ExternalConnectDialog({
                               {hasOAuth ? 'OAuth' : 'IMAP'}
                             </span>
                           </div>
-                          <span className="w-full truncate text-xs font-medium text-text-main">
+                          <span className="w-full truncate text-[11px] font-medium text-text-main">
                             {preset.label}
                           </span>
                         </button>

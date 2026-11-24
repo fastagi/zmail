@@ -12,7 +12,7 @@ import type {
  */
 
 /** How often an open mailbox looks for new mail while its tab is visible. */
-export const MAIL_REFRESH_MS = 15_000;
+export const MAIL_REFRESH_MS = 5_000;
 
 /**
  * Polling for the open mailbox: every 15 seconds while the tab is visible, and again when the
