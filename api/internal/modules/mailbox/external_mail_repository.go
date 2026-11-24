@@ -2,7 +2,6 @@ package mailbox
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -14,26 +13,26 @@ import (
 
 // ErrExternalMailConnectionNotFound hides a connection that does not exist, belongs to someone
 // else, or whose feature is off.
-var ErrExternalMailConnectionNotFound = errors.New("external mail connection not found")
+var ErrExternalMailConnectionNotFound = domain.ErrExternalMailConnectionNotFound
 
 // Errors of binding an outside account.
 var (
 	// ErrExternalMailAuthorizationNotFound hides a sign-in that is unknown, expired, used, or
 	// started by someone else.
-	ErrExternalMailAuthorizationNotFound = errors.New("external mail authorization not found")
+	ErrExternalMailAuthorizationNotFound = domain.ErrExternalMailAuthorizationNotFound
 	// ErrExternalMailAuthorizationFailed means the provider refused the authorization code.
-	ErrExternalMailAuthorizationFailed = errors.New("external mail authorization failed")
+	ErrExternalMailAuthorizationFailed = domain.ErrExternalMailAuthorizationFailed
 	// ErrExternalMailAccountMismatch means a reconnect signed in to another account.
-	ErrExternalMailAccountMismatch = errors.New("external mail account does not match the connection")
+	ErrExternalMailAccountMismatch = domain.ErrExternalMailAccountMismatch
 	// ErrExternalMailAccountTaken means another member of the organization bound the account.
-	ErrExternalMailAccountTaken = errors.New("external mail account is bound by another member")
+	ErrExternalMailAccountTaken = domain.ErrExternalMailAccountTaken
 	// ErrExternalMailConnectionLimit means the member bound the most accounts allowed.
-	ErrExternalMailConnectionLimit = errors.New("external mail connection limit reached")
+	ErrExternalMailConnectionLimit = domain.ErrExternalMailConnectionLimit
 	// ErrExternalMailAuthorizationInvalid means a sign-in request is malformed: backfill out of
 	// range, or a provider that is not the reconnected connection's.
-	ErrExternalMailAuthorizationInvalid = errors.New("external mail authorization request is invalid")
+	ErrExternalMailAuthorizationInvalid = domain.ErrExternalMailAuthorizationInvalid
 	// ErrExternalMailProviderUnavailable means the instance does not run the requested connector.
-	ErrExternalMailProviderUnavailable = errors.New("external mail provider unavailable")
+	ErrExternalMailProviderUnavailable = domain.ErrExternalMailProviderUnavailable
 )
 
 // ExternalMailConnectionPO is the persistent object of one external mail connection.
