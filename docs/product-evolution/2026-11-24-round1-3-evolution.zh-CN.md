@@ -18,3 +18,24 @@
 - `r1-backend-mime-backfill`：修复 RFC 2047 发件人/主题解码 + 扩展 `MaxExternalMailBackfillDays = 3650` + `-race` 回归测试。
 - `r1-web-mobile-i18n-shell`：修复 `390px` 顶栏重叠（移入移动抽屉）+ 隐藏个人模式底部 B2B 链接 + `Personal/Work` 中英文 i18n。
 - `r1-web-badges-backfill`：消息行智能厂商徽章（`163`/`QQ`/`iCloud`/`Gmail`）+ 回溯选项扩展（14/30/90/365/3650 天）。
+
+---
+
+## Round 2：Electron 桌面端接入共享 `@zmail/mail-ui` + 根治 P1-1「标为未读」竞态缺陷
+
+### 交付成果
+1. **`r2-desktop-mail-ui-wire`（`55976f3a`）**：
+   - 将 `@zmail/mail-ui`（`packages/mail-ui/src/index.ts`）通过 Vite alias & TS path 正式接入 `apps/desktop`；
+   - `apps/desktop/src/renderer/App.tsx` 直接挂载 `<MailShell />` 与 `QuickConnectModal.tsx`（13 厂商识别、30 账号隔离、回复自动匹配原账号），联动主进程本地 FTS 全文搜索（`window.zmailDesktop.searchLocal`）与系统未读角标（`window.zmailDesktop.setBadgeCount`）；
+   - `packages/mail-ui` + `apps/desktop` 联合单测 **18/18 通过**（5 个套件，0 失败）。
+2. **`r2-web-mark-unread-p1`（`45277b3c`）**：
+   - 定位 P1-1 根因：`InboxReadingPane` 打开已读会话时未记录 `marked.current = item.id`，点击「标为未读」后乐观更新把 `rowUnread(item)` 置为 `true`，在关闭面板前触发自动已读 `useEffect` 反向把邮件重新标回已读；
+   - 修复为在 `readable` 就绪时即锁定 `marked.current = item.id`，并补齐端到端回归测试 [inbox-mark-unread.test.tsx](file:///Users/stark/item/zmail/web/src/test/inbox-mark-unread.test.tsx)（113/113 通过）。
+
+---
+
+## Round 3：全端门禁验收、并发基准复核与最终生产部署
+
+- **后端 `-race` 与架构守卫**：14/14 邮箱与迁移包 `-race` 全绿；`check-api-boundaries.sh` 0 违规；`check-code-size-guardrails.py` 全绿。
+- **前端与跨端包**：`packages/mail-ui` + `apps/desktop` **18/18 通过**；`web/` `tsc --noEmit` 0 报错，Vitest 核心套件全绿。
+- **合规材料**：`https://zmail.im/privacy` 已上线 Google API Services User Data Policy（Limited Use）声明，具备 Google OAuth / CASA Tier 2 审核前置条件。
