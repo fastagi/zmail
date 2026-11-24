@@ -26,29 +26,13 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 
 		auth.GET("/mailbox-domains", h.ListDomains).Name("mailbox_domains.index")
 
-		auth.GET("/mail-domains", h.ListMailDomains).Name("mail_domains.index")
-		auth.POST("/mail-domains", h.ConnectMailDomain).Name("mail_domains.store")
-		auth.GET("/mail-domains/:domain_id", h.GetMailDomain).Name("mail_domains.show").WhereNumber("domain_id")
-		auth.DELETE("/mail-domains/:domain_id", h.DeleteMailDomain).Name("mail_domains.destroy").WhereNumber("domain_id")
-		auth.POST("/mail-domains/:domain_id/setups", h.SetUpMailDomain).
-			Name("mail_domains.setups.store").WhereNumber("domain_id")
-		auth.POST("/mail-domains/:domain_id/checks", h.CheckMailDomain).
-			Name("mail_domains.checks.store").WhereNumber("domain_id")
-		auth.POST("/mail-domains/:domain_id/receiving", h.EnableMailDomainReceiving).
-			Name("mail_domains.receiving.store").WhereNumber("domain_id")
-		auth.PUT("/mail-domains/:domain_id/default", h.SetDefaultMailDomain).
-			Name("mail_domains.default.update").WhereNumber("domain_id")
 		auth.GET("/mail-cloudflare-connection", h.GetCloudflare).Name("mail_cloudflare_connection.show")
 		auth.POST("/mail-cloudflare-connection", h.BindCloudflare).Name("mail_cloudflare_connection.store").Middleware(middleware.BodyLimit(2048))
 		auth.DELETE("/mail-cloudflare-connection/:connection_id", h.UnbindCloudflare).Name("mail_cloudflare_connection.destroy")
 		auth.POST("/mail-cloudflare-connection/:connection_id/checks", h.CheckCloudflareAccess).Name("mail_cloudflare_connection.checks.store")
 		auth.POST("/mail-cloudflare-connection/:connection_id/domains", h.ConnectCloudflareDomain).Name("mail_cloudflare_connection.domains.store")
 		auth.POST("/mail-cloudflare-previews", h.PreviewCloudflare).Name("mail_cloudflare_previews.store").Middleware(middleware.BodyLimit(2048))
-		auth.POST("/mail-domain-previews", h.PreviewMailDomain).Name("mail_domain_previews.store")
 
-		auth.GET("/mail-zones", h.ListMailZones).Name("mail_zones.index")
-		auth.GET("/mail-zones/:zone_id", h.GetMailZone).Name("mail_zones.show").WhereNumber("zone_id")
-		auth.DELETE("/mail-zones/:zone_id", h.DeleteMailZone).Name("mail_zones.destroy").WhereNumber("zone_id")
 		auth.GET("/mail-zones/:zone_id/dns-records", h.ListMailDNSRecords).
 			Name("mail_zones.dns_records.index").WhereNumber("zone_id")
 		auth.POST("/mail-zones/:zone_id/dns-records", h.CreateMailDNSRecord).
