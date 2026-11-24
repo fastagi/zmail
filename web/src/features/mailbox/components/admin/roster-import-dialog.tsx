@@ -7,14 +7,12 @@ import {
   Download,
   FileSpreadsheet,
   Globe,
-  MailCheck,
   RotateCcw,
   Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -26,7 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -36,32 +33,40 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { getOrganizationRoute, ROUTES } from '@/constants/routes';
+import { ROUTES } from '@/constants/routes';
+import {
+  canEditPrefix,
+  mergeRetry,
+  needsAttention,
+  rosterSummary,
+  rosterToast,
+  rowNote,
+} from '@/features/mailbox/components/admin/roster-import-helpers';
+import {
+  RosterResultTable,
+  WelcomePreviewNote,
+} from '@/features/mailbox/components/admin/roster-result-table';
 import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { saveFile, useImportMembers } from '@/features/mailbox/hooks/use-mailbox-admin';
-import { useMemberWelcomeSetting } from '@/features/mailbox/hooks/use-member-welcome';
 import type {
   MemberImportFeatures,
   MemberImportResult,
   MemberImportRowInput,
-  MemberImportRowResult,
 } from '@/features/mailbox/types';
 import { toCsv } from '@/features/mailbox/utils/csv';
 import { guardFormulaCell } from '@/features/mailbox/utils/mailbox-import';
-import { importRowErrorKey, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
+import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ROSTER_IMPORT_TEMPLATE, readRosterRows } from '@/features/mailbox/utils/roster-csv';
-import { ApiErrorCode } from '@/http/codes';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
+
+export {
+  mergeRetry,
+  needsAttention,
+  rosterRowErrorKey,
+  rosterSummary,
+  rosterToast,
+} from '@/features/mailbox/components/admin/roster-import-helpers';
 
 /** Lets spreadsheet programs read the file as UTF-8. */
 const BYTE_ORDER_MARK = '﻿';
@@ -592,319 +597,4 @@ function RosterImportSteps({
       </DialogFooter>
     </>
   );
-}
-
-/**
- * Tells the admin before importing that new members get a welcome email, or that it is off, with
- * a link to the setting on the Invitations tab. Says nothing while the setting is unknown.
- */
-function WelcomePreviewNote({
-  organizationId,
-  count,
-  onNavigate,
-}: {
-  organizationId: number;
-  count: number;
-  onNavigate: () => void;
-}) {
-  const t = useT('mailbox');
-  const setting = useMemberWelcomeSetting(organizationId);
-  if (!setting.data) return null;
-  const enabled = setting.data.enabled;
-  return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-      <MailCheck className="size-4 shrink-0" aria-hidden="true" />
-      <span className="min-w-0">
-        {enabled
-          ? t('admin.rosterImport.welcomePreview', { count })
-          : t('admin.rosterImport.welcomePreviewOff')}
-      </span>
-      <Link
-        href={`${getOrganizationRoute(organizationId)}?tab=invitations`}
-        className="font-medium text-foreground underline underline-offset-4"
-        onClick={onNavigate}
-      >
-        {enabled
-          ? t('admin.rosterImport.welcomeSettingsLink')
-          : t('admin.rosterImport.welcomeSettingsLinkOff')}
-      </Link>
-    </p>
-  );
-}
-
-function RosterResultTable({
-  rows,
-  inputs,
-  edits,
-  disabled,
-  onEdit,
-}: {
-  rows: MemberImportRowResult[];
-  inputs: MemberImportRowInput[];
-  edits: Record<number, string>;
-  disabled: boolean;
-  onEdit: (index: number, value: string) => void;
-}) {
-  const t = useT('mailbox');
-  const roleOf = (row: MemberImportRowResult) => {
-    const raw = (inputs[row.row - 1]?.role ?? '').trim();
-    const role = raw.toLowerCase();
-    if (role === '' || role === 'member') return t('admin.rosterImport.roles.member');
-    if (role === 'admin') return t('admin.rosterImport.roles.admin');
-    return raw;
-  };
-  const statusBadge = (row: MemberImportRowResult) => {
-    const taken = isTaken(row);
-    return (
-      <Badge
-        variant={taken ? 'outline' : statusVariant(row.status)}
-        className={cn(taken && 'border-warning/40 bg-warning-subtle text-warning')}
-      >
-        {t(taken ? 'admin.rosterImport.status.taken' : `admin.rosterImport.status.${row.status}`)}
-      </Badge>
-    );
-  };
-  return (
-    <div className="max-h-80 overflow-auto rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-12">{t('admin.rosterImport.columns.row')}</TableHead>
-            <TableHead>{t('admin.rosterImport.columns.email')}</TableHead>
-            <TableHead className="hidden sm:table-cell">
-              {t('admin.rosterImport.columns.role')}
-            </TableHead>
-            <TableHead className="hidden sm:table-cell">
-              {t('admin.rosterImport.columns.address')}
-            </TableHead>
-            <TableHead className="hidden sm:table-cell">
-              {t('admin.rosterImport.columns.status')}
-            </TableHead>
-            <TableHead className="hidden sm:table-cell">
-              {t('admin.rosterImport.columns.note')}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map(row => {
-            const index = row.row - 1;
-            return (
-              <TableRow
-                key={row.row}
-                data-status={row.status}
-                data-attention={needsAttention(row) ? 'true' : 'false'}
-                className={cn(
-                  row.status === 'failed' && 'bg-destructive/5 hover:bg-destructive/10',
-                  isTaken(row) && 'bg-warning-subtle hover:bg-warning-subtle'
-                )}
-              >
-                <TableCell className="align-top tabular-nums text-muted-foreground">
-                  {row.row}
-                </TableCell>
-                <TableCell className="max-w-56 whitespace-normal align-top" title={row.email}>
-                  <span className="break-all">{row.email || '—'}</span>
-                  {/* On a phone the other columns stack here instead of scrolling sideways. */}
-                  <div className="mt-1 space-y-1 sm:hidden">
-                    <p className="text-xs text-muted-foreground">{roleOf(row)}</p>
-                    {row.address ? (
-                      <p className="break-all text-xs text-muted-foreground">{row.address}</p>
-                    ) : null}
-                    {statusBadge(row)}
-                    <p className={cn('text-xs', noteTone(row))}>{rowNote(t, row)}</p>
-                    <WelcomeNote row={row} className="text-xs" />
-                  </div>
-                  {canEditPrefix(row) ? (
-                    <Input
-                      className="mt-2 h-8 max-w-48 border-warning/40 text-sm dark:bg-background"
-                      aria-label={t('admin.rosterImport.newPrefixLabel', { email: row.email })}
-                      placeholder={t('admin.rosterImport.newPrefixPlaceholder')}
-                      value={edits[index] ?? ''}
-                      disabled={disabled}
-                      spellCheck={false}
-                      autoCapitalize="off"
-                      onChange={event => onEdit(index, event.target.value)}
-                    />
-                  ) : null}
-                </TableCell>
-                <TableCell className="hidden align-top text-sm sm:table-cell">
-                  {roleOf(row)}
-                </TableCell>
-                <TableCell
-                  className="hidden max-w-48 truncate align-top sm:table-cell"
-                  title={row.address}
-                >
-                  {row.address || '—'}
-                </TableCell>
-                <TableCell className="hidden align-top sm:table-cell">{statusBadge(row)}</TableCell>
-                <TableCell
-                  className={cn(
-                    'hidden min-w-48 whitespace-normal align-top text-sm sm:table-cell',
-                    noteTone(row)
-                  )}
-                >
-                  {rowNote(t, row)}
-                  <WelcomeNote row={row} className="mt-1" />
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
-/** A taken address leaves the person un-invited: the admin has to choose another prefix. */
-/** Row codes a different mailbox prefix fixes; the row can take a new one inline. */
-const PREFIX_ERROR_CODES: readonly string[] = [
-  ApiErrorCode.MAILBOX_IMPORT_DUPLICATE_ROW,
-  ApiErrorCode.MAILBOX_ADDRESS_INVALID,
-  ApiErrorCode.MAILBOX_ADDRESS_RESERVED,
-  ApiErrorCode.MAILBOX_ADDRESS_TAKEN,
-];
-
-function canEditPrefix(row: MemberImportRowResult) {
-  return (
-    isTaken(row) ||
-    (row.status === 'failed' &&
-      row.error_code !== null &&
-      PREFIX_ERROR_CODES.includes(row.error_code))
-  );
-}
-
-function isTaken(row: MemberImportRowResult) {
-  return row.status === 'skipped' && row.skip_reason === 'mailbox_taken';
-}
-
-/**
- * Rows the admin must act on: refused rows, taken addresses, and rows whose welcome email failed,
- * which a retry sends. Other skips are no-ops.
- */
-export function needsAttention(row: MemberImportRowResult) {
-  return row.status === 'failed' || isTaken(row) || row.welcome_mail_status === 'failed';
-}
-
-/** Why a provisioned row's welcome email did not go out; nothing when it did or was off. */
-function WelcomeNote({ row, className }: { row: MemberImportRowResult; className?: string }) {
-  const t = useT('mailbox');
-  if (row.welcome_mail_status !== 'failed' && row.welcome_mail_status !== 'suppressed') return null;
-  return (
-    <p className={cn('text-warning', className)}>
-      {t(`admin.rosterImport.welcomeNotes.${row.welcome_mail_status}`)}
-    </p>
-  );
-}
-
-function noteTone(row: MemberImportRowResult) {
-  if (row.status === 'failed') return 'text-error';
-  return isTaken(row) ? 'text-warning' : 'text-muted-foreground';
-}
-
-function statusVariant(status: MemberImportRowResult['status']) {
-  switch (status) {
-    case 'failed':
-      return 'destructive' as const;
-    case 'skipped':
-      return 'outline' as const;
-    case 'valid':
-      return 'secondary' as const;
-    default:
-      return 'default' as const;
-  }
-}
-
-type MailboxT = ReturnType<typeof useT<'mailbox'>>;
-
-/** The import toast, naming only what happened: clauses with a zero count are left out. */
-export function rosterToast(
-  t: MailboxT,
-  counts: Pick<ReturnType<typeof rosterSummary>, 'invited' | 'reserved' | 'created' | 'attention'>,
-  { retried = false }: { retried?: boolean } = {}
-): string {
-  const clauses = (['invited', 'reserved', 'created', 'attention'] as const)
-    .filter(key => counts[key] > 0)
-    .map(key => t(`admin.rosterImport.toast.${key}`, { count: counts[key] }));
-  if (clauses.length === 0) clauses.push(t('admin.rosterImport.toast.nothing'));
-  if (retried) clauses.unshift(t('admin.rosterImport.toast.retried'));
-  return clauses.join(t('admin.rosterImport.toast.separator'));
-}
-
-/** The reason or next step of one row, in local copy; backend text is never shown. */
-function rowNote(t: MailboxT, row: MemberImportRowResult): string {
-  switch (row.status) {
-    case 'failed':
-      return t(rosterRowErrorKey(row.error_code), { emails: '' });
-    case 'skipped':
-      return t(`admin.rosterImport.skip.${row.skip_reason ?? 'already_member'}`);
-    case 'invited':
-      return row.email_send_status === 'failed' || row.email_send_status === 'not_configured'
-        ? t('admin.rosterImport.notes.invitedNoEmail')
-        : t('admin.rosterImport.notes.invited');
-    case 'created':
-      return t('admin.rosterImport.notes.created');
-    default:
-      return t('admin.rosterImport.notes.valid', { address: row.address });
-  }
-}
-
-/** Roster-only row codes have their own copy; the rest share the mailbox import's. */
-export function rosterRowErrorKey(code: string | null) {
-  switch (code) {
-    case ApiErrorCode.MAILBOX_IMPORT_EMAIL_INVALID:
-      return 'admin.rosterImport.rowErrors.emailInvalid' as const;
-    case ApiErrorCode.MAILBOX_IMPORT_ROLE_INVALID:
-      return 'admin.rosterImport.rowErrors.roleInvalid' as const;
-    case ApiErrorCode.MAILBOX_IMPORT_DOMAIN_REQUIRED:
-      return 'admin.rosterImport.rowErrors.domainRequired' as const;
-    case ApiErrorCode.MAILBOX_IMPORT_DUPLICATE_ROW:
-      return 'admin.rosterImport.rowErrors.duplicate' as const;
-    default:
-      return importRowErrorKey(code);
-  }
-}
-
-/**
- * Counts for the summary lines. `reserved` counts the mailboxes held for invited people,
- * `noop` the skips that need nothing, and `attention` the failed rows plus taken addresses.
- */
-export function rosterSummary(result: MemberImportResult) {
-  const attention = result.rows.filter(needsAttention).length;
-  return {
-    total: result.total,
-    ready: result.valid,
-    invited: result.invited,
-    reserved: result.rows.filter(row => row.status === 'invited' && row.mailbox_id !== null).length,
-    created: result.created,
-    noop: result.rows.filter(row => row.status === 'skipped' && !isTaken(row)).length,
-    attention,
-  };
-}
-
-/** Puts the retried rows' outcomes in place of the old ones and counts again. */
-export function mergeRetry(
-  previous: MemberImportResult,
-  indexes: number[],
-  next: MemberImportResult
-): MemberImportResult {
-  const rows = previous.rows.map(row => ({ ...row }));
-  next.rows.forEach((row, position) => {
-    const index = indexes[position];
-    if (index !== undefined && rows[index]) rows[index] = { ...row, row: index + 1 };
-  });
-  const count = (status: MemberImportRowResult['status']) =>
-    rows.filter(row => row.status === status).length;
-  const welcome = (...statuses: MemberImportRowResult['welcome_mail_status'][]) =>
-    rows.filter(row => statuses.includes(row.welcome_mail_status)).length;
-  return {
-    dry_run: false,
-    total: rows.length,
-    valid: count('valid'),
-    invited: count('invited'),
-    created: count('created'),
-    skipped: count('skipped'),
-    failed: count('failed'),
-    welcome_mails_queued: welcome('queued'),
-    welcome_mails_failed: welcome('failed', 'suppressed'),
-    rows,
-  };
 }

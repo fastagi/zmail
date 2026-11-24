@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, RefreshCw, Trash2, UserX } from 'lucide-react';
+import { AlertCircle, RefreshCw, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -11,20 +11,20 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import {
-  nativeSelectClassName,
-  useDateTimeFormat,
-} from '@/features/mailbox/components/mail-shared';
+  HandoverSection,
+  SealedSection,
+} from '@/features/mailbox/components/mailbox-access-admin-sections';
+import { HistorySection } from '@/features/mailbox/components/mailbox-access-history';
 import {
   MailboxPermissionSelect,
   memberName,
@@ -35,20 +35,13 @@ import {
 import { MailboxSignatureEditor } from '@/features/mailbox/components/mailbox-signature-editor';
 import { MailboxTriageSwitch } from '@/features/mailbox/components/mailbox-triage-switch';
 import {
-  useDeleteMailboxSealedHistory,
-  useHandOverMailbox,
   useMailboxAccessEvents,
   useMailboxMembers,
   useRemoveMailboxMember,
   useSetMailboxMember,
   useSetMailboxWebhooks,
 } from '@/features/mailbox/hooks/use-mailbox';
-import type {
-  Mailbox,
-  MailboxAccessEvent,
-  MailboxMember,
-  MailboxPermission,
-} from '@/features/mailbox/types';
+import type { Mailbox, MailboxMember, MailboxPermission } from '@/features/mailbox/types';
 import {
   isAccessConflict,
   isPermissionDenied,
@@ -518,342 +511,4 @@ function WebhookSwitch({ mailbox, run }: { mailbox: Mailbox; run: Run }) {
       />
     </section>
   );
-}
-
-function HandoverSection({
-  mailbox,
-  people,
-  run,
-}: {
-  mailbox: Mailbox;
-  people: MailboxPerson[];
-  run: Run;
-}) {
-  const t = useT('mailbox');
-  const handOver = useHandOverMailbox(useMailOrganizationId(), mailbox.id);
-  const ids = { title: useId(), successor: useId() };
-  const [successor, setSuccessor] = useState('');
-  const [confirming, setConfirming] = useState(false);
-  const candidates = people.filter(person => person.user_id !== mailbox.owner_user_id);
-
-  return (
-    <section className="space-y-3 rounded-md border p-3" aria-labelledby={ids.title}>
-      <h3 id={ids.title} className="text-sm font-semibold">
-        {t('access.handover.title')}
-      </h3>
-      <p className="text-sm text-muted-foreground">{t('access.handover.description')}</p>
-      <p className="text-sm text-muted-foreground">{t('access.handover.seal')}</p>
-      <div className="space-y-2">
-        <Label htmlFor={ids.successor}>{t('access.handover.successor')}</Label>
-        <select
-          id={ids.successor}
-          className={nativeSelectClassName}
-          value={successor}
-          disabled={handOver.isPending}
-          onChange={event => {
-            setSuccessor(event.target.value);
-            setConfirming(false);
-          }}
-        >
-          <option value="">{t('create.chooseMember')}</option>
-          {candidates.map(person => (
-            <option key={person.user_id} value={String(person.user_id)}>
-              {memberName(person)}
-            </option>
-          ))}
-        </select>
-      </div>
-      {confirming ? (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">{t('access.handover.confirmHint')}</p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={handOver.isPending}
-              onClick={() => setConfirming(false)}
-            >
-              {t('actions.cancel')}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              loading={handOver.isPending}
-              onClick={async () => {
-                const done = await run(
-                  () => handOver.mutateAsync(Number(successor)),
-                  t('messages.handedOver')
-                );
-                if (done.ok) setConfirming(false);
-              }}
-            >
-              {t('access.handover.confirm')}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <Button
-          type="button"
-          size="sm"
-          disabled={successor === ''}
-          onClick={() => setConfirming(true)}
-        >
-          {t('access.handover.submit')}
-        </Button>
-      )}
-    </section>
-  );
-}
-
-function SealedSection({ mailbox, run }: { mailbox: Mailbox; run: Run }) {
-  const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
-  const remove = useDeleteMailboxSealedHistory(useMailOrganizationId(), mailbox.id);
-  const inputId = useId();
-  const [open, setOpen] = useState(false);
-  const [typed, setTyped] = useState('');
-  const [failure, setFailure] = useState<MailboxErrorKey | null>(null);
-  const matches = typed.trim().toLowerCase() === mailbox.address.toLowerCase();
-  const sealedBefore = mailbox.sealed_before ?? '';
-
-  const confirm = async () => {
-    const address = typed.trim();
-    let counts = { deleted_messages: 0, deleted_broadcasts: 0 };
-    setFailure(null);
-    const result = await run(async () => {
-      counts = await remove.mutateAsync(address);
-    });
-    if (result.ok) {
-      toast.success(
-        t('messages.sealedDeleted', {
-          messages: counts.deleted_messages,
-          broadcasts: counts.deleted_broadcasts,
-        })
-      );
-    } else if (!result.stale) {
-      // A wrong address or a passing outage: the dialog stays open to correct or retry.
-      setFailure(result.key);
-      return;
-    }
-    close();
-  };
-
-  const close = () => {
-    setOpen(false);
-    setTyped('');
-    setFailure(null);
-  };
-
-  return (
-    <section className="space-y-2 rounded-md border p-3">
-      <h3 className="text-sm font-semibold">{t('access.sealed.title')}</h3>
-      <p className="text-sm text-muted-foreground">
-        {t('access.sealed.description', { date: formatter.format(new Date(sealedBefore)) })}
-      </p>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        icon={<Trash2 className="size-4" />}
-        onClick={() => setOpen(true)}
-      >
-        {t('access.sealed.delete')}
-      </Button>
-      <Dialog
-        open={open}
-        onOpenChange={next => {
-          if (next || remove.isPending) return;
-          close();
-        }}
-      >
-        <DialogContent size="sm" role="alertdialog">
-          <DialogHeader>
-            <DialogTitle>{t('access.sealed.confirmTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('access.sealed.confirmDescription', { address: mailbox.address })}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor={inputId}>{t('access.sealed.confirmLabel')}</Label>
-            <Input
-              id={inputId}
-              value={typed}
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              placeholder={mailbox.address}
-              disabled={remove.isPending}
-              onChange={event => setTyped(event.target.value)}
-            />
-            {failure ? (
-              <p role="alert" className="text-sm text-error">
-                {t(failure)}
-              </p>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={remove.isPending} onClick={close}>
-              {t('actions.cancel')}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={!matches}
-              loading={remove.isPending}
-              icon={<Trash2 className="size-4" />}
-              onClick={() => void confirm()}
-            >
-              {t('access.sealed.confirmAction')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
-  );
-}
-
-function HistorySection({
-  events,
-  page,
-  onPageChange,
-  nameOf,
-}: {
-  events: ReturnType<typeof useMailboxAccessEvents>;
-  page: number;
-  onPageChange: (page: number) => void;
-  nameOf: (userId: number | null) => string;
-}) {
-  const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
-  const titleId = useId();
-  const describe = useEventText(nameOf);
-
-  return (
-    <section className="space-y-3">
-      <h3 id={titleId} className="text-sm font-semibold">
-        {t('access.history.title')}
-      </h3>
-      {events.isPending ? (
-        <Skeleton className="h-24 w-full" />
-      ) : events.error || !events.data ? (
-        <p className="text-sm text-error">{t('access.history.loadFailed')}</p>
-      ) : events.data.items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t('access.history.empty')}</p>
-      ) : (
-        <>
-          <ul aria-labelledby={titleId} className="divide-y rounded-md border">
-            {events.data.items.map(event => (
-              <li key={event.id} className="flex flex-wrap justify-between gap-2 px-3 py-2 text-sm">
-                <span className="min-w-0">{describe(event)}</span>
-                <time
-                  dateTime={event.created_at}
-                  className="shrink-0 text-xs text-muted-foreground"
-                >
-                  {formatter.format(new Date(event.created_at))}
-                </time>
-              </li>
-            ))}
-          </ul>
-          {events.data.meta.last_page > 1 ? (
-            <div className="flex items-center justify-between gap-3">
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                disabled={page <= 1}
-                onClick={() => onPageChange(page - 1)}
-              >
-                {t('access.history.newer')}
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                {t('list.page', { page, total: events.data.meta.last_page })}
-              </span>
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                disabled={page >= events.data.meta.last_page}
-                onClick={() => onPageChange(page + 1)}
-              >
-                {t('access.history.older')}
-              </Button>
-            </div>
-          ) : null}
-        </>
-      )}
-    </section>
-  );
-}
-
-/** One sentence per event; unknown `detail` keys are ignored. */
-function useEventText(nameOf: (userId: number | null) => string) {
-  const t = useT('mailbox');
-  const count = (value: unknown) => (typeof value === 'number' ? value : 0);
-  const permissionOf = (value: unknown) =>
-    value === 'view' || value === 'send' || value === 'manage'
-      ? t(`access.permissions.${value}`)
-      : String(value ?? '');
-
-  return (event: MailboxAccessEvent): string => {
-    const actor = nameOf(event.actor_user_id);
-    const subject = nameOf(event.subject_user_id);
-    const { detail } = event;
-    switch (event.type) {
-      case 'created':
-        return detail.type === 'personal' && event.subject_user_id !== null
-          ? t('access.history.createdPersonal', { actor, subject })
-          : t('access.history.createdShared', { actor });
-      case 'member_set':
-        return t('access.history.memberSet', {
-          actor,
-          subject,
-          permission: permissionOf(detail.permission),
-        });
-      case 'member_removed':
-        return detail.reason === 'left_organization'
-          ? t('access.history.memberLeft', { subject })
-          : t('access.history.memberRemoved', { actor, subject });
-      case 'owner_left':
-        return t('access.history.ownerLeft', { subject });
-      case 'owner_returned':
-        return t('access.history.ownerReturned', { subject });
-      case 'handed_over':
-        return t('access.history.handedOver', { actor, subject });
-      case 'sealed_deleted':
-        return t('access.history.sealedDeleted', {
-          actor,
-          messages: count(detail.deleted_messages),
-          broadcasts: count(detail.deleted_broadcasts),
-        });
-      case 'webhooks_changed':
-        return t(
-          detail.enabled === true ? 'access.history.webhooksOn' : 'access.history.webhooksOff',
-          { actor }
-        );
-      case 'renamed':
-        return typeof detail.to === 'string' && detail.to !== ''
-          ? t('access.history.renamed', { actor, name: detail.to })
-          : t('access.history.renamedCleared', { actor });
-      case 'connection_bound':
-        return t('access.history.connectionBound', { actor });
-      case 'connection_reconnected':
-        return t('access.history.connectionReconnected', { actor });
-      case 'connection_revoked':
-        return t('access.history.connectionRevoked', { actor });
-      case 'connection_force_disconnected':
-        return t('access.history.connectionForceDisconnected', { actor });
-      case 'connection_revoked_on_leave':
-        return t('access.history.connectionRevokedOnLeave', { subject });
-      case 'agent_granted':
-        return t('access.history.agentGranted', { actor, subject });
-      case 'agent_revoked':
-        return event.actor_user_id === null
-          ? t('access.history.agentEnded', { subject })
-          : t('access.history.agentRevoked', { actor, subject });
-      case 'owner_assigned':
-        return t('access.history.ownerAssigned', { subject });
-    }
-  };
 }

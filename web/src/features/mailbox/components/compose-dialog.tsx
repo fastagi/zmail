@@ -3,18 +3,15 @@
 import {
   useContext,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
 } from 'react';
-import Link from 'next/link';
-import { AlertCircle, Paperclip, Send, X } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -25,12 +22,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { authConfig } from '@/config/auth';
 import { AuthStoreContext } from '@/features/auth/store/auth-store';
-import { withReturnUrl } from '@/features/auth/utils/return-url';
+import {
+  ComposeAttachmentsSection,
+  encodeComposeAttachments,
+} from '@/features/mailbox/components/compose-attachments-section';
+import { ComposeContentFields } from '@/features/mailbox/components/compose-content-fields';
 import {
   type StoredComposeDraft,
   composeDraftFilesKept,
@@ -42,11 +41,9 @@ import {
   writeComposeDraft,
   writeComposeDraftFiles,
 } from '@/features/mailbox/components/compose-draft-store';
-import { COMPOSE_PARAM, COMPOSE_RESUME } from '@/features/mailbox/components/mailbox-params';
 import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
-import { fileToBase64, formatBytes } from '@/features/mailbox/components/mail-attachments';
+import { ComposeErrorAlert } from '@/features/mailbox/components/compose-error-alert';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
@@ -54,7 +51,6 @@ import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
 import {
   MAIL_ATTACHMENTS_MAX_BYTES,
   MAIL_MAX_ATTACHMENTS,
-  MAIL_SUBJECT_MAX_LENGTH,
   normalizeMailMessage,
   normalizeRecipient,
   normalizeRecipientLists,
@@ -161,7 +157,6 @@ export function ComposeDialog({
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
-  const templateHintId = useId();
   const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
   const knownSavedId = draft.savedId ?? kept?.savedId;
   // A draft opened from the list starts from the API's text, which another device may have changed,
@@ -279,7 +274,6 @@ export function ComposeDialog({
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(() =>
     restored?.failure === undefined ? null : resolveMailboxErrorKey(restored.failure)
   );
-  const fileInput = useRef<HTMLInputElement>(null);
   const toInput = useRef<HTMLTextAreaElement>(null);
   const ccInput = useRef<HTMLTextAreaElement>(null);
   // Addresses a recipient field holds that are not plain email addresses, shown on that field.
@@ -306,41 +300,19 @@ export function ComposeDialog({
     else if (ccInvalid.length > 0) ccInput.current?.focus();
     return toInvalid.length === 0 && ccInvalid.length === 0;
   };
-  const attachHintId = useId();
   const filesTooMany = files.length + carried.length > MAIL_MAX_ATTACHMENTS;
   const filesTooLarge =
     files.reduce((total, file) => total + file.size, 0) +
       carried.reduce((total, file) => total + file.size, 0) >
     MAIL_ATTACHMENTS_MAX_BYTES;
 
-  /** Every file to send: the forwarded ones, read from their message, then the chosen ones. */
-  const encodeAttachments = async () => {
-    const source = draft.forwarded;
-    const forwarded = source
-      ? await Promise.all(
-          carried.map(async attachment => ({
-            filename: attachment.filename,
-            ...(attachment.content_type ? { content_type: attachment.content_type } : {}),
-            content: await fileToBase64(
-              await mailboxService.fetchAttachment(
-                organizationId,
-                source.mailboxId,
-                source.messageId,
-                attachment
-              )
-            ),
-          }))
-        )
-      : [];
-    const chosen = await Promise.all(
-      files.map(async file => ({
-        filename: file.name,
-        ...(file.type ? { content_type: file.type } : {}),
-        content: await fileToBase64(file),
-      }))
-    );
-    return [...forwarded, ...chosen];
-  };
+  const encodeAttachments = () =>
+    encodeComposeAttachments({
+      organizationId,
+      forwarded: draft.forwarded,
+      carried,
+      files,
+    });
 
   const addFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(event.target.files ?? []);
@@ -354,7 +326,7 @@ export function ComposeDialog({
 
   /**
    * A refused send. When the session ended, what is written is kept as this browser's draft, so
-   * signing in again and coming back (see `signInHref`) opens it once more.
+   * signing in again and coming back (see `ComposeErrorAlert`) opens it once more.
    */
   const failed = (failure: unknown) => {
     const key = resolveMailboxErrorKey(failure);
@@ -367,15 +339,6 @@ export function ComposeDialog({
       toast.error(t(key));
       onStored?.();
     }
-  };
-
-  /** Sign-in that returns to this page, reopening a new message on its kept draft. */
-  const signInHref = () => {
-    const back = new URL(window.location.href);
-    if ((draft.mode ?? 'compose') === 'compose') {
-      back.searchParams.set(COMPOSE_PARAM, COMPOSE_RESUME);
-    }
-    return withReturnUrl(authConfig.routes.login, `${back.pathname}${back.search}`);
   };
 
   const submitTemplate = async () => {
@@ -663,186 +626,41 @@ export function ComposeDialog({
             }}
           />
         </div>
-        {!isReplyOrForward && templates.data && templates.data.length > 0 ? (
-          <div className="space-y-2">
-            <Label htmlFor="mail-compose-template">{t('compose.template')}</Label>
-            <select
-              id="mail-compose-template"
-              className={cn(nativeSelectClassName, 'w-full')}
-              value={templateId === null ? '' : String(templateId)}
-              disabled={send.isPending}
-              onChange={event => {
-                setErrorKey(null);
-                setValues({});
-                setTemplateId(event.target.value === '' ? null : Number(event.target.value));
-              }}
-            >
-              <option value="">{t('compose.templateNone')}</option>
-              {templates.data.map(option => (
-                <option key={option.id} value={String(option.id)}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-        {template ? (
-          template.variables.length > 0 ? (
-            <fieldset className="space-y-2" aria-describedby={templateHintId}>
-              <legend className="text-sm font-medium">{t('templates.variables')}</legend>
-              <p id={templateHintId} className="text-xs text-muted-foreground">
-                {t('compose.templateHint')}
-              </p>
-              {template.variables.map(name => (
-                <div key={name} className="space-y-1">
-                  <Label htmlFor={`mail-compose-variable-${name}`} className="font-mono text-xs">
-                    {name}
-                  </Label>
-                  <Input
-                    id={`mail-compose-variable-${name}`}
-                    value={values[name] ?? ''}
-                    disabled={send.isPending}
-                    onChange={event =>
-                      setValues(current => ({ ...current, [name]: event.target.value }))
-                    }
-                  />
-                </div>
-              ))}
-            </fieldset>
-          ) : null
-        ) : (
-          <>
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-subject">{t('compose.subject')}</Label>
-              <Input
-                id="mail-compose-subject"
-                value={subject}
-                maxLength={MAIL_SUBJECT_MAX_LENGTH}
-                disabled={send.isPending}
-                onChange={event => setSubject(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-body">{t('compose.body')}</Label>
-              <Textarea
-                id="mail-compose-body"
-                value={body}
-                rows={8}
-                disabled={send.isPending}
-                onChange={event => setBody(event.target.value)}
-              />
-            </div>
-          </>
-        )}
-        <div className="space-y-2">
-          <input
-            ref={fileInput}
-            id="mail-compose-files"
-            type="file"
-            multiple
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            onChange={addFiles}
-          />
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={send.isPending}
-              icon={<Paperclip className="size-4" />}
-              aria-describedby={attachHintId}
-              onClick={() => fileInput.current?.click()}
-            >
-              {t('compose.attach')}
-            </Button>
-            <p
-              id={attachHintId}
-              className={cn(
-                'text-xs',
-                filesTooMany || filesTooLarge ? 'text-error' : 'text-muted-foreground'
-              )}
-            >
-              {t('compose.attachHint')}
-            </p>
-          </div>
-          {lostFiles.length > 0 && files.length === 0 && !restoringFiles ? (
-            <p role="status" className="text-xs text-warning">
-              {t('compose.draftFilesLost', { names: lostFiles.join(', ') })}
-            </p>
-          ) : null}
-          {files.length + carried.length > 0 ? (
-            <ul className="divide-y rounded-md border text-sm">
-              {carried.map(attachment => (
-                <li
-                  key={`forwarded-${String(attachment.id)}`}
-                  className="flex items-center gap-3 px-3 py-1.5"
-                >
-                  <Paperclip className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate" title={attachment.filename}>
-                    {attachment.filename}
-                  </span>
-                  <span className="text-xs whitespace-nowrap text-muted-foreground">
-                    {formatBytes(attachment.size)}
-                  </span>
-                  <Button
-                    type="button"
-                    size="xs"
-                    isIcon
-                    variant="ghost"
-                    disabled={send.isPending}
-                    icon={<X className="size-3.5" />}
-                    aria-label={t('compose.removeAttachment', { name: attachment.filename })}
-                    onClick={() =>
-                      setCarried(current => current.filter(file => file.id !== attachment.id))
-                    }
-                  />
-                </li>
-              ))}
-              {files.map((file, index) => (
-                // A list the user edits by position; two files may share a name.
-                <li key={index} className="flex items-center gap-3 px-3 py-1.5">
-                  <Paperclip className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate" title={file.name}>
-                    {file.name}
-                  </span>
-                  <span className="text-xs whitespace-nowrap text-muted-foreground">
-                    {formatBytes(file.size)}
-                  </span>
-                  <Button
-                    type="button"
-                    size="xs"
-                    isIcon
-                    variant="ghost"
-                    disabled={send.isPending}
-                    icon={<X className="size-3.5" />}
-                    aria-label={t('compose.removeAttachment', { name: file.name })}
-                    onClick={() =>
-                      setFiles(current => current.filter((_, position) => position !== index))
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-        {errorKey ? (
-          <Alert variant="destructive">
-            <AlertCircle className="size-4" aria-hidden="true" />
-            <AlertDescription>
-              {t(errorKey)}
-              {errorKey === 'errors.sessionEnded' ? (
-                <>
-                  <span className="block">{t('compose.sessionEndedDraft')}</span>
-                  <Button asChild size="sm" variant="outline" className="mt-2">
-                    <Link href={signInHref()}>{t('compose.signIn')}</Link>
-                  </Button>
-                </>
-              ) : null}
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        <ComposeContentFields
+          isReplyOrForward={isReplyOrForward}
+          templates={templates.data}
+          templateId={templateId}
+          template={template}
+          values={values}
+          subject={subject}
+          body={body}
+          disabled={send.isPending}
+          onSelectTemplate={nextTemplateId => {
+            setErrorKey(null);
+            setValues({});
+            setTemplateId(nextTemplateId);
+          }}
+          onChangeValue={(name, value) => setValues(current => ({ ...current, [name]: value }))}
+          onChangeSubject={setSubject}
+          onChangeBody={setBody}
+        />
+        <ComposeAttachmentsSection
+          files={files}
+          carried={carried}
+          lostFiles={lostFiles}
+          restoringFiles={restoringFiles}
+          filesTooMany={filesTooMany}
+          filesTooLarge={filesTooLarge}
+          disabled={send.isPending}
+          onAddFiles={addFiles}
+          onRemoveCarried={attachmentId =>
+            setCarried(current => current.filter(file => file.id !== attachmentId))
+          }
+          onRemoveFile={index =>
+            setFiles(current => current.filter((_, position) => position !== index))
+          }
+        />
+        {errorKey ? <ComposeErrorAlert errorKey={errorKey} mode={draft.mode} /> : null}
       </DialogBody>
       {/* Inline, the page scrolls the form; Send stays pinned to its bottom, even on a phone. */}
       <DialogFooter
