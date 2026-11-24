@@ -24,7 +24,14 @@
     "./components/MailShell": {
       "types": "./src/components/MailShell.tsx",
       "default": "./src/components/MailShell.tsx"
+    },
+    "./primitives/inbox-behaviors": {
+      "types": "./src/primitives/inbox-behaviors.ts",
+      "default": "./src/primitives/inbox-behaviors.ts"
     }
+  },
+  "dependencies": {
+    "@ui-sdk/core": "^0.1.0-beta.17"
   },
   "scripts": {
     "type-check": "tsc --noEmit -p tsconfig.json",
@@ -35,5 +42,6 @@
   },
   "engines": {
     "node": "^22.12.0 || ^24.0.0"
-  }
+  },
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
 }

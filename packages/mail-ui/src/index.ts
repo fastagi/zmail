@@ -33,3 +33,22 @@ export {
 } from './selectors.ts';
 
 export { MailShell, type MailShellProps } from './components/MailShell.tsx';
+
+export {
+  createAccountRailController,
+  createInboxListController,
+  createMailUiAgent,
+  type AccountRailController,
+  type AccountRailControllerOptions,
+  type AccountRailState,
+  type InboxListController,
+  type InboxListControllerOptions,
+  type InboxListState,
+  type KeyEventLike,
+  type MailUiAgent,
+  type MailUiAgentActResult,
+  type MailUiAgentIntent,
+  type MailUiAgentOptions,
+  type MailUiAgentSnapshot,
+  type VirtualWindow,
+} from './primitives/inbox-behaviors.ts';

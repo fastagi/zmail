@@ -5,6 +5,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  createAccountRailController,
+  createInboxListController,
+  createMailUiAgent,
+} from '../src/primitives/inbox-behaviors.ts';
+import {
   detectProviderFromEmail,
   getProviderPreset,
   MAIL_UI_MAX_CONNECTED_ACCOUNTS,
@@ -218,6 +223,123 @@ test('resolveReplySenderAccount and buildReplyPayload always match the receiving
   assert.ok(forward);
   assert.equal(forward.fromAccountId, 'acc_gmail');
   assert.equal(forward.subject, 'Fwd: Re: Invoice');
+});
+
+test('createInboxListController supports j/k navigation, x toggle, Shift range select, and 10,000-message virtual window', () => {
+  const bulk = Array.from({ length: 10_000 }, (_, i) =>
+    makeMessage({ id: `m_${i}`, accountId: 'acc_1', subject: `Message #${i}` })
+  );
+  let openedId: string | null = null;
+  const list = createInboxListController({
+    messages: bulk,
+    itemHeight: 60,
+    overscan: 3,
+    onOpen: (m) => {
+      openedId = m.id;
+    },
+  });
+
+  // 10,000-message virtual window slicing at 60fps
+  const win = list.getVirtualWindow(30_000, 600);
+  assert.equal(win.totalHeight, 600_000);
+  assert.equal(win.startIndex, 497);
+  assert.equal(win.endIndex, 512);
+  assert.equal(win.offsetTop, 497 * 60);
+  assert.equal(win.visibleItems.length, 16);
+  assert.equal(win.visibleItems[0]?.id, 'm_497');
+  assert.equal(win.visibleItems.at(-1)?.id, 'm_512');
+
+  // j/k/Arrow cursor + x toggle + Shift+click range select
+  assert.equal(list.getState().activeMessageId, 'm_0');
+  list.handleKeyDown({ key: 'j' });
+  list.handleKeyDown({ key: 'ArrowDown' });
+  assert.equal(list.getState().activeMessageId, 'm_2');
+  list.handleKeyDown({ key: 'x' });
+  assert.deepEqual(list.getState().selectedIds, ['m_2']);
+  list.handleRowClick('m_5', { shiftKey: true });
+  assert.deepEqual(list.getState().selectedIds, ['m_2', 'm_3', 'm_4', 'm_5']);
+  list.handleKeyDown({ key: 'k' });
+  assert.equal(list.getState().activeMessageId, 'm_4');
+  list.handleKeyDown({ key: 'Enter' });
+  assert.equal(openedId, 'm_4');
+  list.destroy();
+});
+
+test('createAccountRailController caps at 30 accounts and supports fuzzy filter & typeahead navigation', () => {
+  const accounts = [
+    makeAccount({ id: 'a_gmail', email: 'alice@gmail.com', displayName: 'Alice Personal', providerId: 'gmail' }),
+    makeAccount({ id: 'a_qq', email: 'bob@qq.com', displayName: 'Bob QQ', providerId: 'qq' }),
+    makeAccount({ id: 'a_feishu', email: 'carol@larksuite.com', displayName: 'Carol Feishu', providerId: 'feishu' }),
+    ...Array.from({ length: 32 }, (_, idx) =>
+      makeAccount({ id: `a_extra_${idx}`, email: `user${idx}@163.com`, providerId: 'netease163' })
+    ),
+  ];
+  const rail = createAccountRailController({ accounts });
+  assert.equal(rail.getState().accounts.length, 30);
+
+  const matched = rail.typeahead('c');
+  assert.equal(matched?.id, 'a_feishu');
+  assert.equal(rail.getState().activeAccountId, 'a_feishu');
+
+  const filtered = rail.setFilterQuery('qq');
+  assert.equal(filtered[0]?.id, 'a_qq');
+  assert.equal(rail.handleKeyDown({ key: 'Enter' }), true);
+  assert.equal(rail.getState().activeAccountId, 'a_qq');
+  rail.destroy();
+});
+
+test('createMailUiAgent snapshot() and act() execute deterministic full-lifecycle round-trip', () => {
+  const accounts = [
+    makeAccount({ id: 'acc_work', email: 'ceo@zmail.app', kind: 'hosted', providerId: 'custom' }),
+    makeAccount({ id: 'acc_gmail', email: 'me@gmail.com', kind: 'external', providerId: 'gmail' }),
+    makeAccount({ id: 'acc_qq', email: 'me@qq.com', kind: 'external', providerId: 'qq' }),
+  ];
+  const messages = [
+    makeMessage({ id: 'm1', accountId: 'acc_work', subject: 'Q4 Board Deck', receivedAt: '2026-11-24T09:00:00Z', read: false }),
+    makeMessage({ id: 'm2', accountId: 'acc_gmail', subject: 'Flight Receipt', receivedAt: '2026-11-24T10:00:00Z', read: false }),
+    makeMessage({ id: 'm3', accountId: 'acc_qq', subject: 'Flight Check-in', receivedAt: '2026-11-24T11:00:00Z', read: false }),
+  ];
+  const archived: string[][] = [];
+  const agent = createMailUiAgent({
+    accounts,
+    messages,
+    initialMode: 'personal',
+    onArchive: (ids) => archived.push(ids),
+  });
+
+  assert.equal(agent.tools.length, 3);
+  assert.deepEqual(agent.snapshot(), {
+    mode: 'personal',
+    activeAccountId: null,
+    selectedIds: [],
+    activeMessageId: 'm3',
+    openedMessageId: null,
+    searchQuery: '',
+    unreadTotal: 2,
+    visibleCount: 2,
+  });
+
+  assert.equal(agent.act({ type: 'move_next' }).snapshot.activeMessageId, 'm2');
+  assert.equal(agent.act({ type: 'open_active' }).snapshot.openedMessageId, 'm2');
+  assert.equal(agent.snapshot().unreadTotal, 1);
+
+  assert.equal(agent.act({ type: 'move_prev' }).snapshot.activeMessageId, 'm3');
+  assert.deepEqual(agent.act({ type: 'toggle_select' }).snapshot.selectedIds, ['m3']);
+  const archRes = agent.act({ type: 'archive_selected' });
+  assert.equal(archRes.ok, true);
+  assert.deepEqual(archived, [['m3']]);
+  assert.equal(archRes.snapshot.visibleCount, 1);
+  assert.equal(archRes.snapshot.unreadTotal, 0);
+
+  assert.equal(agent.act({ type: 'search', query: 'receipt' }).snapshot.visibleCount, 1);
+  assert.equal(agent.act({ type: 'select_account', accountId: 'acc_gmail' }).ok, true);
+  assert.equal(agent.act({ type: 'select_account', accountId: 'acc_work' }).ok, false);
+
+  const workRes = agent.act({ type: 'select_mode', mode: 'work' });
+  assert.equal(workRes.snapshot.mode, 'work');
+  assert.equal(workRes.snapshot.unreadTotal, 1);
+  assert.equal(agent.act({ type: 'search', query: '' }).snapshot.activeMessageId, 'm1');
+  agent.destroy();
 });
 
 test('packages/mail-ui has zero next/* or electron imports and every file stays under 400 lines', () => {
