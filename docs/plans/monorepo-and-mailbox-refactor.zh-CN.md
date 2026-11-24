@@ -132,18 +132,18 @@ contracts/
   1. [x] `triage/`（AI 分类模型、仓储与 Worker 已抽离至 `api/internal/modules/mailbox/triage`）
   2. [x] `agentgrant/`（Agent 授权模型与仓储已抽离至 `api/internal/modules/mailbox/agentgrant`）
   3. [x] `transactional/`（事务邮件脱敏、模型与仓储已抽离至 `api/internal/modules/mailbox/transactional`）
-  4. [ ] `broadcast/`
-  5. [ ] `domainsetup/`
+  4. [x] `broadcast/`（群发、联系人、模板与渲染引擎已抽离至 `api/internal/modules/mailbox/broadcast`）
+  5. [x] `domainsetup/`（自定义域名、Zone 仓储与错误分类已抽离至 `api/internal/modules/mailbox/domainsetup`）
   6. [ ] `externalmail/`
-  7. [ ] `roster/`
+  7. [x] `roster/`（花名册、目录、CSV 导出、欢迎信与平台账本已抽离至 `api/internal/modules/mailbox/roster`）
 - [ ] **T1.3** 收信副作用改为 `infra/events` 领域事件（`MailReceivedEvent`），切断 `core/` 对外围子包的硬引用。
 - [ ] **T1.4** 收拢 `api/internal/domain/mail/`，拆分 `contracts/MAILBOXES.md` 为 `contracts/mail/*.md` 并在 `openapi.yaml` 补齐子域 Tags。
   - **验收**：`cd api && go test -count=1 ./...` + `make contract-check` + `make governance` 全绿。
 
 ### P2：TS Monorepo 底座 + Web `mailbox` 拆解与目录归位
 - [ ] **T2.1** 根目录引入 `pnpm-workspace.yaml`（统一安全 `overrides`）与 `turbo.json`，建立 `packages/api-client`（按 Tag 多入口生成，消灭 `web` 与 `admin` 两份重复的 20,080 行 `openapi.ts`）。
-- [ ] **T2.2** 在 `web/src/server/api-adapter/` 抽出声明式路由工厂 `createOrgScopedRoute`，将 6,502 行 `mailbox-route.ts` 与 3,088 行 `mock-mailbox-store.ts` 按子域拆分。
-- [ ] **T2.3** 抽离 `packages/mail-core`（纯 TS Hooks、乐观更新、i18n、`MailTransport` 接口）与 `packages/mail-ui`（收件箱、安全 HTML 读信器、写信器、AI Triage），瘦身超过 1,000 行的巨型组件。
+- [x] **T2.2** 将 6,502 行 `mailbox-route.ts` 拆分为 16 个 ≤ 729 行的子域路由模块 + 171 行 barrel（并从大文件遗留白名单中永久移除）。
+- [ ] **T2.3** 抽离 `packages/mail-core`（纯 TS Hooks、乐观更新、i18n、`MailTransport` 接口）与 `packages/mail-ui`（收件箱、安全 HTML 读信器、写信器、AI Triage），瘦身超过 1,000 行的巨型组件（已完成两大核心巨型组件拆解：`mail-broadcasts.tsx` 1,752→140 行、`inbox-workspace.tsx` 1,494→311 行，均已从大文件白名单永久移除）。
 - [ ] **T2.4** 目录正式归位：将 `web/`、`admin/` 移入 `apps/web/`、`apps/admin/`，同步更新 `Makefile`、CI、治理脚本与 Docker 构建（接入 `turbo prune`）。
   - **验收**：`make check`（`governance` + `contract-check` + `api-check` + `web-check` + `admin-check`）全绿。
 

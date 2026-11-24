@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { PLUGIN_WEB_FEATURES, pascalCase } from './plugin-web-features';
@@ -43,6 +43,28 @@ interface PluginRouteModule {
   source: string;
 }
 
+function readPluginRouteSource(entryPath: string): string {
+  if (!existsSync(entryPath)) return '';
+  const entrySource = readFileSync(entryPath, 'utf8');
+  const dir = dirname(entryPath);
+  const reExportTargets = Array.from(
+    entrySource.matchAll(/export\s+(?:type\s+)?\{[\s\S]*?\}\s+from\s+'(\.\/[^']+)'/g),
+    match => match[1]
+  );
+  if (reExportTargets.length === 0) {
+    return entrySource;
+  }
+  const seen = new Set<string>([entryPath]);
+  const parts = [entrySource];
+  for (const target of reExportTargets) {
+    const targetPath = resolve(dir, `${target}.ts`);
+    if (seen.has(targetPath) || !existsSync(targetPath)) continue;
+    seen.add(targetPath);
+    parts.push(readFileSync(targetPath, 'utf8'));
+  }
+  return parts.join('\n');
+}
+
 const pluginRouteModules: PluginRouteModule[] = PLUGIN_WEB_FEATURES.map(feature => {
   const path = resolve(process.cwd(), `src/features/${feature}/server/${feature}-route.ts`);
   return {
@@ -50,7 +72,7 @@ const pluginRouteModules: PluginRouteModule[] = PLUGIN_WEB_FEATURES.map(feature 
     pascal: pascalCase(feature),
     importPath: `@/features/${feature}/server/${feature}-route`,
     path,
-    source: existsSync(path) ? readFileSync(path, 'utf8') : '',
+    source: readPluginRouteSource(path),
   };
 });
 
@@ -274,12 +296,17 @@ function pluginRouteModuleFor(path: string): PluginRouteModule | undefined {
   );
 }
 
-/** Exported `*Route` handlers of a plugin route module, except its availability resolver. */
+/** Exported `*Route` handlers of a plugin route module, except its shared resolvers. */
 function pluginRouteHandlers(routeModule: PluginRouteModule): string[] {
+  const resolvers = new Set([
+    `resolve${routeModule.pascal}Route`,
+    `resolve${routeModule.pascal}ReadRoute`,
+    `resolve${routeModule.pascal}MutationRoute`,
+  ]);
   return Array.from(
     routeModule.source.matchAll(/export async function (\w+Route)\b/g),
     match => match[1]
-  );
+  ).filter(name => !resolvers.has(name));
 }
 
 /**
