@@ -17,7 +17,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
+import { WorkspaceModeToggle } from '@/features/mailbox/components/workspace-mode-toggle';
 import type { ExternalMailConnection } from '@/features/mailbox/external-mail-schemas';
+import { useIsPersonalMode } from '@/features/mailbox/stores/workspace-mode';
 import type { InboxCounts, InboxView, MailRole, Mailbox } from '@/features/mailbox/types';
 import { isOwnConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
 import { useT } from '@/i18n';
@@ -128,6 +130,7 @@ export function InboxSidebar({
   drafts?: { count: number | undefined; onOpen: () => void } | null;
 }) {
   const t = useT('mailbox');
+  const isPersonalMode = useIsPersonalMode();
   const views = counts?.views;
   const viewNumber: Record<InboxView, number | undefined> = {
     all: views?.all_unread,
@@ -205,6 +208,10 @@ export function InboxSidebar({
         <Kbd aria-hidden="true" className={cn(rail && 'hidden lg:inline-flex')}>
           ⌘K
         </Kbd>
+      </div>
+
+      <div className={cn('px-1 pb-2.5', rail && 'hidden lg:block')}>
+        <WorkspaceModeToggle className="w-full" />
       </div>
 
       {onCompose ? (
@@ -303,6 +310,7 @@ export function InboxSidebar({
         ) : null}
       </nav>
 
+      {!isPersonalMode ? (
       <nav aria-label={t('inbox.groups.label')} className="flex flex-col gap-0.5">
         <div className={cn('items-center gap-2 pt-[18px] pr-1 pb-1.5 pl-3', wide)}>
           <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
@@ -420,6 +428,7 @@ export function InboxSidebar({
           );
         })}
       </nav>
+      ) : null}
 
       {external && showConnected ? (
         <Suspense fallback={null}>
