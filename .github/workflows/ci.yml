@@ -120,15 +120,28 @@ jobs:
           version: v2.14.0
           install-only: true
 
-      - name: Verification — Tier 1 (build + lint + test) on the whole api/ tree
-        # The whole tree is now lint clean (golangci-lint run ./...). New
-        # debt anywhere blocks CI here.
+      # A pull request checks the packages it can affect: those it changes and their importers.
+      # Anything outside the import graph (go.mod, testdata, SQL) and every manual run check the
+      # whole tree, which is lint clean, so new debt anywhere still blocks here.
+      - id: scope
+        name: Select the affected Go packages
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then scope=$(python3 scripts/affected-packages.py "$BASE_SHA"); else scope=./...; fi
+          echo "packages=$scope" >> "$GITHUB_OUTPUT"
+          echo "Checking: $scope"
+
+      - name: Verification — Tier 1 (build + lint + test) on the affected packages
         env:
           FASTBUILD_TEST_POSTGRES_DSN: postgres://fastbuild:fastbuild_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/fastbuild_test?sslmode=disable
           # Every package builds its schema in the one service database; fewer packages at a
           # time keep that database responsive, and the mailbox package alone can pass 10 minutes.
           GO_TEST_FLAGS: -timeout=30m -p=4
-        run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 1
+          PACKAGES: ${{ steps.scope.outputs.packages }}
+        # shellcheck disable=SC2086 # PACKAGES is a space-separated package list.
+        run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 1 $PACKAGES
 
       - name: Verify Wire output is current
         run: make wire-check
@@ -252,8 +265,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verification — Tier 2 (type-check + lint + test + build)
-        run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 2
+      # A pull request stops before the production build: the deploy builds the image and aborts
+      # before any switch if it fails. A manual run adds the build (tier 2).
+      - name: Verification — type-check + lint + test, plus the build on a manual run
+        env:
+          TIER: ${{ github.event_name == 'workflow_dispatch' && '2' || '1' }}
+        run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh "$TIER"
 
   admin:
     name: Admin Console (Node ${{ matrix.node-version }})
