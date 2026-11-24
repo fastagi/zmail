@@ -12,6 +12,7 @@ import { getT } from '@/i18n/server';
  */
 export default async function SiteLayout({ children }: PropsWithChildren) {
   const t = await getT('site');
+  const legal = await getT('legal');
 
   return (
     <div className="flex min-h-screen flex-col bg-bg-canvas">
@@ -66,7 +67,13 @@ export default async function SiteLayout({ children }: PropsWithChildren) {
             </div>
 
             {/* Links & Copyright */}
-            <div className="flex items-center gap-6 text-sm text-text-muted">
+            <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-text-muted">
+              <Link href="/privacy" className="hover:text-primary transition-colors">
+                {legal('footer.privacy')}
+              </Link>
+              <Link href="/terms" className="hover:text-primary transition-colors">
+                {legal('footer.terms')}
+              </Link>
               <a
                 href="https://github.com/fastagi/zmail"
                 target="_blank"

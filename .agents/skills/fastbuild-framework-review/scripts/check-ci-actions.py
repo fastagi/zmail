@@ -52,6 +52,11 @@ REVIEWED_ACTIONS = {
         version="v6.4.0",
         runtime="node24",
     ),
+    "actions/setup-python": ActionPin(
+        sha="6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+        version="v7.1.0",
+        runtime="node24",
+    ),
     "actions/upload-artifact": ActionPin(
         sha="043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         version="v7.0.1",

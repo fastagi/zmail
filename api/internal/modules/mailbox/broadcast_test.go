@@ -53,11 +53,13 @@ func newBroadcastFixture(t *testing.T, dailyLimit int) *broadcastFixture {
 	ctx := context.Background()
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
+	// The clock is truncated to the microsecond PostgreSQL keeps: a Linux clock has nanoseconds, so a
+	// round-tripped time would never compare equal.
 	fixture := &broadcastFixture{
 		repo:        repo,
 		transport:   &scriptedTransport{bounces: map[string]bool{}},
 		mailbox:     createMailbox(t, repo, "news@mail.example"),
-		now:         time.Now().UTC(),
+		now:         time.Now().UTC().Truncate(time.Microsecond),
 		notices:     &recordingNotices{},
 		memberships: &fakeMemberships{},
 	}

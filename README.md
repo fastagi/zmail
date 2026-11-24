@@ -54,7 +54,7 @@ A message the provider rejects answers `502` and is kept as `failed`.
 For mailbox permissions, delivery events, and API scopes, see the [mailbox contract](contracts/MAILBOXES.md).
 
 <details>
-<summary>FastBuild framework and contributor guide</summary>
+<summary>FastBuild scaffold and contributor guide</summary>
 
 ## FastBuild
 
