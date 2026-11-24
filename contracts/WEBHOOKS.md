@@ -31,7 +31,7 @@ strong encryption key. The Web feature never silently falls back to mock data in
 Every endpoint, event, delivery, and attempt belongs to exactly one organization. HTTP management
 routes require authentication, a verified `Organization-Id` context, and an `owner` or `admin`
 organization role, or a `member` holding the developer grant (see "Developer access" in
-[MAILBOXES.md](MAILBOXES.md#developer-access)). Other members receive `403 PERMISSION.DENIED`;
+[mail/DELIVERY.md](mail/DELIVERY.md#developer-access)). Other members receive `403 PERMISSION.DENIED`;
 cross-organization identifiers resolve as `404` without revealing existence.
 
 Every endpoint records its creator (`created_by`). Owners and admins see and manage every endpoint
@@ -64,7 +64,7 @@ publisher adapters before subscriptions can select them. Browser clients therefo
 catalog-valid event type in responses instead of a hard-coded list.
 
 Zmail is such a downstream app. Its product catalog adds the `mail.message.*` events defined in
-[MAILBOXES.md](MAILBOXES.md#webhooks) to the starter's `webhook.test`; `GET /v1/webhook-event-types`
+[mail/DELIVERY.md](mail/DELIVERY.md#webhooks) to the starter's `webhook.test`; `GET /v1/webhook-event-types`
 lists all of them.
 
 An internal publication contains:

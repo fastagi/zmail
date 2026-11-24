@@ -225,7 +225,7 @@ fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clie
   value: `true` for every feature of an owner or admin.
 - A new membership starts with the grants its invitation carries. `POST /v1/organizations/:id/invitations`
   always carries the defaults, `contacts`, `templates`, and `mail_clients`; `broadcasts` and
-  `api_keys`, which send mail at scale, wait for an owner or admin. A [roster import](MAILBOXES.md#roster-import) may
+  `api_keys`, which send mail at scale, wait for an owner or admin. A [roster import](mail/GATEWAY.md#roster-import) may
   carry other grants, chosen by the owner or admin who imports. Invitations created before grants
   were stored carry the defaults, and memberships that existed before grants were introduced keep
   all four. Every membership and invitation that existed before `mail_clients` was added has it.
@@ -237,7 +237,7 @@ fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clie
   `409 ORGANIZATION.MEMBER_FEATURES_FIXED`. A change takes effect on the member's next request.
 - A change emits one `organization_members.change_features` audit change listing only the features
   whose value changed, with member, organization, and user IDs.
-- `developer` (see [MAILBOXES.md](MAILBOXES.md#developer-access)) carries a sending scope and
+- `developer` (see [mail/DELIVERY.md](mail/DELIVERY.md#developer-access)) carries a sending scope and
   implies `api_keys`: views report `api_keys: true` while `developer` is granted, and the stored
   `api_keys` value returns when `developer` is withdrawn. Granting `developer: true` to a member
   without a scope needs `developer_all_domains: true` or a non-empty `developer_domains` list (at
@@ -253,7 +253,7 @@ fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`, `mail_clie
   promoted and later demoted starts without developer access.
 - A route that needs a feature the active membership lacks returns
   `403 ORGANIZATION.FEATURE_NOT_GRANTED`. The routes each feature opens are listed in
-  [`MAILBOXES.md`](MAILBOXES.md#member-feature-grants).
+  [`mail/INBOX.md`](mail/INBOX.md#member-feature-grants).
 
 ## Invitation Lifecycle
 

@@ -3,7 +3,7 @@
 Push lets Gmail and Outlook tell Zmail that a connected mailbox received mail, so the
 `mail:external:sync` worker fetches that connection within seconds instead of at its next poll. It is
 off by default. The behavior and the public routes are specified in
-[contracts/MAILBOXES.md](../../contracts/MAILBOXES.md#push-subscriptions). This page lists what an
+[contracts/mail/EXTERNAL_MAIL.md](../../contracts/mail/EXTERNAL_MAIL.md#push-subscriptions). This page lists what an
 operator creates and configures.
 
 A notification is only a hint that marks a connection due. Mail is still read by the regular sync
