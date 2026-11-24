@@ -67,6 +67,11 @@ REVIEWED_ACTIONS = {
         version="v9.3.0",
         runtime="node24",
     ),
+    "namespacelabs/nscloud-cache-action": ActionPin(
+        sha="1124a6f3ce44e5cf84cc22111530961f4d2a15f9",
+        version="v1.7.0",
+        runtime="node24",
+    ),
     "pnpm/action-setup": ActionPin(
         sha="0ebf47130e4866e96fce0953f49152a61190b271",
         version="v6.0.9",

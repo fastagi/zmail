@@ -60,6 +60,10 @@ Workflows default to `ubuntu-latest`. An installation may set repository variabl
 `CI_RUNNER_LABELS` to a JSON array of labels for a compatible self-hosted or managed runner (for
 example a Namespace profile, `["namespace-profile-default"]`). Jobs that run the governance or
 contract scripts set up Python 3.12 and the Go version in `api/go.mod` themselves, so the runner image's own toolchains do not matter.
+On a Namespace profile with cache volumes (`CI_RUNNER_LABELS` naming a `namespace-profile-*`),
+`namespacelabs/nscloud-cache-action` keeps the Go module, build, and lint caches and the pnpm store
+on the profile's volume, and the setup actions skip GitHub's cache service; any other runner keeps
+the setup actions' own cache.
 Do not point a public repository at a self-hosted runner on a host that also runs production. On a runner
 host shared by several repositories, give the repository its own pool label (for example
 `["self-hosted","fe5-zmail"]`) with its own runner cap, so its jobs do not queue behind other
