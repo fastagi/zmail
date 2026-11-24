@@ -1,0 +1,100 @@
+{
+  "name": "@zmail/desktop",
+  "version": "0.1.0",
+  "description": "Zmail Electron desktop client with OS keychain storage, offline full-text search, system tray, and direct Go /v1 API access.",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "vite --config vite.config.ts",
+    "dev:main": "tsc -p tsconfig.json --noEmit false --watch",
+    "dev:electron": "electron .",
+    "build:renderer": "vite build --config vite.config.ts",
+    "build:main": "tsc -p tsconfig.json --noEmit false",
+    "build": "pnpm build:renderer && pnpm build:main",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test tests/desktop-core.test.ts",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:win": "electron-builder --win nsis",
+    "dist:linux": "electron-builder --linux AppImage"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.12.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.2.0"
+  },
+  "build": {
+    "appId": "com.zmail.desktop",
+    "productName": "Zmail",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "Zmail OAuth Callback",
+        "schemes": [
+          "zmail"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "category": "Email",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    }
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
+  }
+}
