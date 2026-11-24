@@ -4,7 +4,7 @@ const messages = {
   welcomeBack: 'Welcome back',
   signInToContinue: 'Sign in to continue to your account',
   createAccount: 'Create account',
-  getStarted: 'Get started with the platform',
+  getStarted: 'Get started',
   registrationDisabled: 'Registration Disabled',
   registrationDisabledMessage:
     'Registration is currently disabled for this platform. Please contact your administrator for access.',
@@ -95,8 +95,8 @@ const messages = {
   // Decorative panel
   heroTitle: 'Mail for your whole team',
   heroSubtitle:
-    'Send and receive on your own domains, broadcast product updates to your contacts, and see how every message lands',
-  feature1: 'Several custom domains',
+    'Send and receive on your own domains, broadcast product updates to your contacts, and see how every message lands.',
+  feature1: 'Multiple custom domains',
   feature2: 'Staged broadcasts with automatic pauses',
   feature3: 'Templates and contact lists',
   feature4: 'Organizations and member roles',

@@ -1,5 +1,5 @@
 import type { PropsWithChildren } from 'react';
-import { Zap, Shield, Layers, Headphones } from 'lucide-react';
+import { Globe, Send, Layers, Users } from 'lucide-react';
 import { getMessages } from 'next-intl/server';
 import { Logo } from '@/components/ui/icons';
 import { Toaster } from '@/components/ui/sonner';
@@ -11,10 +11,10 @@ import { getT } from '@/i18n/server';
 import { QueryProvider } from '@/providers/query-provider';
 
 const features = [
-  { icon: Zap, key: 'feature1' },
-  { icon: Shield, key: 'feature2' },
+  { icon: Globe, key: 'feature1' },
+  { icon: Send, key: 'feature2' },
   { icon: Layers, key: 'feature3' },
-  { icon: Headphones, key: 'feature4' },
+  { icon: Users, key: 'feature4' },
 ] as const;
 
 /**
@@ -29,8 +29,8 @@ export default async function AuthLayout({ children }: PropsWithChildren) {
 
   return (
     <div className="flex min-h-svh bg-bg-canvas">
-      {/* Decorative Left Panel */}
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-linear-to-br from-primary via-primary/90 to-primary-deeper">
+      {/* Decorative Left Panel — fixed dark editorial surface so white ink always meets WCAG AAA contrast in both light and dark themes */}
+      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-linear-to-br from-zinc-950 via-zinc-900 to-indigo-950 border-r border-white/10">
         {/* Animated Background Elements */}
         <div className="absolute inset-0">
           {/* Large gradient orbs */}

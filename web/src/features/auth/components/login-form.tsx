@@ -146,6 +146,7 @@ export function LoginForm({
               name="password"
               type="password"
               autoComplete="current-password"
+              placeholder={t.auth('enterPassword')}
               required
               disabled={isPending}
               className="bg-bg-canvas"
