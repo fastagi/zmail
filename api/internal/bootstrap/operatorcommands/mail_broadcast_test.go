@@ -2,6 +2,7 @@ package operatorcommands
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -159,5 +160,117 @@ func TestMailWorkerPurgesRevokedAppPasswords(t *testing.T) {
 	last := dispatcher.calls[len(dispatcher.calls)-1]
 	if last != "purge-app-passwords" || dispatcher.prunedLimit != 22 || processed != 4 {
 		t.Fatalf("calls = %v, limit %d, processed %d", dispatcher.calls, dispatcher.prunedLimit, processed)
+	}
+}
+
+func TestParseMailBroadcastWorkerArgs(t *testing.T) {
+	parsed, err := parseMailBroadcastWorkerArgs([]string{
+		"--batch=50", "--poll=300ms", "--lanes=transactional,personal", "--concurrency=8", "--once",
+	})
+	if err != nil {
+		t.Fatalf("parseMailBroadcastWorkerArgs: %v", err)
+	}
+	if parsed.worker.Batch != 50 || parsed.worker.Poll != 300*time.Millisecond || !parsed.worker.Once {
+		t.Fatalf("unexpected worker config: %+v", parsed.worker)
+	}
+	if parsed.concurrency != 8 {
+		t.Fatalf("concurrency = %d; want 8", parsed.concurrency)
+	}
+	if !parsed.lanes.Transactional || !parsed.lanes.Personal || parsed.lanes.Broadcast || parsed.lanes.Purge {
+		t.Fatalf("lanes = %+v; want transactional+personal only", parsed.lanes)
+	}
+	if parsed.lanes.String() != "transactional,personal" {
+		t.Fatalf("lanes.String() = %q", parsed.lanes.String())
+	}
+
+	for _, bad := range [][]string{
+		{"--lanes=invalid"},
+		{"--concurrency=0"},
+		{"--concurrency=33"},
+		{"--concurrency=abc"},
+	} {
+		if _, err := parseMailBroadcastWorkerArgs(bad); err == nil {
+			t.Fatalf("expected error for args %v", bad)
+		}
+	}
+}
+
+func TestMailWorkerLaneIsolation(t *testing.T) {
+	fastLanes, err := parseMailWorkerLanes("transactional,personal")
+	if err != nil {
+		t.Fatalf("parseMailWorkerLanes: %v", err)
+	}
+	fastDispatcher := &recordingMailDispatcher{transactional: 2, queued: 3, sent: 10, purged: 5}
+	processed, err := mailBroadcastWorker{dispatcher: fastDispatcher, lanes: fastLanes}.DispatchWebhooks(context.Background(), 25)
+	if err != nil {
+		t.Fatalf("DispatchWebhooks fast lanes: %v", err)
+	}
+	if processed != 5 || len(fastDispatcher.calls) != 2 || fastDispatcher.calls[0] != "transactional" || fastDispatcher.calls[1] != "queued" {
+		t.Fatalf("fast lanes calls = %v, processed = %d; want transactional + queued (5)", fastDispatcher.calls, processed)
+	}
+
+	slowLanes, err := parseMailWorkerLanes("broadcast,purge")
+	if err != nil {
+		t.Fatalf("parseMailWorkerLanes: %v", err)
+	}
+	slowDispatcher := &recordingMailDispatcher{transactional: 10, queued: 10, sent: 4, purged: 2}
+	processed, err = mailBroadcastWorker{dispatcher: slowDispatcher, lanes: slowLanes}.DispatchWebhooks(context.Background(), 25)
+	if err != nil {
+		t.Fatalf("DispatchWebhooks slow lanes: %v", err)
+	}
+	if processed != 6 || len(slowDispatcher.calls) < 2 || slowDispatcher.calls[0] != "broadcasts" || slowDispatcher.calls[1] != "purge" {
+		t.Fatalf("slow lanes calls = %v, processed = %d; want broadcasts + purge (6)", slowDispatcher.calls, processed)
+	}
+}
+
+type concurrentTestWorker struct {
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+	barrier     chan struct{}
+}
+
+func (w *concurrentTestWorker) DispatchWebhooks(_ context.Context, _ int) (int, error) {
+	cur := w.inFlight.Add(1)
+	for {
+		prev := w.maxInFlight.Load()
+		if cur <= prev || w.maxInFlight.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
+	<-w.barrier
+	w.inFlight.Add(-1)
+	return 3, nil
+}
+
+func TestRunConcurrentMailWorkerParallelism(t *testing.T) {
+	worker := &concurrentTestWorker{barrier: make(chan struct{})}
+	cfg := webhookWorkerConfig{Batch: 10, Poll: 10 * time.Millisecond, Once: true}
+
+	done := make(chan struct{})
+	var total int
+	var runErr error
+	go func() {
+		total, runErr = runConcurrentMailWorker(context.Background(), worker, cfg, 4)
+		close(done)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for worker.maxInFlight.Load() < 4 {
+		select {
+		case <-deadline:
+			close(worker.barrier)
+			t.Fatalf("expected 4 concurrent workers in flight, got max %d", worker.maxInFlight.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	close(worker.barrier)
+	<-done
+
+	if runErr != nil {
+		t.Fatalf("runConcurrentMailWorker error: %v", runErr)
+	}
+	if total != 12 {
+		t.Fatalf("total = %d; want 12 (4 workers * 3)", total)
 	}
 }
