@@ -55,7 +55,8 @@ func TestAddWebhookEndpointDeveloperOwnedUpDown(t *testing.T) {
 
 	var defaultValue string
 	require.NoError(t, db.Raw(`SELECT column_default FROM information_schema.columns
-		WHERE table_name = 'webhook_endpoints' AND column_name = 'developer_owned'`).Scan(&defaultValue).Error)
+		WHERE table_schema = current_schema() AND table_name = 'webhook_endpoints'
+		AND column_name = 'developer_owned'`).Scan(&defaultValue).Error)
 	assert.Equal(t, "false", defaultValue)
 
 	require.NoError(t, (&addWebhookEndpointDeveloperOwned{}).Down(db))
