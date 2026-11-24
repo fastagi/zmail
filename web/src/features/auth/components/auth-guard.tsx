@@ -109,8 +109,21 @@ export function AuthGuard({
     );
   }
 
-  // If not authenticated, don't render children (will redirect)
+  // Show loading while redirecting unauthenticated users to prevent a blank viewport flash
   if (status === 'unauthenticated') {
+    if (showLoading) {
+      return (
+        <main aria-busy="true" className="flex min-h-screen items-center justify-center">
+          <div className="flex flex-col items-center space-y-4">
+            <div
+              aria-hidden="true"
+              className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            />
+            <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+          </div>
+        </main>
+      );
+    }
     return null;
   }
 

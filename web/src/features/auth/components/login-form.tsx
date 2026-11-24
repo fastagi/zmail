@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -56,6 +56,7 @@ export function LoginForm({
   );
   const [email, setEmail] = useState(demoCredentials?.email ?? '');
   const [password, setPassword] = useState(demoCredentials?.password ?? '');
+  const [showPassword, setShowPassword] = useState(false);
   const [totpCode, setTotpCode] = useState('');
   const errorCode = getAuthErrorCode(error);
   // The password was right and the account asks for its second factor.
@@ -141,22 +142,38 @@ export function LoginForm({
                 </Link>
               )}
             </div>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              placeholder={t.auth('enterPassword')}
-              required
-              disabled={isPending}
-              className="bg-bg-canvas"
-              value={password}
-              errorText={passwordError}
-              onChange={event => {
-                setPassword(event.target.value);
-                clearMutationError();
-              }}
-            />
+            <div className="relative">
+              <Input
+                id="password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                placeholder={t.auth('enterPassword')}
+                required
+                disabled={isPending}
+                className="bg-bg-canvas pr-10"
+                value={password}
+                errorText={passwordError}
+                onChange={event => {
+                  setPassword(event.target.value);
+                  clearMutationError();
+                }}
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                disabled={isPending}
+                onClick={() => setShowPassword(prev => !prev)}
+                className="absolute top-2.5 right-2.5 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                {showPassword ? (
+                  <EyeOff className="size-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="size-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </div>
           {needsCode ? (
             <div className="space-y-2">

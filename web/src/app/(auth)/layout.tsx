@@ -4,6 +4,7 @@ import { getMessages } from 'next-intl/server';
 import { Logo } from '@/components/ui/icons';
 import { Toaster } from '@/components/ui/sonner';
 import { LanguageSwitcher } from '@/components/common';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { CLIENT_MESSAGE_NAMESPACES } from '@/i18n/client-message-namespaces';
 import { selectMessageNamespaces } from '@/i18n/message-selection';
 import { RouteMessagesProvider } from '@/i18n/route-messages-provider';
@@ -112,8 +113,9 @@ export default async function AuthLayout({ children }: PropsWithChildren) {
           {/* Subtle gradient overlay for depth */}
           <div className="absolute inset-0 bg-gradient-to-br from-muted/30 via-transparent to-muted/20 pointer-events-none" />
 
-          {/* Language Switcher */}
-          <div className="absolute top-4 right-4 z-20">
+          {/* Theme & Language Controls */}
+          <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5">
+            <ThemeToggle />
             <LanguageSwitcher />
           </div>
 
