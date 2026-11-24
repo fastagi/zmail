@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowRight, Braces, Inbox, Megaphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getT } from '@/i18n/server';
 
 const receiptRequest = `POST /v1/outbound-mail-messages
@@ -18,9 +17,9 @@ Content-Type: application/json
   "text": "Thanks, Maya. We received your payment."
 }`;
 const previewTabClass =
-  'relative h-auto min-h-10 whitespace-normal px-1 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:ring-0';
+  'relative flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md px-1 text-center text-sm font-medium has-focus-visible:ring-2 has-focus-visible:ring-primary';
 const previewPanelClass =
-  'col-start-1 row-start-1 focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-primary data-[state=inactive]:invisible data-[state=inactive]:opacity-0 motion-safe:transition-opacity motion-safe:duration-200';
+  'col-start-1 row-start-1 motion-safe:transition-opacity motion-safe:duration-200';
 
 const workflows = [
   { key: 'inbox', icon: Inbox },
@@ -65,26 +64,28 @@ export default async function HomePage() {
           <figcaption className="mb-3 text-xs font-medium text-text-muted">
             {t('preview.label')}
           </figcaption>
-          <Tabs defaultValue="inbox" className="gap-3">
-            <TabsList
-              aria-label={t('preview.label')}
-              className="group relative grid h-auto w-full grid-cols-2 p-1"
-            >
+          <fieldset className="group min-w-0">
+            <legend className="sr-only">{t('preview.label')}</legend>
+            <div className="relative mb-3 grid grid-cols-2 rounded-lg bg-muted p-1">
               <span
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-md bg-background shadow-sm motion-safe:transition-transform motion-safe:duration-200 group-has-[[data-preview-update][data-state=active]]:translate-x-full"
+                className="pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-md bg-background shadow-sm motion-safe:transition-transform motion-safe:duration-200 group-has-[#preview-update:checked]:translate-x-full"
               />
-              <TabsTrigger value="inbox" className={previewTabClass}>
-                <Inbox aria-hidden="true" />
+              <label className={previewTabClass}>
+                <input type="radio" className="sr-only" name="mail-preview" defaultChecked />
+                <Inbox aria-hidden="true" className="size-4" />
                 {t('preview.inbox')}
-              </TabsTrigger>
-              <TabsTrigger value="update" data-preview-update="" className={previewTabClass}>
-                <Megaphone aria-hidden="true" />
+              </label>
+              <label className={previewTabClass}>
+                <input type="radio" className="sr-only" name="mail-preview" id="preview-update" />
+                <Megaphone aria-hidden="true" className="size-4" />
                 {t('preview.update')}
-              </TabsTrigger>
-            </TabsList>
+              </label>
+            </div>
             <div className="grid overflow-hidden rounded-xl border border-border bg-bg-surface shadow-sm">
-              <TabsContent value="inbox" forceMount className={previewPanelClass}>
+              <div
+                className={`${previewPanelClass} group-has-[#preview-update:checked]:invisible group-has-[#preview-update:checked]:opacity-0`}
+              >
                 <p className="border-b border-border px-5 py-3 text-sm text-text-muted">
                   {t('preview.address')}
                 </p>
@@ -101,8 +102,10 @@ export default async function HomePage() {
                     <p className="mt-1 text-sm leading-relaxed">{t('preview.reply')}</p>
                   </div>
                 </div>
-              </TabsContent>
-              <TabsContent value="update" forceMount className={previewPanelClass}>
+              </div>
+              <div
+                className={`${previewPanelClass} invisible opacity-0 group-has-[#preview-update:checked]:visible group-has-[#preview-update:checked]:opacity-100`}
+              >
                 <p className="border-b border-border px-5 py-3 text-sm text-text-muted">
                   {t('preview.address')}
                 </p>
@@ -113,9 +116,9 @@ export default async function HomePage() {
                   <p className="text-sm leading-relaxed">{t('preview.releaseBody')}</p>
                   <p className="text-sm text-text-muted">{t('preview.team')}</p>
                 </div>
-              </TabsContent>
+              </div>
             </div>
-          </Tabs>
+          </fieldset>
         </figure>
       </section>
 

@@ -1,7 +1,8 @@
 import { PropsWithChildren } from 'react';
 import Link from 'next/link';
 import { SiteHeaderNav } from '@/components/features/site/site-header-nav';
-import { LanguageSwitcher } from '@/components/common/locale-switcher';
+import { SiteLanguageSelect } from '@/components/features/site/site-language-select';
+import { isLocaleSwitcherEnabled } from '@/i18n/config';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Logo } from '@/components/ui/icons';
 import { getT } from '@/i18n/server';
@@ -13,6 +14,7 @@ import { getT } from '@/i18n/server';
 export default async function SiteLayout({ children }: PropsWithChildren) {
   const t = await getT('site');
   const legal = await getT('legal');
+  const common = await getT('common');
 
   return (
     <div className="flex min-h-screen flex-col bg-bg-canvas">
@@ -45,7 +47,7 @@ export default async function SiteLayout({ children }: PropsWithChildren) {
 
           {/* Right side actions */}
           <div className="flex items-center gap-2">
-            <LanguageSwitcher />
+            {isLocaleSwitcherEnabled && <SiteLanguageSelect label={common('toggleLanguage')} />}
             <ThemeToggle />
             <SiteHeaderNav />
           </div>
