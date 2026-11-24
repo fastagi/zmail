@@ -317,7 +317,7 @@ func TestOutlookAuthURL(t *testing.T) {
 			want := map[string]string{
 				"client_id": "client-1", "response_type": "code", "redirect_uri": "https://app.example/callback",
 				"response_mode": "query", "state": "state-1", "code_challenge": "challenge-1", "code_challenge_method": "S256",
-				"scope": "offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read openid email",
+				"scope": "offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read openid email",
 			}
 			for key, value := range want {
 				if got := parsed.Query().Get(key); got != value {

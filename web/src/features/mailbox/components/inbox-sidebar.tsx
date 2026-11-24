@@ -437,9 +437,9 @@ export function InboxSidebar({
             rail && 'hidden lg:block'
           )}
         >
-          <p className="text-xs font-medium text-text-main">Personal Mailboxes</p>
+          <p className="text-xs font-medium text-text-main">{t('external.sidebar.personalTitle')}</p>
           <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
-            Connect Gmail, Outlook, iCloud, QQ, 163, or any IMAP mailbox in one click.
+            {t('external.sidebar.personalDescription')}
           </p>
           <Button
             type="button"
@@ -448,7 +448,7 @@ export function InboxSidebar({
             className="mt-2.5 h-7 w-full text-xs"
             onClick={() => external.onAdd?.()}
           >
-            Connect personal email
+            {t('external.sidebar.personalConnect')}
           </Button>
         </div>
       ) : null}

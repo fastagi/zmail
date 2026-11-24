@@ -27,9 +27,9 @@ const (
 	gmailTokenEndpoint  = "https://oauth2.googleapis.com/token"
 	gmailAPIBase        = "https://gmail.googleapis.com/gmail/v1"
 	gmailRevokeEndpoint = "https://oauth2.googleapis.com/revoke"
-	// gmailScope reads mail and labels and nothing else; openid and email let the consent screen
-	// name the account.
-	gmailScope = "https://www.googleapis.com/auth/gmail.readonly openid email"
+	// gmailScope reads mail/labels and sends mail on the member's behalf; openid and email let the
+	// consent screen name the account.
+	gmailScope = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send openid email"
 
 	// gmailPageSize keeps one fetch bounded: at most this many messages are listed and read.
 	gmailPageSize = 25
@@ -77,7 +77,7 @@ func init() {
 		source := newGmailMailSource(client)
 		connector := ExternalMailConnector{
 			ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2,
-			Capabilities: ExternalMailCapabilities{Read: true}, Source: source,
+			Capabilities: ExternalMailCapabilities{Read: true, Send: true}, Source: source,
 			Tenant: newGmailTenantSource(), RevokesGrant: true,
 		}
 		if cfg.Push.GmailConfigured() {

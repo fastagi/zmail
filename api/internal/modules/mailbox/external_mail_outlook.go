@@ -29,9 +29,9 @@ import (
 const (
 	outlookLoginBaseURL = "https://login.microsoftonline.com"
 	outlookGraphBaseURL = "https://graph.microsoft.com/v1.0"
-	// outlookScopes are the delegated permissions the member grants: read mail, read the profile
-	// for the account address, and a refresh token (offline_access).
-	outlookScopes = "offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read openid email"
+	// outlookScopes are the delegated permissions the member grants: read and send mail, read the
+	// profile for the account address, and a refresh token (offline_access).
+	outlookScopes = "offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read openid email"
 	// outlookPageSize is the Graph page size a delta request prefers; an oversized page is asked
 	// again with half the size, down to one message.
 	outlookPageSize = 25
@@ -80,7 +80,7 @@ func buildOutlookConnector(cfg config.ExternalMailConfig) (ExternalMailConnector
 	connector := ExternalMailConnector{
 		ID:           domain.ExternalMailProviderOutlook,
 		AuthKind:     ExternalMailAuthOAuth2,
-		Capabilities: ExternalMailCapabilities{Read: true},
+		Capabilities: ExternalMailCapabilities{Read: true, Send: true},
 		Source:       source,
 		Tenant:       newOutlookTenantSource(client),
 	}

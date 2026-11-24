@@ -28,6 +28,7 @@ import {
 } from '@/features/mailbox/external-mail-schemas';
 import {
   detectPersonalProvider,
+  PERSONAL_PROVIDER_PRESETS,
   type PersonalProviderPreset,
 } from '@/features/mailbox/components/personal-provider-picker';
 import type { ExternalPasswordInitialPreset } from '@/features/mailbox/components/external-password-form';
@@ -132,9 +133,8 @@ export function ExternalConnectDialog({
     detectedPreset !== null &&
     (oauthMatch(detectedPreset) !== null || passwordConnector !== null);
 
-  const handleQuickContinue = () => {
-    if (!detectedPreset) return;
-    const oauth = oauthMatch(detectedPreset);
+  const handleSelectPreset = (preset: PersonalProviderPreset, email?: string) => {
+    const oauth = oauthMatch(preset);
     if (oauth) {
       setPasswordInitialPreset(null);
       setChosen(oauth);
@@ -143,14 +143,19 @@ export function ExternalConnectDialog({
     }
     if (passwordConnector) {
       setPasswordInitialPreset({
-        email: quickEmail.trim(),
-        imapHost: detectedPreset.imapHost || undefined,
-        smtpHost: detectedPreset.smtpHost || undefined,
-        smtpPort: detectedPreset.smtpPort,
+        email: email?.trim() || undefined,
+        imapHost: preset.imapHost || undefined,
+        smtpHost: preset.smtpHost || undefined,
+        smtpPort: preset.smtpPort,
       });
       setChosen(passwordConnector);
       setFormShown(true);
     }
+  };
+
+  const handleQuickContinue = () => {
+    if (!detectedPreset) return;
+    handleSelectPreset(detectedPreset, quickEmail);
   };
 
   const reset = () => {
@@ -202,11 +207,12 @@ export function ExternalConnectDialog({
                   <div className="flex items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-text-main">
                       <Sparkles className="size-3.5 text-brand" aria-hidden="true" />
-                      Quick detect by email
+                      {t('external.connect.quickDetect')}
                     </span>
                     {detectedPreset ? (
                       <Badge variant="secondary" className="text-[11px]">
-                        {detectedPreset.label} · {oauthMatch(detectedPreset) ? 'OAuth 2.0' : 'IMAP / SMTP'}
+                        {detectedPreset.label} ·{' '}
+                        {oauthMatch(detectedPreset) ? 'OAuth 2.0' : 'IMAP / SMTP'}
                       </Badge>
                     ) : null}
                   </div>
@@ -221,8 +227,8 @@ export function ExternalConnectDialog({
                           handleQuickContinue();
                         }
                       }}
-                      placeholder="name@gmail.com, qq.com, icloud.com, 163.com..."
-                      aria-label="Quick detect email address"
+                      placeholder={t('external.connect.quickDetectPlaceholder')}
+                      aria-label={t('external.connect.quickDetect')}
                       className="h-8 text-xs"
                     />
                     <Button
@@ -234,6 +240,43 @@ export function ExternalConnectDialog({
                     >
                       <ArrowRight className="size-3.5" aria-hidden="true" />
                     </Button>
+                  </div>
+                </div>
+              ) : null}
+              {passwordConnector ? (
+                <div>
+                  <p className="mb-2 text-xs text-text-muted">
+                    {t('external.connect.popularProviders')}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {PERSONAL_PROVIDER_PRESETS.map(preset => {
+                      const hasOAuth = oauthMatch(preset) !== null;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handleSelectPreset(preset)}
+                          className="flex flex-col items-start gap-1 rounded-lg border border-border-main bg-bg-surface p-2 text-left transition-colors focus-ring hover:bg-nav-hover motion-reduce:transition-none"
+                        >
+                          <div className="flex w-full items-center justify-between gap-1">
+                            <span
+                              className={cn(
+                                'inline-flex size-6 items-center justify-center rounded-md text-[10px] font-bold',
+                                preset.accentClass
+                              )}
+                            >
+                              {preset.shortLabel}
+                            </span>
+                            <span className="truncate text-[10px] text-text-muted">
+                              {hasOAuth ? 'OAuth' : 'IMAP'}
+                            </span>
+                          </div>
+                          <span className="w-full truncate text-xs font-medium text-text-main">
+                            {preset.label}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}

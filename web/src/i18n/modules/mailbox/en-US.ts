@@ -2149,6 +2149,10 @@ const messages = {
       manage: 'Manage connected mailboxes',
       row: '{address}, {provider}, {status}',
       rowUnread: '{address}, {provider}, {status}, {count} unread',
+      personalTitle: 'Personal mailboxes',
+      personalDescription:
+        'Connect Gmail, Outlook, iCloud, QQ, 163, or any IMAP mailbox in one click.',
+      personalConnect: 'Connect personal email',
     },
     status: {
       active: 'Syncing',
@@ -2159,6 +2163,9 @@ const messages = {
       title: 'Add an external mailbox',
       description: 'Bring mail from an account you already use into your Zmail inbox.',
       choose: 'Choose where your mail is',
+      quickDetect: 'Quick detect by email',
+      quickDetectPlaceholder: 'name@gmail.com, qq.com, icloud.com, 163.com…',
+      popularProviders: 'Popular personal providers',
       imapHint:
         'QQ, 163, 126, Tencent Exmail, Aliyun, iCloud, and other mail you sign in to with an app password',
       comingSoon: 'Coming soon',

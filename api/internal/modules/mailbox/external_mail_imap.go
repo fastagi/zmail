@@ -695,7 +695,7 @@ func (s *imapSource) open(ctx context.Context, credentials imapCredentials) (*im
 		session.close()
 		return nil, fmt.Errorf("%w: server refused the connection", ErrExternalMailServerUnreachable)
 	}
-	if err := session.login(credentials.Username, credentials.Password); err != nil {
+	if err := session.authenticateAndIdentify(credentials.Username, credentials.Password); err != nil {
 		session.close()
 		return nil, err
 	}
