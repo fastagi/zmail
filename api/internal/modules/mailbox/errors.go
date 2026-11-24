@@ -3,6 +3,8 @@ package mailbox
 import (
 	"errors"
 	"fmt"
+
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // Domain errors owned by the mailbox starter.
@@ -72,14 +74,14 @@ var (
 	// ErrMailTemplateKindMismatch means a send named a template of the wrong kind, such as a
 	// transactional template in a mailbox send or a broadcast.
 	ErrMailTemplateKindMismatch  = errors.New("mail template kind does not fit this send")
-	ErrMailContactNotFound       = errors.New("mail contact not found")
-	ErrMailContactExists         = errors.New("mail contact already exists")
-	ErrMailContactInvalid        = errors.New("mail contact is invalid")
-	ErrMailContactLimitReached   = errors.New("mail contact limit reached")
-	ErrMailContactListNotFound   = errors.New("mail contact list not found")
-	ErrMailContactListNameTaken  = errors.New("mail contact list name is already taken")
-	ErrMailContactListLimit      = errors.New("mail contact list limit reached")
-	ErrMailContactImportInvalid  = errors.New("mail contact import is invalid")
+	ErrMailContactNotFound      = domain.ErrMailContactNotFound
+	ErrMailContactExists        = domain.ErrMailContactExists
+	ErrMailContactInvalid       = domain.ErrMailContactInvalid
+	ErrMailContactLimitReached  = domain.ErrMailContactLimitReached
+	ErrMailContactListNotFound  = domain.ErrMailContactListNotFound
+	ErrMailContactListNameTaken = domain.ErrMailContactListNameTaken
+	ErrMailContactListLimit     = domain.ErrMailContactListLimit
+	ErrMailContactImportInvalid = domain.ErrMailContactImportInvalid
 	ErrMailBroadcastNotFound     = errors.New("mail broadcast not found")
 	ErrMailBroadcastInvalid      = errors.New("mail broadcast is invalid")
 	ErrMailBroadcastNotEditable  = errors.New("mail broadcast cannot be changed in its current state")

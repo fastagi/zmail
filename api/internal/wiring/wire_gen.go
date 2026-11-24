@@ -24,6 +24,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/modules/operator"
 	"github.com/fastagi/zmail/api/internal/modules/organization"
 	"github.com/fastagi/zmail/api/internal/modules/permission"
+	"github.com/fastagi/zmail/api/internal/modules/roster"
 	"github.com/fastagi/zmail/api/internal/modules/setting"
 	"github.com/fastagi/zmail/api/internal/modules/usage"
 	"github.com/fastagi/zmail/api/internal/modules/user"
@@ -59,6 +60,7 @@ func InitApplication() (*app.Application, error) {
 	mailboxRepository := mailbox.NewRepository(db)
 	organizationRepository := organization.NewRepository(db)
 	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
+	rosterRepository := roster.NewRepository(db)
 	domainProvider := mailtransport.NewDomainProvider(configConfig)
 	transport := mailtransport.New(configConfig)
 	catalog, err := mailbox.NewWebhookCatalog()
@@ -93,7 +95,7 @@ func InitApplication() (*app.Application, error) {
 	authAbuseGuard := user.NewAuthAbuseGuard(configConfig, stores)
 	userService := user.ProvideService(userRepository, userRepository, sessionService, eventBus, userMailer, accountDeletionPolicy, authAbuseGuard, configConfig)
 	mailEventPublisher := mailbox.NewMailEventPublisher(eventBus)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService, mailEventPublisher)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, rosterRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService, mailEventPublisher)
 	apikeyService := apikey.ProvideService(apikeyRepository, mailboxService)
 	apikeyHandler := apikey.NewHandler(apikeyService)
 	userHandler := user.NewHandler(userService, userService, userService, sessionService, userMailer, authAbuseGuard, userService)
@@ -149,6 +151,8 @@ func InitApplication() (*app.Application, error) {
 		MailMetrics:   operatorMetricsHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, configConfig, surfaces)
+	rosterService := roster.NewService(rosterRepository)
+	rosterHandler := roster.NewHandler(rosterService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -162,6 +166,7 @@ func InitApplication() (*app.Application, error) {
 		Usage:        usageHandler,
 		Webhook:      webhookHandler,
 		Operator:     handler2,
+		Roster:       rosterHandler,
 		Mailbox:      mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(configConfig, migrator, handlers)
@@ -233,6 +238,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	mailboxRepository := mailbox.NewRepository(db)
 	organizationRepository := organization.NewRepository(db)
 	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
+	rosterRepository := roster.NewRepository(db)
 	domainProvider := mailtransport.NewDomainProvider(cfg)
 	transport := mailtransport.New(cfg)
 	catalog, err := mailbox.NewWebhookCatalog()
@@ -267,7 +273,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	authAbuseGuard := user.NewAuthAbuseGuard(cfg, stores)
 	userService := user.ProvideService(userRepository, userRepository, sessionService, eventBus, userMailer, accountDeletionPolicy, authAbuseGuard, cfg)
 	mailEventPublisher := mailbox.NewMailEventPublisher(eventBus)
-	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService, mailEventPublisher)
+	mailboxService := mailbox.ProvideService(mailboxRepository, membershipDirectory, mailboxRepository, rosterRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory, broadcastNoticeSender, organizationService, notificationService, userService, mailEventPublisher)
 	apikeyService := apikey.ProvideService(apikeyRepository, mailboxService)
 	apikeyHandler := apikey.NewHandler(apikeyService)
 	userHandler := user.NewHandler(userService, userService, userService, sessionService, userMailer, authAbuseGuard, userService)
@@ -323,6 +329,8 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		MailMetrics:   operatorMetricsHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, cfg, surfaces)
+	rosterService := roster.NewService(rosterRepository)
+	rosterHandler := roster.NewHandler(rosterService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -336,6 +344,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		Usage:        usageHandler,
 		Webhook:      webhookHandler,
 		Operator:     handler2,
+		Roster:       rosterHandler,
 		Mailbox:      mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(cfg, migrator, handlers)

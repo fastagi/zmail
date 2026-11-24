@@ -98,17 +98,6 @@ var featureGatedRoutes = map[domain.MemberFeature][]featureRoute{
 		{http.MethodPost, "/mail-broadcasts/1/resumptions", ""},
 		{http.MethodGet, "/mail-broadcasts/1/recipients", ""},
 	},
-	domain.MemberFeatureContacts: {
-		{http.MethodGet, "/mail-contacts", ""},
-		{http.MethodPost, "/mail-contacts", `{}`},
-		{http.MethodGet, "/mail-contacts/1", ""},
-		{http.MethodPut, "/mail-contacts/1", `{}`},
-		{http.MethodDelete, "/mail-contacts/1", ""},
-		{http.MethodPost, "/mail-contact-imports", ""},
-		{http.MethodPost, "/mail-contact-lists", `{}`},
-		{http.MethodPut, "/mail-contact-lists/1", `{}`},
-		{http.MethodDelete, "/mail-contact-lists/1", ""},
-	},
 	domain.MemberFeatureTemplates: {
 		{http.MethodPost, "/mail-templates", `{}`},
 		{http.MethodPut, "/mail-templates/1", `{}`},
@@ -203,7 +192,6 @@ func TestBroadcastGrantReadsTemplatesAndListNames(t *testing.T) {
 		{http.MethodGet, "/mail-templates", ""},
 		{http.MethodGet, "/mail-templates/1", ""},
 		{http.MethodPost, "/mail-template-previews", `{}`},
-		{http.MethodGet, "/mail-contact-lists", ""},
 	}
 	for _, route := range reads {
 		recorder, body := f.do(route.method, route.path, route.body)

@@ -20,8 +20,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		// A developer writes transactional templates inside the grant's sending domains; the
 		// service decides which kind and sender each caller may write.
 		broadcasts := requireFeature(domain.MemberFeatureBroadcasts)
-		contacts := requireFeature(domain.MemberFeatureContacts)
-		contactLists := requireFeature(domain.MemberFeatureContacts, domain.MemberFeatureBroadcasts)
 		templates := requireFeature(domain.MemberFeatureTemplates)
 		templateWrites := requireFeature(domain.MemberFeatureTemplates, domain.MemberFeatureDeveloper)
 		templateReads := requireFeature(
@@ -160,17 +158,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_broadcasts.resumptions.store").WhereNumber("broadcast_id").Middleware(broadcasts)
 		auth.GET("/mail-broadcasts/:broadcast_id/recipients", h.ListBroadcastRecipients).
 			Name("mail_broadcasts.recipients.index").WhereNumber("broadcast_id").Middleware(broadcasts)
-
-		auth.GET("/mail-contacts", h.ListContacts).Name("mail_contacts.index").Middleware(contacts)
-		auth.POST("/mail-contacts", h.CreateContact).Name("mail_contacts.store").Middleware(contacts)
-		auth.GET("/mail-contacts/:contact_id", h.GetContact).Name("mail_contacts.show").WhereNumber("contact_id").Middleware(contacts)
-		auth.PUT("/mail-contacts/:contact_id", h.UpdateContact).Name("mail_contacts.update").WhereNumber("contact_id").Middleware(contacts)
-		auth.DELETE("/mail-contacts/:contact_id", h.DeleteContact).Name("mail_contacts.destroy").WhereNumber("contact_id").Middleware(contacts)
-		auth.POST("/mail-contact-imports", h.ImportContacts).Name("mail_contact_imports.store").Middleware(contacts)
-		auth.GET("/mail-contact-lists", h.ListContactLists).Name("mail_contact_lists.index").Middleware(contactLists)
-		auth.POST("/mail-contact-lists", h.CreateContactList).Name("mail_contact_lists.store").Middleware(contacts)
-		auth.PUT("/mail-contact-lists/:list_id", h.RenameContactList).Name("mail_contact_lists.update").WhereNumber("list_id").Middleware(contacts)
-		auth.DELETE("/mail-contact-lists/:list_id", h.DeleteContactList).Name("mail_contact_lists.destroy").WhereNumber("list_id").Middleware(contacts)
 
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
