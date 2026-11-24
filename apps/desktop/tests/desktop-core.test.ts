@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   KeychainStore,
   KeychainUnavailableError,
@@ -263,5 +264,62 @@ describe('Electron main security & deep-link helpers', () => {
     assert.equal(isAllowedExternalOAuthUrl('http://insecure.example/oauth'), false);
     assert.equal(isAllowedExternalOAuthUrl('javascript:alert(1)'), false);
     assert.equal(isAllowedExternalOAuthUrl('file:///etc/passwd'), false);
+  });
+});
+
+function walkDesktopFiles(dir: string): string[] {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const results: string[] = [];
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkDesktopFiles(full));
+    } else if (/\.(ts|tsx|css)$/.test(entry.name)) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+describe('Shared @zmail/mail-ui renderer integration & file-size guardrails', () => {
+  const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+  it('wires @zmail/mail-ui in vite.config.ts, tsconfig.json, and App.tsx', () => {
+    const viteConfig = fs.readFileSync(path.join(desktopRoot, 'vite.config.ts'), 'utf8');
+    const tsConfig = fs.readFileSync(path.join(desktopRoot, 'tsconfig.json'), 'utf8');
+    const appSource = fs.readFileSync(path.join(desktopRoot, 'src/renderer/App.tsx'), 'utf8');
+
+    assert.ok(viteConfig.includes("'@zmail/mail-ui'"), 'vite.config.ts must alias @zmail/mail-ui');
+    assert.ok(viteConfig.includes('../../packages/mail-ui/src/index.ts'));
+    assert.ok(tsConfig.includes('"@zmail/mail-ui"'), 'tsconfig.json must map @zmail/mail-ui');
+    assert.ok(tsConfig.includes('../../packages/mail-ui/src/index.ts'));
+
+    assert.match(appSource, /from\s+['"]@zmail\/mail-ui['"]/);
+    for (const symbol of [
+      'MailShell',
+      'detectProviderFromEmail',
+      'MAIL_UI_PROVIDER_PRESETS',
+      'resolveReplySenderAccount',
+      'buildReplyPayload',
+      'searchLocal',
+      'setBadgeCount',
+    ]) {
+      assert.ok(appSource.includes(symbol), `App.tsx must use ${symbol}`);
+    }
+  });
+
+  it('keeps every file under apps/desktop/src and apps/desktop/tests under 400 lines', () => {
+    const files = [
+      ...walkDesktopFiles(path.join(desktopRoot, 'src')),
+      ...walkDesktopFiles(path.join(desktopRoot, 'tests')),
+    ];
+    assert.ok(files.length > 0);
+    for (const filePath of files) {
+      const lineCount = fs.readFileSync(filePath, 'utf8').split('\n').length;
+      assert.ok(
+        lineCount <= 400,
+        `${path.relative(desktopRoot, filePath)} has ${lineCount} lines (max 400)`
+      );
+    }
   });
 });

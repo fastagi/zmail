@@ -38,6 +38,9 @@ const zmailDesktopBridge: ZmailDesktopBridge = {
   searchMessages: (query: LocalSearchQuery) =>
     ipcRenderer.invoke(IPC_CHANNELS.STORE_SEARCH_MESSAGES, query),
 
+  searchLocal: (query: LocalSearchQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STORE_SEARCH_MESSAGES, query),
+
   listMessages: (query?: ListMessagesQuery) =>
     ipcRenderer.invoke(IPC_CHANNELS.STORE_LIST_MESSAGES, query),
 

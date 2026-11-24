@@ -12,12 +12,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@shared': path.resolve(rootDir, 'src/shared'),
+      '@zmail/mail-ui': path.resolve(rootDir, '../../packages/mail-ui/src/index.ts'),
     },
   },
   server: {
     host: '127.0.0.1',
     port: 5174,
     strictPort: true,
+    fs: {
+      allow: [rootDir, path.resolve(rootDir, '../../packages/mail-ui')],
+    },
   },
   build: {
     outDir: path.resolve(rootDir, 'dist/renderer'),

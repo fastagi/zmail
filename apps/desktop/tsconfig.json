@@ -5,7 +5,11 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"],
+      "@zmail/mail-ui": ["../../packages/mail-ui/src/index.ts"]
+    },
     "outDir": "dist",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,

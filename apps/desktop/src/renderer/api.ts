@@ -5,6 +5,7 @@ export interface DesktopAccountConfig {
   email: string;
   displayName: string;
   workspace: 'personal' | 'work';
+  providerId?: string;
   apiBaseUrl: string;
   unreadCount: number;
 }

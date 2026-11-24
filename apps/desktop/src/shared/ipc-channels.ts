@@ -143,6 +143,7 @@ export interface ZmailDesktopBridge {
   upsertMessages(messages: CachedMailMessage[]): Promise<{ count: number }>;
   deleteMessage(request: DeleteMessageRequest): Promise<{ deleted: boolean }>;
   searchMessages(query: LocalSearchQuery): Promise<LocalSearchResult>;
+  searchLocal(query: LocalSearchQuery): Promise<LocalSearchResult>;
   listMessages(query?: ListMessagesQuery): Promise<CachedMailMessage[]>;
   getStoreStats(): Promise<LocalStoreStats>;
 
