@@ -13,9 +13,6 @@ import (
 func newTriageFixture(t *testing.T) *accessFixture {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&MailTriagePO{}, &MailTriageSettingsPO{}); err != nil {
-		t.Fatalf("migrate triage tables: %v", err)
-	}
 	createOwner(t, db, accessOrg)
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()

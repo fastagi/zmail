@@ -135,9 +135,12 @@ if [ "$KIND" = "go" ]; then
     else
         echo "  ⚠️  golangci-lint not installed, skipped"
     fi
-else
+elif [ "$TIER" -eq 0 ]; then
     run_step "pnpm type-check" "${PNPM[@]}" type-check
     run_step "pnpm lint" "${PNPM[@]}" lint
+else
+    # The browser checks are independent, so tier 1 runs them together; the slowest sets the pace.
+    echo "  (type-check, lint, and test run in parallel; results follow tier 1)"
 fi
 
 if [ "$TIER" -eq 0 ]; then
@@ -157,7 +160,26 @@ if [ "$KIND" = "go" ]; then
     # shellcheck disable=SC2086 # GO_TEST_FLAGS is a list of flags, split on spaces.
     run_step "go test ${GO_TEST_FLAGS:-}${GO_TEST_FLAGS:+ }${SCOPE[*]}" go test ${GO_TEST_FLAGS:-} "${SCOPE[@]}"
 else
-    run_step "pnpm test" "${PNPM[@]}" test -- --run
+    PARALLEL_DIR="$LOG_DIR/parallel"
+    mkdir -p "$PARALLEL_DIR"
+    pids=()
+    index=0
+    for check in type-check lint test; do
+        index=$((index + 1))
+        COMMAND_INDEX=$((COMMAND_INDEX + 1))
+        if [ "$check" = test ]; then
+            ( run_step "pnpm test" "${PNPM[@]}" test -- --run; exit $FAILED ) >"$PARALLEL_DIR/$index.out" 2>&1 &
+        else
+            ( run_step "pnpm $check" "${PNPM[@]}" "$check"; exit $FAILED ) >"$PARALLEL_DIR/$index.out" 2>&1 &
+        fi
+        pids+=("$!")
+    done
+    index=0
+    for pid in "${pids[@]}"; do
+        index=$((index + 1))
+        wait "$pid" || FAILED=1
+        cat "$PARALLEL_DIR/$index.out"
+    done
 fi
 
 if [ "$TIER" -eq 1 ]; then

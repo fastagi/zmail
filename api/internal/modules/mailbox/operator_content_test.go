@@ -42,7 +42,6 @@ func newContentFixture(t *testing.T) *contentFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	base := newMetricsFixture(t)
-	require.NoError(t, base.repo.db.AutoMigrate(&MailContentAccessAuditPO{}))
 	broadcast := &MailBroadcastPO{OrganizationID: 1, Name: "Launch", MailboxID: base.north.ID, TemplateID: 1, ListID: 1, Status: "sent", CreatedBy: 1}
 	require.NoError(t, base.repo.db.Create(broadcast).Error)
 	f := &contentFixture{metricsFixture: base, broadcast: broadcast.ID}

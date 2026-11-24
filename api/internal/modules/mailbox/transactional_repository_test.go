@@ -12,10 +12,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/fastagi/zmail/api/database/migrations"
 	"github.com/fastagi/zmail/api/internal/domain"
-	"github.com/fastagi/zmail/api/internal/infra/migration"
-	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 // txBase is the fixed instant the transactional tests measure from.
@@ -25,12 +22,7 @@ var txBase = time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 // check constraints and partial indexes are the production ones, and adds organizations 10 and 11.
 func openTransactionalRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
-	db := testplatform.OpenPostgres(t, &gorm.Config{TranslateError: true})
-	migrator := migration.NewMigrator(migration.NewDatabaseRepository(db, "migrations"), db, nil)
-	migrator.RegisterMany(migrations.All())
-	if _, err := migrator.Run(migration.MigratorOptions{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := openMigratedPostgres(t)
 	for _, statement := range []string{
 		`INSERT INTO users (id, username, email, password, created_at, updated_at) VALUES (901, 'tx', 'tx@example.com', 'x', now(), now())`,
 		`INSERT INTO organizations (id, name, slug, created_by, created_at, updated_at) VALUES (10, 'Acme', 'acme', 901, now(), now())`,

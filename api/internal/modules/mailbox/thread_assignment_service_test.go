@@ -12,9 +12,6 @@ import (
 func newAssignmentFixture(t *testing.T) *accessFixture {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&MailThreadAssignmentPO{}); err != nil {
-		t.Fatalf("migrate assignments: %v", err)
-	}
 	createOwner(t, db, accessOrg)
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()

@@ -27,31 +27,8 @@ import (
 func newPushFixture(t *testing.T) *externalFixture {
 	t.Helper()
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
-	migratePushTable(t, f)
 	f.service.settings.ExternalMail.Push = config.ExternalMailPushConfig{Enabled: true}
 	return f
-}
-
-// migratePushTable creates the subscriptions table with the checks of the migration
-// 2026_12_15_090000_add_external_mail_push, so every write the tests make is held to them.
-func migratePushTable(t *testing.T, f *externalFixture) {
-	t.Helper()
-	db := f.repo.(*repository).db
-	if err := db.AutoMigrate(&ExternalMailSubscriptionPO{}); err != nil {
-		t.Fatalf("migrate subscriptions: %v", err)
-	}
-	for _, statement := range []string{
-		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_status CHECK (status IN ('pending','active','unsupported','stopped'))`,
-		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_active CHECK (status <> 'active' OR (lookup_key <> '' AND expires_at IS NOT NULL))`,
-		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_stopped CHECK (status <> 'stopped' OR (lookup_key = '' AND secret_hash = '' AND pending_at IS NULL))`,
-		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_secret CHECK (secret_hash = '' OR secret_hash ~ '^[0-9a-f]{64}$')`,
-		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_failures CHECK (consecutive_failures >= 0)`,
-		`ALTER TABLE external_mail_sync_runs ADD CONSTRAINT chk_trigger CHECK (triggered_by IN ('poll','push'))`,
-	} {
-		if err := db.Exec(statement).Error; err != nil {
-			t.Fatalf("add check: %v", err)
-		}
-	}
 }
 
 // fakeNotificationBody is a notification of the subscription with the given secret.
@@ -597,7 +574,6 @@ func TestExternalMailPushStopsWithItsConnection(t *testing.T) {
 // tenant minted for that mailbox only, and stops when the tenant is revoked.
 func TestExternalMailPushTenantMailbox(t *testing.T) {
 	tf := newTenantFixture(t)
-	migratePushTable(t, tf.externalFixture)
 	tf.service.settings.ExternalMail.Push = config.ExternalMailPushConfig{Enabled: true}
 	assigned := tf.mustAssign(t, personalRow("alice", accessB))[0]
 	tf.sync(t)
@@ -645,9 +621,6 @@ func TestExternalMailPushKeepsTheReceiveFloor(t *testing.T) {
 // the poll stays two minutes, and the connection list shows no subscription.
 func TestExternalMailPushSwitchedOff(t *testing.T) {
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
-	if err := f.repo.(*repository).db.AutoMigrate(&ExternalMailSubscriptionPO{}); err != nil {
-		t.Fatal(err)
-	}
 	now := f.service.now().UTC()
 	f.sync(t)
 	if f.source.Subscribes(externalTestToken) != 0 || f.count(t, `SELECT count(*) FROM external_mail_subscriptions`) != 0 {

@@ -10,9 +10,6 @@ import (
 
 func TestSharedThreadNotesNeedSendAndStayWithTheirAuthor(t *testing.T) {
 	f := newAssignmentFixture(t)
-	if err := f.service.notes.(*repository).db.AutoMigrate(&MailThreadNotePO{}); err != nil {
-		t.Fatalf("migrate notes: %v", err)
-	}
 	ctx := context.Background()
 	thread := f.teamMessage.ThreadID
 

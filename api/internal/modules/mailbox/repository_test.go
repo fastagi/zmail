@@ -26,13 +26,51 @@ type mailboxOwnerPO struct {
 
 func (mailboxOwnerPO) TableName() string { return "organizations" }
 
+// repositoryModels are the tables openRepository creates with AutoMigrate.
+var repositoryModels = []any{
+	&mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailDeletedSendPO{}, &MailAttachmentPO{}, &MailMessageSourcePO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
+	// Triage reads a connected mailbox's connection status.
+	&ExternalMailConnectionPO{}, &ExternalMailAddressRecordPO{},
+	&MailAgentGrantPO{}, &MailAgentEventPO{}, &MailAgentAuditPO{}, &MailAgentDraftPO{}, &apikey.APIKeyPO{},
+	// The tables fixtures used to add on top: with every table here the pooled schema never
+	// changes shape, so each test reuses it instead of preparing its own.
+	&MailDomainPO{}, &MailZonePO{}, &MailTriagePO{}, &MailTriageSettingsPO{},
+	&ExternalMailProviderReleasePO{}, &ExternalMailAuthorizationPO{}, &ExternalMailSyncRunPO{},
+	&ExternalMailTenantPO{}, &ExternalMailSubscriptionPO{},
+	&MailThreadAssignmentPO{}, &MailThreadNotePO{}, &MailDraftPO{}, &MailSignaturePO{},
+	&MailContentAccessAuditPO{}, &PlatformAccountPO{}, &PlatformAccountEventPO{},
+}
+
+// repositoryConstraints are the production migrations' checks and foreign keys AutoMigrate does
+// not create, so every test's writes meet them as in production.
+var repositoryConstraints = []string{
+	// 2026_12_15_090000_add_external_mail_push
+	`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_status CHECK (status IN ('pending','active','unsupported','stopped'))`,
+	`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_active CHECK (status <> 'active' OR (lookup_key <> '' AND expires_at IS NOT NULL))`,
+	`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_stopped CHECK (status <> 'stopped' OR (lookup_key = '' AND secret_hash = '' AND pending_at IS NULL))`,
+	`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_secret CHECK (secret_hash = '' OR secret_hash ~ '^[0-9a-f]{64}$')`,
+	`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_failures CHECK (consecutive_failures >= 0)`,
+	`ALTER TABLE external_mail_sync_runs ADD CONSTRAINT chk_trigger CHECK (triggered_by IN ('poll','push'))`,
+	`ALTER TABLE mailboxes ADD CONSTRAINT fk_mailboxes_role
+		FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL`,
+	`ALTER TABLE mail_message_reads ADD CONSTRAINT mail_message_reads_message_fk
+		FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE`,
+}
+
+// openRepository lends a pooled schema with the repository's tables and constraints.
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
-	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailDeletedSendPO{}, &MailAttachmentPO{}, &MailMessageSourcePO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
-		// Triage reads a connected mailbox's connection status.
-		&ExternalMailConnectionPO{}, &ExternalMailAddressRecordPO{},
-		&MailAgentGrantPO{}, &MailAgentEventPO{}, &MailAgentAuditPO{}, &MailAgentDraftPO{}, &apikey.APIKeyPO{})
+	db := testplatform.OpenPooledPostgres(t, &gorm.Config{TranslateError: true}, "repository", func(db *gorm.DB) error {
+		if err := db.AutoMigrate(repositoryModels...); err != nil {
+			return err
+		}
+		for _, statement := range repositoryConstraints {
+			if err := db.Exec(statement).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	return NewRepository(db), db
 }
 
@@ -1096,11 +1134,6 @@ func TestRepositorySetMessageReadOnAMessageDeletedAtInsert(t *testing.T) {
 	repo, db := openRepository(t)
 	ctx := context.Background()
 	createOwner(t, db, 1)
-	// The schema migration's foreign key; AutoMigrate does not create it.
-	if err := db.Exec(`ALTER TABLE mail_message_reads ADD CONSTRAINT mail_message_reads_message_fk
-		FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE`).Error; err != nil {
-		t.Fatalf("add foreign key: %v", err)
-	}
 	mailbox := createMailbox(t, repo, "hello@mail.example")
 	message := &domain.MailMessage{
 		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,

@@ -24,7 +24,6 @@ type ledgerFixture struct {
 func newLedgerFixture(t *testing.T) *ledgerFixture {
 	t.Helper()
 	f := &ledgerFixture{accessFixture: newPostgresAccessFixture(t)}
-	migrateLedger(t, f.inboxRepo().db)
 	f.service.recordAudit = func(_ context.Context, change auditstarter.Change) {
 		f.audited = append(f.audited, change)
 	}

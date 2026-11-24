@@ -42,12 +42,24 @@ var benchScene struct {
 }
 
 func TestMain(m *testing.M) {
-	code := m.Run()
+	code := testplatform.RunWithPostgresPool(m)
 	dropBenchScene()
 	dropInboxScene()
 	dropDirectoryScene()
 	dropV2Scene()
 	os.Exit(code)
+}
+
+// openMigratedPostgres lends a schema the real migrations built, so check constraints, partial
+// indexes, and foreign keys are the production ones. The package pools these schemas.
+func openMigratedPostgres(t *testing.T) *gorm.DB {
+	t.Helper()
+	return testplatform.OpenPooledPostgres(t, &gorm.Config{TranslateError: true}, "migrations.All", func(db *gorm.DB) error {
+		migrator := migration.NewMigrator(migration.NewDatabaseRepository(db, "migrations"), db, nil)
+		migrator.RegisterMany(migrations.All())
+		_, err := migrator.Run(migration.MigratorOptions{})
+		return err
+	})
 }
 
 func dropBenchScene() {

@@ -15,11 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/fastagi/zmail/api/database/migrations"
 	"github.com/fastagi/zmail/api/internal/domain"
-	"github.com/fastagi/zmail/api/internal/infra/migration"
 	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
-	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
 
@@ -60,12 +57,7 @@ type appPasswordFixture struct {
 // with owner 901, members 902 and 903; organization 11 where 902 is also a member.
 func newAppPasswordFixture(t *testing.T) *appPasswordFixture {
 	t.Helper()
-	db := testplatform.OpenPostgres(t, &gorm.Config{TranslateError: true})
-	migrator := migration.NewMigrator(migration.NewDatabaseRepository(db, "migrations"), db, nil)
-	migrator.RegisterMany(migrations.All())
-	if _, err := migrator.Run(migration.MigratorOptions{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := openMigratedPostgres(t)
 	for _, statement := range []string{
 		`INSERT INTO users (id, username, email, password, created_at, updated_at) VALUES
 			(901, 'owner', 'owner@example.com', 'x', now(), now()),

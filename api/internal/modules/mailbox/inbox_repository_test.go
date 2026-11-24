@@ -749,9 +749,6 @@ func TestInboxAssignmentFilter(t *testing.T) {
 	mine := f.deliverAt(t, f.team, delivery{subject: "mine"}, minutes(1))
 	done := f.deliverAt(t, f.team, delivery{subject: "done"}, minutes(2))
 	untouched := f.deliverAt(t, f.team, delivery{subject: "untouched"}, minutes(3))
-	if err := f.inboxRepo().db.AutoMigrate(&MailThreadAssignmentPO{}); err != nil {
-		t.Fatalf("migrate assignments: %v", err)
-	}
 	viewer := f.c.UserID
 	for _, assignment := range []domain.MailThreadAssignment{
 		{MailboxID: f.team.ID, ThreadID: mine.ThreadID, AssigneeUserID: &viewer, Status: domain.MailThreadOpen},

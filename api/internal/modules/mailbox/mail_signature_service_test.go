@@ -14,9 +14,6 @@ import (
 func newSignatureFixture(t *testing.T) *accessFixture {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&MailSignaturePO{}); err != nil {
-		t.Fatalf("migrate signatures: %v", err)
-	}
 	createOwner(t, db, accessOrg)
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
