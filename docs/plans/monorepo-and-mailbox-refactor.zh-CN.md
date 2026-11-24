@@ -128,13 +128,13 @@ contracts/
 
 ### P1：后端 `mailbox` 巨石拆解
 - [x] **T1.1** 接口隔离（零破坏）：将 `mailbox.Service`（140 方法）拆为 7 个子接口（`CoreService`、`DomainService`、`BroadcastService`、`TransactionalService`、`ClientAccessService`、`RosterService`、`ExternalMailAllService`，加上既有的 `TriageService`、`AgentGrantService`），原 `Service` 退化为 0 直接方法的组合 Facade（已在护栏中锁定上限 `0`），20 个子域 Handler 全部切换为依赖窄接口并提供独立窄构造函数。
-- [ ] **T1.2** 逐个抽离独立子包（每完成一个独立验证并提交）：
+- [x] **T1.2** 逐个抽离独立子包（7/7 全部完成并验证）：
   1. [x] `triage/`（AI 分类模型、仓储与 Worker 已抽离至 `api/internal/modules/mailbox/triage`）
   2. [x] `agentgrant/`（Agent 授权模型与仓储已抽离至 `api/internal/modules/mailbox/agentgrant`）
   3. [x] `transactional/`（事务邮件脱敏、模型与仓储已抽离至 `api/internal/modules/mailbox/transactional`）
   4. [x] `broadcast/`（群发、联系人、模板与渲染引擎已抽离至 `api/internal/modules/mailbox/broadcast`）
   5. [x] `domainsetup/`（自定义域名、Zone 仓储与错误分类已抽离至 `api/internal/modules/mailbox/domainsetup`）
-  6. [ ] `externalmail/`
+  6. [x] `externalmail/`（外部邮箱连接、Push、释放、运维与 Tenant 仓储已抽离至 `api/internal/modules/mailbox/externalmail`）
   7. [x] `roster/`（花名册、目录、CSV 导出、欢迎信与平台账本已抽离至 `api/internal/modules/mailbox/roster`）
 - [ ] **T1.3** 收信副作用改为 `infra/events` 领域事件（`MailReceivedEvent`），切断 `core/` 对外围子包的硬引用。
 - [ ] **T1.4** 收拢 `api/internal/domain/mail/`，拆分 `contracts/MAILBOXES.md` 为 `contracts/mail/*.md` 并在 `openapi.yaml` 补齐子域 Tags。
@@ -142,8 +142,8 @@ contracts/
 
 ### P2：TS Monorepo 底座 + Web `mailbox` 拆解与目录归位
 - [ ] **T2.1** 根目录引入 `pnpm-workspace.yaml`（统一安全 `overrides`）与 `turbo.json`，建立 `packages/api-client`（按 Tag 多入口生成，消灭 `web` 与 `admin` 两份重复的 20,080 行 `openapi.ts`）。
-- [x] **T2.2** 将 6,502 行 `mailbox-route.ts` 拆分为 16 个 ≤ 729 行的子域路由模块 + 171 行 barrel（并从大文件遗留白名单中永久移除）。
-- [ ] **T2.3** 抽离 `packages/mail-core`（纯 TS Hooks、乐观更新、i18n、`MailTransport` 接口）与 `packages/mail-ui`（收件箱、安全 HTML 读信器、写信器、AI Triage），瘦身超过 1,000 行的巨型组件（已完成两大核心巨型组件拆解：`mail-broadcasts.tsx` 1,752→140 行、`inbox-workspace.tsx` 1,494→311 行，均已从大文件白名单永久移除）。
+- [x] **T2.2** 将 6,502 行 `mailbox-route.ts` 拆分为 16 个 ≤ 729 行的子域路由模块 + 171 行 barrel；将 3,088 行 `mock-mailbox-store.ts` 拆分为 9 个子域 Mock Store；将 `mailbox-service.ts`（1,570→17 行）与 `schemas.ts`（1,309→21 行）拆分为子域模块（全部从大文件遗留白名单永久移除）。
+- [ ] **T2.3** 抽离 `packages/mail-core`（纯 TS Hooks、乐观更新、i18n、`MailTransport` 接口）与 `packages/mail-ui`（收件箱、安全 HTML 读信器、写信器、AI Triage）。Web 端全部 6 个超 1,000 行巨型组件已完成拆解（`mail-broadcasts.tsx`、`inbox-workspace.tsx`、`mail-domains.tsx`、`mail-contacts.tsx`、`mail-templates.tsx`、`message-list.tsx` 均已降至 ≤ 311 行并永久移除出大文件白名单）。
 - [ ] **T2.4** 目录正式归位：将 `web/`、`admin/` 移入 `apps/web/`、`apps/admin/`，同步更新 `Makefile`、CI、治理脚本与 Docker 构建（接入 `turbo prune`）。
   - **验收**：`make check`（`governance` + `contract-check` + `api-check` + `web-check` + `admin-check`）全绿。
 
