@@ -44,6 +44,8 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(mailNotifier), new(*webhookNotifier)),
 	// Broadcast notices go to the notification center and, through the system mailer, by email.
 	NewBroadcastNoticeSender,
+	// Domain mail events decouple inbound delivery from downstream event subscribers.
+	NewMailEventPublisher,
 	ProvideService,
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,
@@ -73,12 +75,14 @@ func ProvideService(
 	inviter domain.OrganizationRosterInviter,
 	notifications domain.NotificationPublisher,
 	reverifier domain.CredentialReverifier,
+	mailEvents domain.MailEventPublisher,
 ) *service {
 	svc := NewService(repo, memberships, templates, contacts, broadcasts, organize, domains, zones, domainProvider,
 		transport, notifier, settings, transactional, limits, accounts, notices)
 	svc.inviter = inviter
 	svc.notifications = notifications
 	svc.reverifier = reverifier
+	svc.mailEvents = mailEvents
 	return svc
 }
 

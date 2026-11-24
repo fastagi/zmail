@@ -195,13 +195,13 @@ type service struct {
 	setupClaimHook func()
 	transport      mailtransport.Transport
 	notifier       mailNotifier
-	// notices tells the person who started a broadcast how it ended or why it stopped; nil sends
-	// no notices.
+	// notices tells the broadcast starter how it ended or stopped; nil sends no notices.
 	notices broadcastNoticeSender
-	// notifications publishes mail.received to the notification starter; nil, or a starter that
-	// does not run, publishes nothing.
+	// notifications publishes mail.received to the notification starter; nil publishes nothing.
 	notifications domain.NotificationPublisher
-	settings      Settings
+	// mailEvents publishes domain mail events to downstream subscribers; nil publishes nothing.
+	mailEvents domain.MailEventPublisher
+	settings   Settings
 	now           func() time.Time
 	// recordAudit enriches the request's audit entry; tests capture it.
 	recordAudit func(context.Context, auditstarter.Change)
