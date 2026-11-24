@@ -78,7 +78,7 @@ func (h *Handler) ImportMailboxes(c *gin.Context) {
 	for _, row := range request.Rows {
 		rows = append(rows, MailboxImportRow(row))
 	}
-	result, err := h.service.ImportMailboxes(c.Request.Context(), viewer, rows, *request.DryRun)
+	result, err := h.roster.ImportMailboxes(c.Request.Context(), viewer, rows, *request.DryRun)
 	if err != nil {
 		response.HandleError(c, "Failed to import mailboxes", err)
 		return

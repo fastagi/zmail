@@ -94,7 +94,7 @@ func (h *Handler) GetTriageSetting(c *gin.Context) {
 	if !ok {
 		return
 	}
-	setting, err := h.service.TriageSetting(c.Request.Context(), viewer)
+	setting, err := h.triage.TriageSetting(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to read the AI triage setting", err)
 		return
@@ -113,7 +113,7 @@ func (h *Handler) UpdateTriageSetting(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	setting, err := h.service.SaveTriageSetting(c.Request.Context(), viewer, TriageSettingInput{
+	setting, err := h.triage.SaveTriageSetting(c.Request.Context(), viewer, TriageSettingInput{
 		Enabled: *req.Enabled, DailyMessageCap: *req.DailyMessageCap, DraftEnabled: *req.DraftEnabled,
 	})
 	if err != nil {
@@ -134,7 +134,7 @@ func (h *Handler) SetMailboxTriageSetting(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	mailbox, err := h.service.SetMailboxTriage(c.Request.Context(), viewer, mailboxID, *req.Enabled)
+	mailbox, err := h.triage.SetMailboxTriage(c.Request.Context(), viewer, mailboxID, *req.Enabled)
 	if err != nil {
 		response.HandleError(c, "Failed to change the mailbox AI triage switch", err)
 		return
@@ -153,7 +153,7 @@ func (h *Handler) UpdateMessageTriage(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	triage, err := h.service.OverrideTriage(c.Request.Context(), viewer, mailboxID, messageID, TriageOverrideInput{
+	triage, err := h.triage.OverrideTriage(c.Request.Context(), viewer, mailboxID, messageID, TriageOverrideInput{
 		Category: domain.MailTriageCategory(req.Category), DueAt: req.DueAt,
 	})
 	if err != nil {
@@ -171,7 +171,7 @@ func (h *Handler) CreateReplyDraft(c *gin.Context) {
 	if !ok {
 		return
 	}
-	draft, err := h.service.DraftReply(c.Request.Context(), viewer, mailboxID, messageID)
+	draft, err := h.triage.DraftReply(c.Request.Context(), viewer, mailboxID, messageID)
 	if err != nil {
 		respondOrganizeError(c, "Failed to draft a reply", err)
 		return

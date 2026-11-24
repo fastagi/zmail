@@ -76,7 +76,7 @@ func (h *Handler) GetMemberWelcomeSetting(c *gin.Context) {
 	if !ok {
 		return
 	}
-	setting, err := h.service.MemberWelcomeSetting(c.Request.Context(), viewer)
+	setting, err := h.roster.MemberWelcomeSetting(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to read the welcome mail setting", err)
 		return
@@ -95,7 +95,7 @@ func (h *Handler) UpdateMemberWelcomeSetting(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	setting, err := h.service.UpdateMemberWelcomeSetting(c.Request.Context(), viewer, MemberWelcomeInput{
+	setting, err := h.roster.UpdateMemberWelcomeSetting(c.Request.Context(), viewer, MemberWelcomeInput{
 		Enabled: *req.Enabled, Language: MemberWelcomeLanguage(req.Language), Subject: req.Subject, Body: req.Body,
 	})
 	if err != nil {
@@ -116,7 +116,7 @@ func (h *Handler) PreviewMemberWelcome(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	preview, err := h.service.PreviewMemberWelcome(c.Request.Context(), viewer, MemberWelcomePreviewInput{
+	preview, err := h.roster.PreviewMemberWelcome(c.Request.Context(), viewer, MemberWelcomePreviewInput{
 		Language: MemberWelcomeLanguage(req.Language), Subject: req.Subject, Body: req.Body,
 	})
 	if err != nil {
@@ -162,7 +162,7 @@ func (h *Handler) ListMemberWelcomeMails(c *gin.Context) {
 	if !ok {
 		return
 	}
-	mails, err := h.service.ListMemberWelcomeMails(c.Request.Context(), viewer)
+	mails, err := h.roster.ListMemberWelcomeMails(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to list welcome mails", err)
 		return
@@ -185,7 +185,7 @@ func (h *Handler) ResendMemberWelcomeMail(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	mail, err := h.service.ResendMemberWelcome(c.Request.Context(), viewer, req.MailboxID)
+	mail, err := h.roster.ResendMemberWelcome(c.Request.Context(), viewer, req.MailboxID)
 	if err != nil {
 		var retry *RetryAfterError
 		if errors.As(err, &retry) {

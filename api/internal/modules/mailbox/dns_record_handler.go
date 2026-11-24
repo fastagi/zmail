@@ -74,7 +74,7 @@ func (h *Handler) ListMailDNSRecords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	records, err := h.service.ListMailDNSRecords(c.Request.Context(), organizationID, zoneID)
+	records, err := h.domains.ListMailDNSRecords(c.Request.Context(), organizationID, zoneID)
 	if err != nil {
 		response.HandleError(c, "Failed to list DNS records", err)
 		return
@@ -101,7 +101,7 @@ func (h *Handler) CreateMailDNSRecord(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	record, err := h.service.CreateMailDNSRecord(c.Request.Context(), organization.OrganizationID, zoneID, MailDNSRecordInput(req))
+	record, err := h.domains.CreateMailDNSRecord(c.Request.Context(), organization.OrganizationID, zoneID, MailDNSRecordInput(req))
 	if err != nil {
 		respondDNSRecordError(c, "Failed to create DNS record", err)
 		return
@@ -124,7 +124,7 @@ func (h *Handler) UpdateMailDNSRecord(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	record, err := h.service.UpdateMailDNSRecord(c.Request.Context(), organization.OrganizationID, zoneID, recordID, MailDNSRecordPatch(req))
+	record, err := h.domains.UpdateMailDNSRecord(c.Request.Context(), organization.OrganizationID, zoneID, recordID, MailDNSRecordPatch(req))
 	if err != nil {
 		respondDNSRecordError(c, "Failed to update DNS record", err)
 		return
@@ -143,7 +143,7 @@ func (h *Handler) DeleteMailDNSRecord(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteMailDNSRecord(c.Request.Context(), organization.OrganizationID, zoneID, recordID); err != nil {
+	if err := h.domains.DeleteMailDNSRecord(c.Request.Context(), organization.OrganizationID, zoneID, recordID); err != nil {
 		respondDNSRecordError(c, "Failed to delete DNS record", err)
 		return
 	}

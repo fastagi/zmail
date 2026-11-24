@@ -69,7 +69,7 @@ func (h *Handler) PreviewMailDomain(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	preview, err := h.service.PreviewMailDomain(c.Request.Context(), req.Name)
+	preview, err := h.domains.PreviewMailDomain(c.Request.Context(), req.Name)
 	if err != nil {
 		response.HandleError(c, "Failed to preview mail domain", err)
 		return
@@ -90,7 +90,7 @@ func (h *Handler) ListMailZones(c *gin.Context) {
 	if !ok {
 		return
 	}
-	zones, err := h.service.ListMailZones(c.Request.Context(), organizationID)
+	zones, err := h.domains.ListMailZones(c.Request.Context(), organizationID)
 	if err != nil {
 		response.HandleError(c, "Failed to list mail zones", err)
 		return
@@ -112,7 +112,7 @@ func (h *Handler) GetMailZone(c *gin.Context) {
 	if !ok {
 		return
 	}
-	zone, err := h.service.GetMailZone(c.Request.Context(), organizationID, id)
+	zone, err := h.domains.GetMailZone(c.Request.Context(), organizationID, id)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail zone", err)
 		return
@@ -132,7 +132,7 @@ func (h *Handler) DeleteMailZone(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteMailZone(c.Request.Context(), organization.OrganizationID, id); err != nil {
+	if err := h.domains.DeleteMailZone(c.Request.Context(), organization.OrganizationID, id); err != nil {
 		response.HandleError(c, "Failed to delete mail zone", err)
 		return
 	}
@@ -142,5 +142,5 @@ func (h *Handler) DeleteMailZone(c *gin.Context) {
 // EnableMailDomainReceiving makes a send-only domain receive through Zmail. Only owners and
 // admins may.
 func (h *Handler) EnableMailDomainReceiving(c *gin.Context) {
-	h.runDomainAction(c, "Failed to enable receiving on mail domain", h.service.EnableMailDomainReceiving)
+	h.runDomainAction(c, "Failed to enable receiving on mail domain", h.domains.EnableMailDomainReceiving)
 }

@@ -123,7 +123,7 @@ func (h *Handler) ListPlatformAccounts(c *gin.Context) {
 	}
 	page := pagination.FromContext(c)
 	filter.Page, filter.PerPage = page.GetPage(), page.GetPerPage()
-	accounts, total, err := h.service.ListPlatformAccounts(c.Request.Context(), viewer, filter)
+	accounts, total, err := h.roster.ListPlatformAccounts(c.Request.Context(), viewer, filter)
 	if err != nil {
 		response.HandleError(c, "Failed to list platform accounts", err)
 		return
@@ -164,7 +164,7 @@ func (h *Handler) CreatePlatformAccount(c *gin.Context) {
 	if !bindLedgerBody(c, &req) {
 		return
 	}
-	account, err := h.service.CreatePlatformAccount(c.Request.Context(), viewer, req.input())
+	account, err := h.roster.CreatePlatformAccount(c.Request.Context(), viewer, req.input())
 	if err != nil {
 		respondOrganizeError(c, "Failed to create platform account", err)
 		return
@@ -183,7 +183,7 @@ func (h *Handler) UpdatePlatformAccount(c *gin.Context) {
 	if !bindLedgerBody(c, &req) {
 		return
 	}
-	account, err := h.service.UpdatePlatformAccount(c.Request.Context(), viewer, accountID, req.input())
+	account, err := h.roster.UpdatePlatformAccount(c.Request.Context(), viewer, accountID, req.input())
 	if err != nil {
 		respondOrganizeError(c, "Failed to update platform account", err)
 		return
@@ -199,7 +199,7 @@ func (h *Handler) DeletePlatformAccount(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeletePlatformAccount(c.Request.Context(), viewer, accountID); err != nil {
+	if err := h.roster.DeletePlatformAccount(c.Request.Context(), viewer, accountID); err != nil {
 		response.HandleError(c, "Failed to delete platform account", err)
 		return
 	}
@@ -213,7 +213,7 @@ func (h *Handler) ListPlatformAccountEvents(c *gin.Context) {
 		return
 	}
 	page := pagination.FromContext(c)
-	events, total, err := h.service.ListPlatformAccountEvents(c.Request.Context(), viewer, accountID, page.GetPage(), page.GetPerPage())
+	events, total, err := h.roster.ListPlatformAccountEvents(c.Request.Context(), viewer, accountID, page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list platform account events", err)
 		return
@@ -235,7 +235,7 @@ func (h *Handler) HandOverPlatformAccounts(c *gin.Context) {
 	if !bindLedgerBody(c, &req) {
 		return
 	}
-	result, err := h.service.HandOverPlatformAccounts(c.Request.Context(), viewer, req.FromUserID, req.ToUserID)
+	result, err := h.roster.HandOverPlatformAccounts(c.Request.Context(), viewer, req.FromUserID, req.ToUserID)
 	if err != nil {
 		respondOrganizeError(c, "Failed to hand over platform accounts", err)
 		return

@@ -44,7 +44,7 @@ func (h *Handler) receivePush(c *gin.Context, provider domain.ExternalMailProvid
 		response.AbortWithCode(c, http.StatusRequestEntityTooLarge, domain.CodeRequestTooLarge, "Notification too large")
 		return
 	}
-	reply, err := h.service.ReceiveExternalMailPush(c.Request.Context(), provider, ExternalMailPushDelivery{
+	reply, err := h.external.ReceiveExternalMailPush(c.Request.Context(), provider, ExternalMailPushDelivery{
 		Header: c.Request.Header, Query: c.Request.URL.Query(), Body: body, ClientIP: c.ClientIP(),
 	})
 	if err != nil {

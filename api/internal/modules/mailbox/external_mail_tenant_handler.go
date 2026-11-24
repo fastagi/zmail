@@ -111,7 +111,7 @@ func (h *Handler) AuthorizeExternalMailTenant(c *gin.Context) {
 		response.HandleError(c, "Failed to authorize external mail tenant", err)
 		return
 	}
-	result, err := h.service.AuthorizeExternalMailTenant(c.Request.Context(), viewer, ExternalMailTenantInput{
+	result, err := h.external.AuthorizeExternalMailTenant(c.Request.Context(), viewer, ExternalMailTenantInput{
 		Provider: domain.ExternalMailProvider(req.Provider),
 		Grant: ExternalMailTenantGrant{
 			ServiceAccountKey: key, AdminSubject: req.AdminSubject, TenantID: req.TenantID,
@@ -132,7 +132,7 @@ func (h *Handler) ListExternalMailTenants(c *gin.Context) {
 	if !ok {
 		return
 	}
-	views, err := h.service.ListExternalMailTenants(c.Request.Context(), viewer)
+	views, err := h.external.ListExternalMailTenants(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to list external mail tenants", err)
 		return
@@ -151,7 +151,7 @@ func (h *Handler) RevokeExternalMailTenant(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.RevokeExternalMailTenant(c.Request.Context(), viewer, tenantID); err != nil {
+	if err := h.external.RevokeExternalMailTenant(c.Request.Context(), viewer, tenantID); err != nil {
 		response.HandleError(c, "Failed to revoke external mail tenant", err)
 		return
 	}
@@ -201,7 +201,7 @@ func (h *Handler) ListExternalMailTenantDirectory(c *gin.Context) {
 		}
 		cursor = string(raw)
 	}
-	page, err := h.service.ExternalMailTenantDirectory(c.Request.Context(), viewer, tenantID, cursor, perPage)
+	page, err := h.external.ExternalMailTenantDirectory(c.Request.Context(), viewer, tenantID, cursor, perPage)
 	if err != nil {
 		response.HandleError(c, "Failed to read the tenant directory", err)
 		return
@@ -278,7 +278,7 @@ func (h *Handler) AssignExternalMailTenantMailboxes(c *gin.Context) {
 		}
 		rows = append(rows, input)
 	}
-	results, err := h.service.AssignExternalMailTenantMailboxes(c.Request.Context(), viewer, tenantID, rows)
+	results, err := h.external.AssignExternalMailTenantMailboxes(c.Request.Context(), viewer, tenantID, rows)
 	if err != nil {
 		response.HandleError(c, "Failed to assign tenant mailboxes", err)
 		return

@@ -96,7 +96,7 @@ func (h *Handler) ListExternalMailConnections(c *gin.Context) {
 	if !ok {
 		return
 	}
-	connections, err := h.service.ListExternalMailConnections(c.Request.Context(), viewer)
+	connections, err := h.external.ListExternalMailConnections(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to list external mail connections", err)
 		return
@@ -111,7 +111,7 @@ func (h *Handler) RevokeExternalMailConnection(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.RevokeExternalMailConnection(c.Request.Context(), viewer, connectionID); err != nil {
+	if err := h.external.RevokeExternalMailConnection(c.Request.Context(), viewer, connectionID); err != nil {
 		response.HandleError(c, "Failed to revoke external mail connection", err)
 		return
 	}
@@ -140,7 +140,7 @@ func (h *Handler) ListExternalMailConnectors(c *gin.Context) {
 	if _, ok := organizationScope(c); !ok {
 		return
 	}
-	connectors := h.service.ListExternalMailConnectors(c.Request.Context())
+	connectors := h.external.ListExternalMailConnectors(c.Request.Context())
 	items := make([]ExternalMailConnectorResponse, 0, len(connectors))
 	for _, connector := range connectors {
 		items = append(items, ExternalMailConnectorResponse{
@@ -208,7 +208,7 @@ func (h *Handler) StartExternalMailAuthorization(c *gin.Context) {
 		response.HandleError(c, "Failed to start external mail authorization", ErrExternalMailAuthorizationInvalid)
 		return
 	}
-	started, err := h.service.StartExternalMailAuthorization(c.Request.Context(), viewer, ExternalMailAuthorizationInput{
+	started, err := h.external.StartExternalMailAuthorization(c.Request.Context(), viewer, ExternalMailAuthorizationInput{
 		Provider: domain.ExternalMailProvider(req.Provider), ConnectionID: req.ConnectionID, BackfillDays: req.BackfillDays,
 		Sharing: req.Sharing.input(),
 	})
@@ -239,7 +239,7 @@ func (h *Handler) CompleteExternalMailAuthorization(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	connection, created, err := h.service.CompleteExternalMailAuthorization(c.Request.Context(), viewer, req.State, req.Code)
+	connection, created, err := h.external.CompleteExternalMailAuthorization(c.Request.Context(), viewer, req.State, req.Code)
 	if err != nil {
 		response.HandleError(c, "Failed to complete external mail authorization", err)
 		return

@@ -41,7 +41,7 @@ func (h *Handler) ListMailboxDirectory(c *gin.Context) {
 		}
 		filter.BeforeID = before
 	}
-	page, err := h.service.MailboxDirectory(c.Request.Context(), viewer, filter)
+	page, err := h.roster.MailboxDirectory(c.Request.Context(), viewer, filter)
 	if err != nil {
 		response.HandleError(c, "Failed to list the mailbox directory", err)
 		return
@@ -59,7 +59,7 @@ func (h *Handler) ListMailboxDirectory(c *gin.Context) {
 		"daily_send_limit": page.DailySendLimit,
 		"sent_last_24h":    page.SentLast24h,
 		"mailbox_count":    page.MailboxCount,
-		"max_mailboxes":    h.service.MaxMailboxes(),
+		"max_mailboxes":    h.core.MaxMailboxes(),
 	})
 }
 
@@ -77,7 +77,7 @@ func (h *Handler) UpdateMailbox(c *gin.Context) {
 	if !httphandler.BindJSON(c, &request) {
 		return
 	}
-	mailbox, err := h.service.RenameMailbox(c.Request.Context(), viewer, mailboxID, *request.DisplayName)
+	mailbox, err := h.core.RenameMailbox(c.Request.Context(), viewer, mailboxID, *request.DisplayName)
 	if err != nil {
 		response.HandleError(c, "Failed to rename mailbox", err)
 		return

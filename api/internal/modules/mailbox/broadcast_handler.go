@@ -156,7 +156,7 @@ func (h *Handler) ListBroadcasts(c *gin.Context) {
 		return
 	}
 	page := pagination.FromContext(c)
-	broadcasts, total, err := h.service.ListBroadcasts(c.Request.Context(), viewer, page.GetPage(), page.GetPerPage())
+	broadcasts, total, err := h.broadcasts.ListBroadcasts(c.Request.Context(), viewer, page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list mail broadcasts", err)
 		return
@@ -176,12 +176,12 @@ func (h *Handler) GetBroadcast(c *gin.Context) {
 	if !ok {
 		return
 	}
-	broadcast, err := h.service.GetBroadcast(c.Request.Context(), viewer, id)
+	broadcast, err := h.broadcasts.GetBroadcast(c.Request.Context(), viewer, id)
 	if err != nil {
 		respondBroadcast(c, broadcast, err, false)
 		return
 	}
-	progress, err := h.service.BroadcastProgress(c.Request.Context(), broadcast)
+	progress, err := h.broadcasts.BroadcastProgress(c.Request.Context(), broadcast)
 	if err != nil {
 		response.HandleError(c, "Failed to estimate mail broadcast progress", err)
 		return
@@ -201,7 +201,7 @@ func (h *Handler) CreateBroadcast(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	broadcast, err := h.service.CreateBroadcast(c.Request.Context(), organization, req.input())
+	broadcast, err := h.broadcasts.CreateBroadcast(c.Request.Context(), organization, req.input())
 	respondBroadcast(c, broadcast, err, true)
 }
 
@@ -214,7 +214,7 @@ func (h *Handler) UpdateBroadcast(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	broadcast, err := h.service.UpdateBroadcast(c.Request.Context(), viewer, id, req.input())
+	broadcast, err := h.broadcasts.UpdateBroadcast(c.Request.Context(), viewer, id, req.input())
 	respondBroadcast(c, broadcast, err, false)
 }
 
@@ -223,7 +223,7 @@ func (h *Handler) DeleteBroadcast(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteBroadcast(c.Request.Context(), viewer, id); err != nil {
+	if err := h.broadcasts.DeleteBroadcast(c.Request.Context(), viewer, id); err != nil {
 		response.HandleError(c, "Failed to delete mail broadcast", err)
 		return
 	}
@@ -248,7 +248,7 @@ func (h *Handler) SendBroadcast(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	broadcast, err := h.service.SendBroadcast(c.Request.Context(), viewer, id, req.ScheduledAt)
+	broadcast, err := h.broadcasts.SendBroadcast(c.Request.Context(), viewer, id, req.ScheduledAt)
 	if err != nil && respondMissingVariablesAt(c, err, "variables.") {
 		return
 	}
@@ -262,7 +262,7 @@ func (h *Handler) CancelBroadcast(c *gin.Context) {
 	if !ok {
 		return
 	}
-	broadcast, visible, err := h.service.CancelBroadcast(c.Request.Context(), viewer, id)
+	broadcast, visible, err := h.broadcasts.CancelBroadcast(c.Request.Context(), viewer, id)
 	respondStoppedBroadcast(c, broadcast, visible, err)
 }
 
@@ -273,7 +273,7 @@ func (h *Handler) PauseBroadcast(c *gin.Context) {
 	if !ok {
 		return
 	}
-	broadcast, visible, err := h.service.PauseBroadcast(c.Request.Context(), viewer, id)
+	broadcast, visible, err := h.broadcasts.PauseBroadcast(c.Request.Context(), viewer, id)
 	respondStoppedBroadcast(c, broadcast, visible, err)
 }
 
@@ -294,7 +294,7 @@ func (h *Handler) ResumeBroadcast(c *gin.Context) {
 	if !ok {
 		return
 	}
-	broadcast, err := h.service.ResumeBroadcast(c.Request.Context(), viewer, id)
+	broadcast, err := h.broadcasts.ResumeBroadcast(c.Request.Context(), viewer, id)
 	respondBroadcast(c, broadcast, err, false)
 }
 
@@ -304,7 +304,7 @@ func (h *Handler) ListBroadcastRecipients(c *gin.Context) {
 		return
 	}
 	page := pagination.FromContext(c)
-	recipients, total, err := h.service.ListBroadcastRecipients(c.Request.Context(), viewer, id,
+	recipients, total, err := h.broadcasts.ListBroadcastRecipients(c.Request.Context(), viewer, id,
 		domain.MailRecipientStatus(c.Query("status")), page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list mail broadcast recipients", err)
@@ -340,7 +340,7 @@ func (h *Handler) ListBroadcastRecipients(c *gin.Context) {
 // Unsubscribe applies a signed unsubscribe link. It needs no session: the token names one
 // contact. Mail clients call it for one-click unsubscribe with any body, which is ignored.
 func (h *Handler) Unsubscribe(c *gin.Context) {
-	if err := h.service.Unsubscribe(c.Request.Context(), c.Param("token")); err != nil {
+	if err := h.broadcasts.Unsubscribe(c.Request.Context(), c.Param("token")); err != nil {
 		response.HandleError(c, "Failed to unsubscribe", err)
 		return
 	}

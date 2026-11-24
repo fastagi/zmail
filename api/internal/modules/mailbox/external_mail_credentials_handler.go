@@ -47,7 +47,7 @@ func (h *Handler) BindExternalMailCredentials(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	connection, created, err := h.service.BindExternalMailCredentials(c.Request.Context(), viewer, ExternalMailCredentialsInput{
+	connection, created, err := h.external.BindExternalMailCredentials(c.Request.Context(), viewer, ExternalMailCredentialsInput{
 		Provider: domain.ExternalMailProvider(req.Provider), Host: req.Host, Port: req.Port,
 		Username: req.Username, Password: req.Password, BackfillDays: req.BackfillDays,
 		SMTPHost: req.SMTPHost, SMTPPort: req.SMTPPort,

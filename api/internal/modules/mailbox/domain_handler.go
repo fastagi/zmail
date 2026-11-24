@@ -94,7 +94,7 @@ func (h *Handler) ListMailDomains(c *gin.Context) {
 	if !ok {
 		return
 	}
-	domains, err := h.service.ListMailDomains(c.Request.Context(), organizationID)
+	domains, err := h.domains.ListMailDomains(c.Request.Context(), organizationID)
 	if err != nil {
 		response.HandleError(c, "Failed to list mail domains", err)
 		return
@@ -116,7 +116,7 @@ func (h *Handler) GetMailDomain(c *gin.Context) {
 	if !ok {
 		return
 	}
-	mailDomain, err := h.service.GetMailDomain(c.Request.Context(), organizationID, id)
+	mailDomain, err := h.domains.GetMailDomain(c.Request.Context(), organizationID, id)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail domain", err)
 		return
@@ -135,7 +135,7 @@ func (h *Handler) ConnectMailDomain(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	mailDomain, err := h.service.ConnectMailDomain(c.Request.Context(), organization.OrganizationID, organization.UserID,
+	mailDomain, err := h.domains.ConnectMailDomain(c.Request.Context(), organization.OrganizationID, organization.UserID,
 		req.Name, domain.MailDomainCapability(req.Capability))
 	if err != nil {
 		response.HandleError(c, "Failed to connect mail domain", err)
@@ -147,12 +147,12 @@ func (h *Handler) ConnectMailDomain(c *gin.Context) {
 
 // SetUpMailDomain runs the domain setup again. Only owners and admins may.
 func (h *Handler) SetUpMailDomain(c *gin.Context) {
-	h.runDomainAction(c, "Failed to set up mail domain", h.service.SetUpMailDomain)
+	h.runDomainAction(c, "Failed to set up mail domain", h.domains.SetUpMailDomain)
 }
 
 // CheckMailDomain re-reads the domain's DNS records. Only owners and admins may.
 func (h *Handler) CheckMailDomain(c *gin.Context) {
-	h.runDomainAction(c, "Failed to check mail domain", h.service.CheckMailDomain)
+	h.runDomainAction(c, "Failed to check mail domain", h.domains.CheckMailDomain)
 }
 
 func (h *Handler) runDomainAction(
@@ -180,7 +180,7 @@ func (h *Handler) runDomainAction(
 // SetDefaultMailDomain makes a verified domain the organization's default. Only owners and
 // admins may.
 func (h *Handler) SetDefaultMailDomain(c *gin.Context) {
-	h.runDomainAction(c, "Failed to set the default mail domain", h.service.SetDefaultMailDomain)
+	h.runDomainAction(c, "Failed to set the default mail domain", h.domains.SetDefaultMailDomain)
 }
 
 // DeleteMailDomain forgets a domain no mailbox uses; Cloudflare is left as it is.
@@ -193,7 +193,7 @@ func (h *Handler) DeleteMailDomain(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteMailDomain(c.Request.Context(), organization.OrganizationID, id); err != nil {
+	if err := h.domains.DeleteMailDomain(c.Request.Context(), organization.OrganizationID, id); err != nil {
 		response.HandleError(c, "Failed to delete mail domain", err)
 		return
 	}
@@ -212,7 +212,7 @@ func (h *Handler) PreviewCloudflare(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	zones, err := h.service.CloudflareZones(c.Request.Context(), req.Token)
+	zones, err := h.domains.CloudflareZones(c.Request.Context(), req.Token)
 	if err != nil {
 		response.Error(c, 422, "Could not list Cloudflare zones. Check Zone Read permission, the token and its IP restrictions.")
 		return
@@ -226,7 +226,7 @@ func (h *Handler) GetCloudflare(c *gin.Context) {
 		return
 	}
 	privateResponse(c)
-	row, err := h.service.GetCloudflareConnection(c.Request.Context(), org.OrganizationID)
+	row, err := h.domains.GetCloudflareConnection(c.Request.Context(), org.OrganizationID)
 	if err != nil {
 		response.HandleError(c, "Failed to load Cloudflare connection", err)
 		return
@@ -246,7 +246,7 @@ func (h *Handler) BindCloudflare(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	row, key, err := h.service.BindCloudflare(c.Request.Context(), org.OrganizationID, req.Token, req.ZoneID)
+	row, key, err := h.domains.BindCloudflare(c.Request.Context(), org.OrganizationID, req.Token, req.ZoneID)
 	if err != nil {
 		response.HandleError(c, "Failed to bind Cloudflare", err)
 		return
@@ -259,7 +259,7 @@ func (h *Handler) UnbindCloudflare(c *gin.Context) {
 		return
 	}
 	privateResponse(c)
-	if err := h.service.UnbindCloudflare(c.Request.Context(), org.OrganizationID, c.Param("connection_id")); err != nil {
+	if err := h.domains.UnbindCloudflare(c.Request.Context(), org.OrganizationID, c.Param("connection_id")); err != nil {
 		response.HandleError(c, "Failed to disconnect Cloudflare", err)
 		return
 	}
@@ -275,7 +275,7 @@ func (h *Handler) ConnectCloudflareDomain(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	row, err := h.service.ConnectCloudflareDomain(c.Request.Context(), org.OrganizationID, org.UserID, c.Param("connection_id"), req.Name, domain.MailDomainCapability(req.Capability))
+	row, err := h.domains.ConnectCloudflareDomain(c.Request.Context(), org.OrganizationID, org.UserID, c.Param("connection_id"), req.Name, domain.MailDomainCapability(req.Capability))
 	if err != nil {
 		response.HandleError(c, "Failed to connect domain", err)
 		return
@@ -289,7 +289,7 @@ func (h *Handler) CheckCloudflareAccess(c *gin.Context) {
 		return
 	}
 	privateResponse(c)
-	checks, err := h.service.CheckCloudflareAccess(c.Request.Context(), org.OrganizationID, c.Param("connection_id"))
+	checks, err := h.domains.CheckCloudflareAccess(c.Request.Context(), org.OrganizationID, c.Param("connection_id"))
 	if err != nil {
 		response.HandleError(c, "Failed to check Cloudflare access", err)
 		return

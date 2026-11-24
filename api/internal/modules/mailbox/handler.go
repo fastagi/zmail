@@ -30,8 +30,18 @@ const (
 )
 
 // Handler handles HTTP requests for the mailbox starter.
+// Subdomain handlers read through their narrow interface fields rather than the full Service facade.
 type Handler struct {
-	service Service
+	service       Service
+	core          CoreService
+	domains       DomainService
+	broadcasts    BroadcastService
+	transactional TransactionalService
+	clientAccess  ClientAccessService
+	roster        RosterService
+	external      ExternalMailAllService
+	triage        TriageService
+	agents        AgentGrantService
 }
 
 var (
@@ -40,9 +50,55 @@ var (
 	_ assembly.ErrorModule = (*Handler)(nil)
 )
 
-// NewHandler creates a new handler.
+// NewHandler creates a new handler wired with all segregated subdomain interfaces.
 func NewHandler(service Service) *Handler {
-	return &Handler{service: service}
+	return &Handler{
+		service:       service,
+		core:          service,
+		domains:       service,
+		broadcasts:    service,
+		transactional: service,
+		clientAccess:  service,
+		roster:        service,
+		external:      service,
+		triage:        service,
+		agents:        service,
+	}
+}
+
+// NewTriageHandler creates a Handler scoped strictly to AI triage operations.
+func NewTriageHandler(triage TriageService) *Handler {
+	return &Handler{triage: triage}
+}
+
+// NewAgentGrantHandler creates a Handler scoped strictly to agent grant operations.
+func NewAgentGrantHandler(agents AgentGrantService) *Handler {
+	return &Handler{agents: agents}
+}
+
+// NewTransactionalHandler creates a Handler scoped strictly to transactional mail operations.
+func NewTransactionalHandler(transactional TransactionalService) *Handler {
+	return &Handler{transactional: transactional}
+}
+
+// NewBroadcastHandler creates a Handler scoped strictly to broadcasts, templates, and contacts.
+func NewBroadcastHandler(broadcasts BroadcastService) *Handler {
+	return &Handler{broadcasts: broadcasts}
+}
+
+// NewDomainHandler creates a Handler scoped strictly to domains, zones, DNS, and Cloudflare setup.
+func NewDomainHandler(domains DomainService) *Handler {
+	return &Handler{domains: domains}
+}
+
+// NewClientAccessHandler creates a Handler scoped strictly to IMAP/SMTP app passwords and settings.
+func NewClientAccessHandler(clientAccess ClientAccessService) *Handler {
+	return &Handler{clientAccess: clientAccess}
+}
+
+// NewRosterHandler creates a Handler scoped strictly to directory, imports/exports, welcome mail, and ledger.
+func NewRosterHandler(roster RosterService) *Handler {
+	return &Handler{roster: roster}
 }
 
 // Name returns the starter name.

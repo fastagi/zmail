@@ -126,7 +126,7 @@ func (h *Handler) ListContacts(c *gin.Context) {
 		listID = parsed
 	}
 	page := pagination.FromContext(c)
-	contacts, total, err := h.service.ListContacts(c.Request.Context(), organizationID, domain.MailContactFilter{
+	contacts, total, err := h.broadcasts.ListContacts(c.Request.Context(), organizationID, domain.MailContactFilter{
 		Query:   c.Query("q"),
 		ListID:  listID,
 		Status:  domain.MailContactStatus(c.Query("status")),
@@ -152,7 +152,7 @@ func (h *Handler) GetContact(c *gin.Context) {
 	if !ok {
 		return
 	}
-	contact, err := h.service.GetContact(c.Request.Context(), organizationID, contactID)
+	contact, err := h.broadcasts.GetContact(c.Request.Context(), organizationID, contactID)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail contact", err)
 		return
@@ -170,7 +170,7 @@ func (h *Handler) CreateContact(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	contact, err := h.service.CreateContact(c.Request.Context(), organizationID, req.input())
+	contact, err := h.broadcasts.CreateContact(c.Request.Context(), organizationID, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to create mail contact", err)
 		return
@@ -188,7 +188,7 @@ func (h *Handler) UpdateContact(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	contact, err := h.service.UpdateContact(c.Request.Context(), organizationID, contactID, req.input())
+	contact, err := h.broadcasts.UpdateContact(c.Request.Context(), organizationID, contactID, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to update mail contact", err)
 		return
@@ -202,7 +202,7 @@ func (h *Handler) DeleteContact(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteContact(c.Request.Context(), organizationID, contactID); err != nil {
+	if err := h.broadcasts.DeleteContact(c.Request.Context(), organizationID, contactID); err != nil {
 		response.HandleError(c, "Failed to delete mail contact", err)
 		return
 	}
@@ -219,7 +219,7 @@ func (h *Handler) ImportContacts(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	result, err := h.service.ImportContacts(c.Request.Context(), organizationID, req.CSV, req.ListID)
+	result, err := h.broadcasts.ImportContacts(c.Request.Context(), organizationID, req.CSV, req.ListID)
 	if err != nil {
 		response.HandleError(c, "Failed to import mail contacts", err)
 		return
@@ -246,7 +246,7 @@ func (h *Handler) ListContactLists(c *gin.Context) {
 	if !ok {
 		return
 	}
-	lists, err := h.service.ListContactLists(c.Request.Context(), organizationID)
+	lists, err := h.broadcasts.ListContactLists(c.Request.Context(), organizationID)
 	if err != nil {
 		response.HandleError(c, "Failed to list mail contact lists", err)
 		return
@@ -268,7 +268,7 @@ func (h *Handler) CreateContactList(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	list, err := h.service.CreateContactList(c.Request.Context(), organizationID, req.Name)
+	list, err := h.broadcasts.CreateContactList(c.Request.Context(), organizationID, req.Name)
 	if err != nil {
 		response.HandleError(c, "Failed to create mail contact list", err)
 		return
@@ -286,7 +286,7 @@ func (h *Handler) RenameContactList(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	list, err := h.service.RenameContactList(c.Request.Context(), organizationID, listID, req.Name)
+	list, err := h.broadcasts.RenameContactList(c.Request.Context(), organizationID, listID, req.Name)
 	if err != nil {
 		response.HandleError(c, "Failed to rename mail contact list", err)
 		return
@@ -300,7 +300,7 @@ func (h *Handler) DeleteContactList(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteContactList(c.Request.Context(), organizationID, listID); err != nil {
+	if err := h.broadcasts.DeleteContactList(c.Request.Context(), organizationID, listID); err != nil {
 		response.HandleError(c, "Failed to delete mail contact list", err)
 		return
 	}

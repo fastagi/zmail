@@ -190,12 +190,12 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 		response.HandleError(c, "Invalid template kind", domain.ErrInvalidInput)
 		return
 	}
-	templates, err := h.service.ListTemplates(c.Request.Context(), organizationID, kind)
+	templates, err := h.broadcasts.ListTemplates(c.Request.Context(), organizationID, kind)
 	if err != nil {
 		response.HandleError(c, "Failed to list mail templates", err)
 		return
 	}
-	outside := h.service.TemplatesOutsideSendingScope(c.Request.Context(), viewer, templates)
+	outside := h.broadcasts.TemplatesOutsideSendingScope(c.Request.Context(), viewer, templates)
 	summaries := make([]MailTemplateSummaryResponse, 0, len(templates))
 	for _, template := range templates {
 		summary := toMailTemplateSummary(template)
@@ -211,14 +211,14 @@ func (h *Handler) GetTemplate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	template, err := h.service.GetTemplate(c.Request.Context(), organizationID, templateID)
+	template, err := h.broadcasts.GetTemplate(c.Request.Context(), organizationID, templateID)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail template", err)
 		return
 	}
 	full := toMailTemplateResponse(template)
 	if viewer, ok := domain.OrganizationContextFromContext(c.Request.Context()); ok {
-		full.OutsideSendingScope = h.service.TemplatesOutsideSendingScope(
+		full.OutsideSendingScope = h.broadcasts.TemplatesOutsideSendingScope(
 			c.Request.Context(), viewer, []*domain.MailTemplate{template})[template.ID]
 	}
 	privateResponse(c)
@@ -234,7 +234,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	template, err := h.service.CreateTemplate(c.Request.Context(), organization, req.input())
+	template, err := h.broadcasts.CreateTemplate(c.Request.Context(), organization, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to create mail template", err)
 		return
@@ -252,7 +252,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	template, err := h.service.UpdateTemplate(c.Request.Context(), viewer, templateID, req.input())
+	template, err := h.broadcasts.UpdateTemplate(c.Request.Context(), viewer, templateID, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to update mail template", err)
 		return
@@ -266,7 +266,7 @@ func (h *Handler) DeleteTemplate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteTemplate(c.Request.Context(), viewer, templateID); err != nil {
+	if err := h.broadcasts.DeleteTemplate(c.Request.Context(), viewer, templateID); err != nil {
 		response.HandleError(c, "Failed to delete mail template", err)
 		return
 	}
@@ -288,7 +288,7 @@ func (h *Handler) PreviewTemplate(c *gin.Context) {
 		source := req.Source.input()
 		input.Source = &source
 	}
-	preview, err := h.service.PreviewTemplate(c.Request.Context(), organizationID, input)
+	preview, err := h.broadcasts.PreviewTemplate(c.Request.Context(), organizationID, input)
 	if err != nil {
 		response.HandleError(c, "Failed to preview mail template", err)
 		return
@@ -312,7 +312,7 @@ func (h *Handler) SendTemplateTest(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	message, err := h.service.SendTemplateTest(
+	message, err := h.broadcasts.SendTemplateTest(
 		c.Request.Context(), viewer, templateID, req.MailboxID, req.To, req.Variables)
 	respondSent(c, message, err == nil, err)
 }

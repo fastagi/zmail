@@ -91,7 +91,7 @@ func (r *repository) ListSuppressions(
 	}
 	suppressions := make([]domain.MailSuppression, 0, len(rows))
 	for i := range rows {
-		suppressions = append(suppressions, rows[i].toDomain())
+		suppressions = append(suppressions, rows[i].ToDomain())
 	}
 	return suppressions, nil
 }
@@ -108,6 +108,6 @@ func (r *repository) DeleteSuppression(ctx context.Context, organizationID, id u
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	suppression := rows[0].toDomain()
+	suppression := rows[0].ToDomain()
 	return &suppression, nil
 }

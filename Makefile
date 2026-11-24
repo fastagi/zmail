@@ -84,6 +84,7 @@ governance: agent-check
 	PYTHONDONTWRITEBYTECODE=1 python3 .agents/skills/fastbuild-framework-review/scripts/check-starter-catalog.py
 	bash .agents/skills/fastbuild-framework-review/scripts/check-api-boundaries.sh
 	bash .agents/skills/fastbuild-framework-review/scripts/check-branch-governance.sh
+	PYTHONDONTWRITEBYTECODE=1 python3 .agents/skills/fastbuild-framework-review/scripts/check-code-size-guardrails.py
 
 api-check:
 	cd api && bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 1

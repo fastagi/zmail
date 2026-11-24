@@ -33,7 +33,7 @@ func (h *Handler) ListExternalMailSyncRuns(c *gin.Context) {
 	if !ok {
 		return
 	}
-	runs, err := h.service.ListExternalMailSyncRuns(c.Request.Context(), viewer, connectionID)
+	runs, err := h.external.ListExternalMailSyncRuns(c.Request.Context(), viewer, connectionID)
 	if err != nil {
 		response.HandleError(c, "Failed to list external mail sync runs", err)
 		return
@@ -63,7 +63,7 @@ func (h *Handler) PurgeExternalMailCopies(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.service.PurgeExternalMailCopies(c.Request.Context(), viewer, connectionID)
+	result, err := h.external.PurgeExternalMailCopies(c.Request.Context(), viewer, connectionID)
 	if err != nil {
 		response.HandleError(c, "Failed to purge external mail copies", err)
 		return

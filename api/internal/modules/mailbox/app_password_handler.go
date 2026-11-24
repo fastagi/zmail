@@ -155,7 +155,7 @@ func (h *Handler) ListAppPasswords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	list, err := h.service.ListAppPasswords(c.Request.Context(), viewer)
+	list, err := h.clientAccess.ListAppPasswords(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to list mail client passwords", err)
 		return
@@ -178,7 +178,7 @@ func (h *Handler) CreateAppPassword(c *gin.Context) {
 	for _, scope := range req.Scopes {
 		scopes = append(scopes, domain.MailClientProtocol(scope))
 	}
-	password, secret, err := h.service.CreateAppPassword(c.Request.Context(), viewer, CreateAppPasswordInput{
+	password, secret, err := h.clientAccess.CreateAppPassword(c.Request.Context(), viewer, CreateAppPasswordInput{
 		Name: req.Name, Scopes: scopes, CurrentPassword: req.CurrentPassword, TOTPCode: req.TOTPCode,
 	})
 	if err != nil {
@@ -199,7 +199,7 @@ func (h *Handler) RevokeAppPassword(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.RevokeAppPassword(c.Request.Context(), viewer, id); err != nil {
+	if err := h.clientAccess.RevokeAppPassword(c.Request.Context(), viewer, id); err != nil {
 		response.HandleError(c, "Failed to revoke mail client password", err)
 		return
 	}
@@ -213,7 +213,7 @@ func (h *Handler) ListAppPasswordDirectory(c *gin.Context) {
 		return
 	}
 	page := pagination.FromContext(c)
-	passwords, total, err := h.service.AppPasswordDirectory(c.Request.Context(), viewer, page.GetPage(), page.GetPerPage())
+	passwords, total, err := h.clientAccess.AppPasswordDirectory(c.Request.Context(), viewer, page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list the mail client password directory", err)
 		return
@@ -234,7 +234,7 @@ func (h *Handler) ForceRevokeAppPassword(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.ForceRevokeAppPassword(c.Request.Context(), viewer, id); err != nil {
+	if err := h.clientAccess.ForceRevokeAppPassword(c.Request.Context(), viewer, id); err != nil {
 		response.HandleError(c, "Failed to revoke mail client password", err)
 		return
 	}
@@ -247,7 +247,7 @@ func (h *Handler) GetMailClientSettings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	settings, err := h.service.MailClientSettings(c.Request.Context(), viewer)
+	settings, err := h.clientAccess.MailClientSettings(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to read mail client settings", err)
 		return
@@ -266,7 +266,7 @@ func (h *Handler) UpdateMailClientSettings(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	settings, err := h.service.UpdateMailClientSettings(c.Request.Context(), viewer, *req.AccessEnabled)
+	settings, err := h.clientAccess.UpdateMailClientSettings(c.Request.Context(), viewer, *req.AccessEnabled)
 	if err != nil {
 		response.HandleError(c, "Failed to update mail client settings", err)
 		return

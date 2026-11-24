@@ -153,7 +153,7 @@ func (h *Handler) IssueAgentGrant(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	grant, err := h.service.IssueAgentGrant(c.Request.Context(), viewer, mailboxID, req.input())
+	grant, err := h.agents.IssueAgentGrant(c.Request.Context(), viewer, mailboxID, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to issue agent grant", err)
 		return
@@ -169,7 +169,7 @@ func (h *Handler) ListAgentGrants(c *gin.Context) {
 		return
 	}
 	page := pagination.FromContext(c)
-	grants, total, err := h.service.ListAgentGrants(c.Request.Context(), viewer, mailboxID, page.GetPage(), page.GetPerPage())
+	grants, total, err := h.agents.ListAgentGrants(c.Request.Context(), viewer, mailboxID, page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list agent grants", err)
 		return
@@ -195,7 +195,7 @@ func (h *Handler) RevokeAgentGrant(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.RevokeAgentGrant(c.Request.Context(), viewer, mailboxID, grantID); err != nil {
+	if err := h.agents.RevokeAgentGrant(c.Request.Context(), viewer, mailboxID, grantID); err != nil {
 		response.HandleError(c, "Failed to revoke agent grant", err)
 		return
 	}
@@ -212,7 +212,7 @@ func (h *Handler) AgentGrantActivity(c *gin.Context) {
 	if !ok {
 		return
 	}
-	entries, err := h.service.AgentGrantActivity(c.Request.Context(), viewer, mailboxID, grantID)
+	entries, err := h.agents.AgentGrantActivity(c.Request.Context(), viewer, mailboxID, grantID)
 	if err != nil {
 		response.HandleError(c, "Failed to list agent grant activity", err)
 		return
@@ -236,7 +236,7 @@ func (h *Handler) ListAgentDrafts(c *gin.Context) {
 		return
 	}
 	page := pagination.FromContext(c)
-	drafts, total, err := h.service.ListAgentDrafts(c.Request.Context(), viewer, mailboxID, page.GetPage(), page.GetPerPage())
+	drafts, total, err := h.agents.ListAgentDrafts(c.Request.Context(), viewer, mailboxID, page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list agent drafts", err)
 		return
@@ -309,7 +309,7 @@ func (h *Handler) ListAgentMailEvents(c *gin.Context) {
 		response.HandleError(c, "Invalid agent mail feed query", err)
 		return
 	}
-	feed, err := h.service.AgentMailEvents(c.Request.Context(), viewer, keyID, after, limit)
+	feed, err := h.agents.AgentMailEvents(c.Request.Context(), viewer, keyID, after, limit)
 	if err != nil {
 		respondAgentError(c, "Failed to read agent mail events", err)
 		return
@@ -339,7 +339,7 @@ func (h *Handler) GetAgentMailMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	read, err := h.service.AgentMailMessage(c.Request.Context(), viewer, keyID, messageID)
+	read, err := h.agents.AgentMailMessage(c.Request.Context(), viewer, keyID, messageID)
 	if err != nil {
 		respondAgentError(c, "Failed to get agent mail message", err)
 		return
@@ -362,7 +362,7 @@ func (h *Handler) CreateAgentDraft(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	draft, created, err := h.service.SaveAgentDraft(c.Request.Context(), viewer, keyID, AgentDraftInput(req))
+	draft, created, err := h.agents.SaveAgentDraft(c.Request.Context(), viewer, keyID, AgentDraftInput(req))
 	if err != nil {
 		response.HandleError(c, "Failed to save agent draft", err)
 		return

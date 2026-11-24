@@ -149,7 +149,7 @@ func (h *Handler) SendTransactional(c *gin.Context) {
 		return
 	}
 	// The switch answers before the body is read, so a disabled instance never validates.
-	if !h.service.TransactionalPolicy().Enabled {
+	if !h.transactional.TransactionalPolicy().Enabled {
 		response.HandleError(c, "Transactional mail is disabled", ErrTransactionalDisabled)
 		return
 	}
@@ -164,7 +164,7 @@ func (h *Handler) SendTransactional(c *gin.Context) {
 		Mode:           apikey.APIKeyModeFromContext(c),
 		Viewer:         viewer,
 	}
-	message, created, err := h.service.SendTransactional(c.Request.Context(), actor, TransactionalSendInput{
+	message, created, err := h.transactional.SendTransactional(c.Request.Context(), actor, TransactionalSendInput{
 		Template:       req.Template,
 		To:             req.To,
 		IdempotencyKey: c.GetHeader(IdempotencyKeyHeader),
@@ -193,7 +193,7 @@ func (h *Handler) GetTransactional(c *gin.Context) {
 	if !ok {
 		return
 	}
-	message, err := h.service.GetTransactional(c.Request.Context(), viewer.OrganizationID, apikey.APIKeyModeFromContext(c), messageID)
+	message, err := h.transactional.GetTransactional(c.Request.Context(), viewer.OrganizationID, apikey.APIKeyModeFromContext(c), messageID)
 	if err != nil {
 		response.HandleError(c, "Failed to get transactional message", err)
 		return
@@ -220,7 +220,7 @@ func (h *Handler) ListTransactionalLog(c *gin.Context) {
 		response.HandleError(c, "Invalid transactional log query", err)
 		return
 	}
-	page, err := h.service.ListTransactionalLog(c.Request.Context(), viewer.OrganizationID, filter)
+	page, err := h.transactional.ListTransactionalLog(c.Request.Context(), viewer.OrganizationID, filter)
 	if err != nil {
 		response.HandleError(c, "Failed to list transactional messages", err)
 		return
@@ -236,7 +236,7 @@ func (h *Handler) GetTransactionalLogEntry(c *gin.Context) {
 	if !ok {
 		return
 	}
-	message, err := h.service.GetTransactionalLogEntry(c.Request.Context(), viewer.OrganizationID, messageID)
+	message, err := h.transactional.GetTransactionalLogEntry(c.Request.Context(), viewer.OrganizationID, messageID)
 	if err != nil {
 		response.HandleError(c, "Failed to get transactional message", err)
 		return
@@ -291,7 +291,7 @@ func (h *Handler) SendTransactionalTest(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.service.TransactionalPolicy().Enabled {
+	if !h.transactional.TransactionalPolicy().Enabled {
 		response.HandleError(c, "Transactional mail is disabled", ErrTransactionalDisabled)
 		return
 	}
@@ -299,7 +299,7 @@ func (h *Handler) SendTransactionalTest(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	message, err := h.service.SendTransactionalTest(c.Request.Context(), viewer, TransactionalTestInput{
+	message, err := h.transactional.SendTransactionalTest(c.Request.Context(), viewer, TransactionalTestInput{
 		Template:  req.Template,
 		Mode:      domain.APIKeyMode(req.Mode),
 		Variables: req.Variables,
@@ -359,7 +359,7 @@ func (h *Handler) ListSendLanes(c *gin.Context) {
 	if !ok {
 		return
 	}
-	lanes, computedAt, err := h.service.ListSendLanes(c.Request.Context(), viewer)
+	lanes, computedAt, err := h.transactional.ListSendLanes(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to list send lanes", err)
 		return
@@ -386,7 +386,7 @@ func (h *Handler) ListSuppressions(c *gin.Context) {
 		response.HandleError(c, "Invalid suppression list query", err)
 		return
 	}
-	suppressions, next, err := h.service.ListSuppressions(c.Request.Context(), viewer, filter)
+	suppressions, next, err := h.transactional.ListSuppressions(c.Request.Context(), viewer, filter)
 	if err != nil {
 		response.HandleError(c, "Failed to list suppressions", err)
 		return
@@ -406,7 +406,7 @@ func (h *Handler) RemoveSuppression(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.RemoveSuppression(c.Request.Context(), viewer, suppressionID); err != nil {
+	if err := h.transactional.RemoveSuppression(c.Request.Context(), viewer, suppressionID); err != nil {
 		response.HandleError(c, "Failed to remove suppression", err)
 		return
 	}

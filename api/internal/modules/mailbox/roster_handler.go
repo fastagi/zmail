@@ -127,7 +127,7 @@ func (h *Handler) ImportMembers(c *gin.Context) {
 	if !httphandler.BindJSON(c, &request) {
 		return
 	}
-	result, err := h.service.ImportMembers(c.Request.Context(), viewer, request.input())
+	result, err := h.roster.ImportMembers(c.Request.Context(), viewer, request.input())
 	if err != nil {
 		response.HandleError(c, "Failed to import members", err)
 		return
