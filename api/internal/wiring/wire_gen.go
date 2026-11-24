@@ -27,6 +27,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/modules/permission"
 	"github.com/fastagi/zmail/api/internal/modules/roster"
 	"github.com/fastagi/zmail/api/internal/modules/setting"
+	"github.com/fastagi/zmail/api/internal/modules/transactional"
 	"github.com/fastagi/zmail/api/internal/modules/triage"
 	"github.com/fastagi/zmail/api/internal/modules/usage"
 	"github.com/fastagi/zmail/api/internal/modules/user"
@@ -157,23 +158,25 @@ func InitApplication() (*app.Application, error) {
 	rosterHandler := roster.NewHandler(rosterService)
 	triageHandler := triage.NewHandler(mailboxService)
 	agentgrantHandler := agentgrant.NewHandler(mailboxService)
+	transactionalHandler := transactional.NewHandler(mailboxService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
-		Audit:        handler,
-		APIKey:       apikeyHandler,
-		User:         userHandler,
-		Organization: organizationHandler,
-		Permission:   permissionHandler,
-		Notification: notificationHandler,
-		Asset:        assetHandler,
-		Setting:      settingHandler,
-		Usage:        usageHandler,
-		Webhook:      webhookHandler,
-		Operator:     handler2,
-		Roster:       rosterHandler,
-		Triage:       triageHandler,
-		AgentGrant:   agentgrantHandler,
-		Mailbox:      mailboxHandler,
+		Audit:         handler,
+		APIKey:        apikeyHandler,
+		User:          userHandler,
+		Organization:  organizationHandler,
+		Permission:    permissionHandler,
+		Notification:  notificationHandler,
+		Asset:         assetHandler,
+		Setting:       settingHandler,
+		Usage:         usageHandler,
+		Webhook:       webhookHandler,
+		Operator:      handler2,
+		Roster:        rosterHandler,
+		Triage:        triageHandler,
+		AgentGrant:    agentgrantHandler,
+		Transactional: transactionalHandler,
+		Mailbox:       mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(configConfig, migrator, handlers)
 	if err != nil {
@@ -339,23 +342,25 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	rosterHandler := roster.NewHandler(rosterService)
 	triageHandler := triage.NewHandler(mailboxService)
 	agentgrantHandler := agentgrant.NewHandler(mailboxService)
+	transactionalHandler := transactional.NewHandler(mailboxService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
-		Audit:        handler,
-		APIKey:       apikeyHandler,
-		User:         userHandler,
-		Organization: organizationHandler,
-		Permission:   permissionHandler,
-		Notification: notificationHandler,
-		Asset:        assetHandler,
-		Setting:      settingHandler,
-		Usage:        usageHandler,
-		Webhook:      webhookHandler,
-		Operator:     handler2,
-		Roster:       rosterHandler,
-		Triage:       triageHandler,
-		AgentGrant:   agentgrantHandler,
-		Mailbox:      mailboxHandler,
+		Audit:         handler,
+		APIKey:        apikeyHandler,
+		User:          userHandler,
+		Organization:  organizationHandler,
+		Permission:    permissionHandler,
+		Notification:  notificationHandler,
+		Asset:         assetHandler,
+		Setting:       settingHandler,
+		Usage:         usageHandler,
+		Webhook:       webhookHandler,
+		Operator:      handler2,
+		Roster:        rosterHandler,
+		Triage:        triageHandler,
+		AgentGrant:    agentgrantHandler,
+		Transactional: transactionalHandler,
+		Mailbox:       mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(cfg, migrator, handlers)
 	if err != nil {

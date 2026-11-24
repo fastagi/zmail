@@ -37,11 +37,11 @@ const (
 // Transactional errors.
 var (
 	// ErrTransactionalDisabled means the instance does not accept transactional messages.
-	ErrTransactionalDisabled = errors.New("transactional mail is not enabled")
+	ErrTransactionalDisabled = domain.ErrTransactionalDisabled
 	// ErrMailRecipientRateLimited means one template went to one recipient too often.
-	ErrMailRecipientRateLimited = errors.New("too many transactional messages to this recipient")
+	ErrMailRecipientRateLimited = domain.ErrMailRecipientRateLimited
 	// ErrTransactionalRateLimited means an API key or a user sent too many messages in a window.
-	ErrTransactionalRateLimited = errors.New("too many transactional messages")
+	ErrTransactionalRateLimited = domain.ErrTransactionalRateLimited
 )
 
 // RetryAfterError is a refusal that may be retried after RetryAfter.
@@ -73,6 +73,9 @@ func (e *FieldsError) Error() string {
 }
 
 func (e *FieldsError) Unwrap() error { return e.Err }
+
+// FieldErrors exposes the wrapped sentinel and field map without coupling callers to package mailbox.
+func (e *FieldsError) FieldErrors() (error, map[string][]string) { return e.Err, e.Fields }
 
 // accountDirectory reads the account a member signed in with, for console test sends.
 type accountDirectory interface {

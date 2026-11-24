@@ -26,6 +26,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailTriageWorker), new(*service)),
 	wire.Bind(new(domain.MailTriagePort), new(*service)),
 	wire.Bind(new(domain.MailAgentGrantPort), new(*service)),
+	wire.Bind(new(domain.MailTransactionalPort), new(*service)),
 	wire.Bind(new(domain.ExternalMailSyncWorker), new(*service)),
 	wire.Bind(new(domain.MailAgentEventPruner), new(*service)),
 	wire.Bind(new(domain.MailClientStore), new(*service)),

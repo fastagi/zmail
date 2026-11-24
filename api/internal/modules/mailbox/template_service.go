@@ -34,6 +34,9 @@ func (e *MissingVariablesError) Error() string {
 
 func (e *MissingVariablesError) Unwrap() error { return ErrMailTemplateVariablesMissing }
 
+// MissingVariableNames exposes the missing variable names without coupling callers to package mailbox.
+func (e *MissingVariablesError) MissingVariableNames() []string { return e.Names }
+
 // TemplateInput is the editable content of a template.
 type TemplateInput struct {
 	Name            string

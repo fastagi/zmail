@@ -44,8 +44,8 @@ var (
 	// ErrMailAppPasswordAttemptsLimited means too many failed credential checks in the window.
 	ErrMailAppPasswordAttemptsLimited = errors.New("too many mail client password attempts")
 	// ErrTransactionalMessageNotFound means no transactional message matched the lookup.
-	ErrTransactionalMessageNotFound    = errors.New("transactional message not found")
-	ErrMailMessageInvalid              = errors.New("mail message is invalid")
+	ErrTransactionalMessageNotFound = domain.ErrTransactionalMessageNotFound
+	ErrMailMessageInvalid           = domain.ErrMailMessageInvalid
 	ErrMailSendLimitReached            = errors.New("mail send limit reached")
 	ErrMailSendingPaused               = errors.New("mail sending paused by bounce or complaint rate")
 	ErrMailDeliveryFailed              = errors.New("mail delivery failed")

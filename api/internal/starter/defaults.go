@@ -19,6 +19,7 @@ import (
 	permissionstarter "github.com/fastagi/zmail/api/internal/modules/permission"
 	"github.com/fastagi/zmail/api/internal/modules/roster"
 	"github.com/fastagi/zmail/api/internal/modules/setting"
+	"github.com/fastagi/zmail/api/internal/modules/transactional"
 	"github.com/fastagi/zmail/api/internal/modules/triage"
 	"github.com/fastagi/zmail/api/internal/modules/usage"
 	"github.com/fastagi/zmail/api/internal/modules/user"
@@ -43,6 +44,7 @@ var ProviderSet = wire.NewSet(
 	roster.ProviderSet,
 	triage.ProviderSet,
 	agentgrant.ProviderSet,
+	transactional.ProviderSet,
 	mailbox.ProviderSet,
 	// fastbuild:slot api.starter.providers
 	wire.Struct(new(Handlers), "*"),
@@ -67,8 +69,9 @@ type Handlers struct {
 	Operator     *operator.Handler
 	Roster       *roster.Handler
 	Triage       *triage.Handler
-	AgentGrant   *agentgrant.Handler
-	Mailbox      *mailbox.Handler
+	AgentGrant    *agentgrant.Handler
+	Transactional *transactional.Handler
+	Mailbox       *mailbox.Handler
 	// fastbuild:slot api.starter.handlers
 }
 
@@ -116,7 +119,7 @@ func OptionalManifests(handlers *Handlers) []assembly.StarterManifest {
 		usage.NewStarterManifest(h.Usage),
 		webhook.NewStarterManifest(h.Webhook),
 		operator.NewStarterManifest(h.Operator),
-		mailbox.NewStarterManifest(h.Mailbox, h.Roster, h.Triage, h.AgentGrant),
+		mailbox.NewStarterManifest(h.Mailbox, h.Roster, h.Triage, h.AgentGrant, h.Transactional),
 		// fastbuild:slot api.starter.manifests
 	}
 }

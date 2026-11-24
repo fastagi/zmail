@@ -14,6 +14,7 @@ import (
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/router"
+	toptransactional "github.com/fastagi/zmail/api/internal/modules/transactional"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
 
@@ -79,6 +80,9 @@ func newTxHandlerFixture(t *testing.T, edit func(*Settings)) *txHandlerFixture {
 		c.Next()
 	})
 	handler.RegisterRoutes(routes)
+	txHandler := toptransactional.NewHandler(f.service)
+	txHandler.RegisterErrorMappings(response.DefaultErrorMapper)
+	txHandler.RegisterRoutes(routes)
 	return f
 }
 

@@ -123,17 +123,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("external_mail_tenants.assignments.store").WhereNumber("tenant_id").
 			Middleware(middleware.BodyLimit(maxExternalMailAssignmentsBodyBytes))
 
-		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
-		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).
-			Name("transactional_mail_log.show").WhereNumber("message_id")
-		auth.POST("/transactional-test-sends", h.SendTransactionalTest).
-			Name("transactional_test_sends.store").Middleware(middleware.BodyLimit(maxTransactionalBodyBytes))
-
-		auth.GET("/mail-send-lanes", h.ListSendLanes).Name("mail_send_lanes.index")
-		auth.GET("/mail-suppressions", h.ListSuppressions).Name("mail_suppressions.index")
-		auth.DELETE("/mail-suppressions/:suppression_id", h.RemoveSuppression).
-			Name("mail_suppressions.destroy").WhereNumber("suppression_id")
-
 		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index").Middleware(templateReads)
 		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store").Middleware(templateWrites)
 		auth.GET("/mail-templates/:template_id", h.GetTemplate).Name("mail_templates.show").WhereNumber("template_id").Middleware(templateReads)
@@ -280,15 +269,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		key.GET("/agent-mail-messages/:message_id", h.GetAgentMailMessage).
 			Name("agent_mail_messages.show").WhereNumber("message_id").
 			Middleware(apikey.RequireScopes(ScopeMailAgent))
-
-		// Transactional mail accepts test keys: a test key's messages are simulated and never
-		// reach the provider.
-		key.POST("/transactional-messages", h.SendTransactional).
-			Name("transactional_messages.store").
-			Middleware(middleware.BodyLimit(maxTransactionalBodyBytes), apikey.RequireScopesAllowingTest(ScopeMailTransactional))
-		key.GET("/transactional-messages/:message_id", h.GetTransactional).
-			Name("transactional_messages.show").WhereNumber("message_id").
-			Middleware(apikey.RequireScopesAllowingTest(ScopeMailTransactional))
 
 		// AI tools save templates with their owner's key. Creating needs the owner's templates
 		// grant, exactly as on the session route, and never sends mail.
