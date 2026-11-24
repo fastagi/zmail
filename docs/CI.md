@@ -31,12 +31,17 @@ nothing: open a draft while iterating, and checks start when it is marked ready 
 
 | Check | Pull request (not draft) | Manual run (`workflow_dispatch`) | Release tag |
 |---|---|---|---|
-| Governance (inside the Changed areas job) | Always | Yes | Via `make release-check` |
+| Governance (inside the Changed areas job) | Always; a change to Markdown or CSV under `docs/` or `research/` alone runs only the link and English-source checks | Yes | Via `make release-check` |
 | API and HTTP contracts (PostgreSQL 16) | When `api/`, `contracts/`, `Makefile`, or CI changes; Go build, lint, and tests cover only the affected packages | Yes, the whole tree | Via `make release-check` |
 | Web, Admin (Node 22) | When `web/`, `admin/`, `contracts/`, or CI changes, per area; Web skips its production build | Yes, with the Web build | Via `make release-check` |
 | Web and Admin on Node 24, PostgreSQL 15, 17, 18 compatibility | No | Yes (`ci.yml`) | — |
 | API, Web, and Admin containers | No | Yes (own workflows) | Built and scanned by `release.yml` |
 | End-to-end, dependency security, plugins, skill self-test, performance | No | Yes (own workflows) | — |
+
+CI does not need to run at all for a draft pull request (nothing runs until it is ready for
+review) or for a push whose head commit message contains `[skip ci]`, which GitHub honors for
+`pull_request` runs too; use it for a follow-up that only rewords prose or comments, and let the
+next real push run the checks.
 
 A pull request's Go checks cover the packages `api/scripts/affected-packages.py` selects: the ones it
 changes and every package whose code or tests import a changed non-test package. A change the import
