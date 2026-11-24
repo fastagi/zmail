@@ -199,6 +199,9 @@ const messages = {
       noMailboxes: 'No mailbox to read yet',
       noMailboxesManage: 'Create a mailbox, or give yourself access to one under Manage mailboxes.',
       noMailboxesMember: 'An owner or admin of this organization can give you access to a mailbox.',
+      personalNoMailboxes: 'Connect your personal mailboxes',
+      personalNoMailboxesHint:
+        'Gmail, Outlook, 163, QQ, iCloud, and any IMAP mailbox — all in one unified inbox.',
       view: 'No mail yet',
       viewHint: 'Mail that arrives in the mailboxes you read appears here.',
       todayHint: 'Mail that arrives today shows here, read or not.',

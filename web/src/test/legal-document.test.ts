@@ -37,8 +37,13 @@ describe('legal copy', () => {
     }
   });
 
-  it('the privacy policy discloses Google Limited Use', () => {
+  it('the privacy policy discloses Google Limited Use and no AI/ML training', () => {
+    expect(enUS.privacy.sections.google.heading).toContain('Limited Use');
+    expect(enUS.privacy.sections.google.body).toContain('Google API Services User Data Policy');
     expect(enUS.privacy.sections.google.body).toContain('Limited Use');
+    expect(enUS.privacy.sections.google.body).toContain('AI/ML');
+    expect(zhHans.privacy.sections.google.heading).toContain('Limited Use');
     expect(zhHans.privacy.sections.google.body).toContain('Limited Use');
+    expect(zhHans.privacy.sections.google.body).toContain('AI/ML');
   });
 });

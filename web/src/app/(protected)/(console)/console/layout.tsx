@@ -42,6 +42,7 @@ import { useAuthStore } from '@/features/auth/store/auth-store';
 import { isWebFeatureEnabled } from '@/config/features';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
 import { WorkspaceModeToggle } from '@/features/mailbox/components/workspace-mode-toggle';
+import { useIsPersonalMode } from '@/features/mailbox/stores/workspace-mode';
 import type { MemberFeature } from '@/features/organization/types';
 
 import type { ConsoleNavItem } from './_components/console-mobile-nav';
@@ -74,6 +75,8 @@ interface NavItem {
   icon: LucideIcon;
   /** Shown only to members granted this feature in the active organization. */
   feature?: MemberFeature;
+  /** Kept visible in Personal Mode; all other main nav items are B2B-only. */
+  personalVisible?: boolean;
 }
 
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
@@ -99,6 +102,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   const notificationEnabled = isWebFeatureEnabled('notification');
   const assetEnabled = isWebFeatureEnabled('asset');
   const usageEnabled = isWebFeatureEnabled('usage');
+  const isPersonalMode = useIsPersonalMode();
   // Until the active organization's grants are known every entry shows; the pages gate themselves.
   const memberFeatures = useChosenMemberFeatures(
     organizationEnabled && isWebFeatureEnabled('mailbox')
@@ -148,6 +152,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             titleKey: 'nav.mailboxes' as const,
             href: ROUTES.CONSOLE.MAILBOXES,
             icon: Mail,
+            personalVisible: true,
           },
           {
             titleKey: 'nav.mailBroadcasts' as const,
@@ -177,9 +182,12 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
       : []),
     // fastbuild:slot web.console.nav
   ];
-  const mainNavItems = allMainNavItems.filter(
-    item => !item.feature || !memberFeatures || memberFeatures[item.feature]
-  );
+  const mainNavItems = allMainNavItems.filter(item => {
+    if (isPersonalMode) {
+      return Boolean(item.personalVisible);
+    }
+    return !item.feature || !memberFeatures || memberFeatures[item.feature];
+  });
 
   const secondaryNavItems: NavItem[] = [
     {
@@ -226,11 +234,12 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
               <OrganizationSwitcher />
             </Suspense>
           ) : null}
-          {organizationEnabled && isWebFeatureEnabled('mailbox') ? (
+          {!isPersonalMode && organizationEnabled && isWebFeatureEnabled('mailbox') ? (
             <Suspense fallback={null}>
               <AdminEntryLink />
             </Suspense>
           ) : null}
+          {isPersonalMode && compactNav ? <WorkspaceModeToggle size="sm" /> : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">

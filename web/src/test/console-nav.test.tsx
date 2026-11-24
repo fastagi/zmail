@@ -3,6 +3,10 @@ import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConsoleLayout from '@/app/(protected)/(console)/console/layout';
+import {
+  DEFAULT_WORKSPACE_MODE,
+  useWorkspaceModeStore,
+} from '@/features/mailbox/stores/workspace-mode';
 import { messages } from '@/i18n/modules';
 
 const state = vi.hoisted(() => ({
@@ -50,6 +54,11 @@ describe('console navigation', () => {
   beforeEach(() => {
     state.pathname = '/console/mailboxes';
     state.features = undefined;
+    window.localStorage.clear();
+    useWorkspaceModeStore.setState({
+      mode: DEFAULT_WORKSPACE_MODE,
+      isPersonal: false,
+    });
   });
 
   it('hides the entries a member has not been granted in the active organization', () => {
@@ -144,5 +153,29 @@ describe('console navigation', () => {
     state.pathname = '/console/emails';
     view.rerender(layoutTree());
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('hides B2B-only nav items in Personal Mode while keeping Mailboxes, Settings, and the mode toggle', () => {
+    state.pathname = '/console/mailboxes';
+    useWorkspaceModeStore.getState().setMode('personal');
+    renderLayout();
+
+    expect(screen.getByRole('link', { name: 'Mailboxes' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Workspace mode' })).toHaveAttribute(
+      'data-mode',
+      'personal'
+    );
+    for (const name of [
+      'Console',
+      'Organizations',
+      'Emails',
+      'Broadcasts',
+      'Contacts',
+      'Templates',
+      'Developers',
+    ]) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
+    }
   });
 });

@@ -9,6 +9,10 @@ import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MailboxesRoute } from '@/features/mailbox/components/mailboxes-route';
+import {
+  DEFAULT_WORKSPACE_MODE,
+  useWorkspaceModeStore,
+} from '@/features/mailbox/stores/workspace-mode';
 import { markInboxRowRead } from '@/features/mailbox/hooks/use-inbox';
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import { mailboxKeys } from '@/features/mailbox/hooks/use-mailbox';
@@ -843,6 +847,22 @@ describe('unified inbox', () => {
     renderRoute();
     expect(screen.getByText('No mailbox to read yet')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).not.toBeInTheDocument();
+  });
+
+  it('shows the MailMaster-style personal empty state when Personal Mode has 0 mailboxes', () => {
+    state.mailboxes.data = [];
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    useWorkspaceModeStore.getState().setMode('personal');
+    const { unmount } = renderRoute();
+    try {
+      expect(screen.getByText('Connect your personal mailboxes')).toBeInTheDocument();
+      expect(screen.getByText(/Gmail, Outlook, 163, QQ, iCloud/u)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add external mailbox' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).not.toBeInTheDocument();
+    } finally {
+      unmount();
+      useWorkspaceModeStore.getState().setMode(DEFAULT_WORKSPACE_MODE);
+    }
   });
 
   it('opens mailbox creation at once for a team just created', async () => {

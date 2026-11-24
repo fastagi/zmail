@@ -32,6 +32,7 @@ import {
 } from '@/features/mailbox/components/mail-organization';
 import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
+import { useIsPersonalMode } from '@/features/mailbox/stores/workspace-mode';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -88,6 +89,7 @@ export function InboxWorkspace() {
 
 function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadyScope }) {
   const t = useT('mailbox');
+  const isPersonalMode = useIsPersonalMode();
   const state = useInboxWorkspace({ canManage });
 
   const externalDialogs = (
@@ -132,16 +134,33 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   }
 
   if (state.readable.length === 0) {
+    const isPersonalEmpty = isPersonalMode && state.mailboxes.data.length === 0;
     return (
       <InboxFrame scope={scope}>
         <EmptyState
           icon={<Mail className="size-5" aria-hidden="true" />}
-          title={t('inbox.empty.noMailboxes')}
+          title={t(isPersonalEmpty ? 'inbox.empty.personalNoMailboxes' : 'inbox.empty.noMailboxes')}
           description={t(
-            canManage ? 'inbox.empty.noMailboxesManage' : 'inbox.empty.noMailboxesMember'
+            isPersonalEmpty
+              ? 'inbox.empty.personalNoMailboxesHint'
+              : canManage
+                ? 'inbox.empty.noMailboxesManage'
+                : 'inbox.empty.noMailboxesMember'
           )}
           action={
-            canManage || state.externalOn ? (
+            isPersonalEmpty ? (
+              state.externalOn ? (
+                <Button
+                  type="button"
+                  size="default"
+                  variant="default"
+                  icon={<Plus className="size-4" />}
+                  onClick={() => state.openConnect()}
+                >
+                  {t('external.sidebar.add')}
+                </Button>
+              ) : undefined
+            ) : canManage || state.externalOn ? (
               <div className="flex flex-wrap justify-center gap-2">
                 {canManage ? (
                   <ManageMailboxesAction

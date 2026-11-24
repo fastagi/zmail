@@ -193,6 +193,9 @@ const messages = {
       noMailboxes: '你还没有可阅读的邮箱',
       noMailboxesManage: '创建一个邮箱，或在“管理邮箱”中给自己访问权限。',
       noMailboxesMember: '本组织的所有者或管理员可以给你邮箱的访问权限。',
+      personalNoMailboxes: '连接你的个人邮箱',
+      personalNoMailboxesHint:
+        'Gmail、Outlook、163、QQ、iCloud 及任意 IMAP 邮箱，汇总到一个统一收件箱。',
       view: '还没有邮件',
       viewHint: '你能阅读的邮箱收到的邮件会出现在这里。',
       todayHint: '今天收到的邮件会出现在这里，无论是否已读。',
