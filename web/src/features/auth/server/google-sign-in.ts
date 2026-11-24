@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { authConfig } from '@/config/auth';
 import { env } from '@/config/env';
 import { serverEnv } from '@/config/server-env';
+import { getAuthSessionCookieName } from '@/config/auth-session';
 import { setApiSessionCookie } from '@/features/auth/server/api-session';
 import { configuredAdapter } from '@/features/auth/server/auth-adapter-route';
 import { privateAuthResponse } from '@/features/auth/server/auth-response';
@@ -18,6 +19,7 @@ import {
   GOOGLE_SIGN_IN_CANCELLED,
   GOOGLE_SIGN_IN_ERROR_PARAM,
 } from '@/features/auth/utils/google-sign-in';
+import { EXTERNAL_MAIL_CALLBACK_PATH } from '@/features/mailbox/utils/external-mail';
 import { ApiErrorCode } from '@/http/codes';
 
 type NodeEnvironment = typeof env.NODE_ENV;
@@ -131,13 +133,26 @@ export async function completeGoogleSignInWithGoApi(request: Request): Promise<N
   const query = new URL(request.url).searchParams;
   const cookieStore = await cookies();
   const cookieState = cookieStore.get(getGoogleStateCookieName())?.value ?? '';
-  cookieStore.set(createExpiredGoogleStateCookie());
-
-  if (query.get('error')) {
-    return googleSignInFailureRedirect(GOOGLE_SIGN_IN_CANCELLED);
-  }
+  const hasAuthSession = Boolean(cookieStore.get(getAuthSessionCookieName())?.value);
   const state = query.get('state') ?? '';
   const code = query.get('code') ?? '';
+  const providerError = query.get('error');
+
+  // When an already-authenticated user returns from Google without a login state cookie,
+  // forward to the external-mail callback page so Gmail binding reuses the registered redirect URI.
+  if (!cookieState && hasAuthSession && state && (code || providerError)) {
+    const target = new URL(EXTERNAL_MAIL_CALLBACK_PATH, env.NEXT_PUBLIC_APP_URL);
+    target.searchParams.set('state', state);
+    if (code) target.searchParams.set('code', code);
+    if (providerError) target.searchParams.set('error', providerError);
+    return privateAuthResponse(NextResponse.redirect(target, 303));
+  }
+
+  cookieStore.set(createExpiredGoogleStateCookie());
+
+  if (providerError) {
+    return googleSignInFailureRedirect(GOOGLE_SIGN_IN_CANCELLED);
+  }
   if (
     !GOOGLE_STATE_PATTERN.test(state) ||
     !sameState(state, cookieState) ||
