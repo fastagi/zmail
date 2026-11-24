@@ -5,43 +5,26 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
-  type InfiniteData,
   type QueryClient,
 } from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { liveRefresh, mailboxKeys, validId } from '@/features/mailbox/hooks/mailbox-keys';
+import { flagChange, showFlagChange } from '@/features/mailbox/hooks/mailbox-optimistic-flags';
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import type {
   CreateMailboxInput,
-  InboxItem,
-  InboxPage,
-  MailDnsRecordInput,
-  MailDnsRecordPatch,
-  MailDomain,
-  MailDomainInput,
   MailFolderInput,
   MailLabelInput,
   MailLogFilters,
-  MailMessage,
   MailMessageFilters,
-  MailMessagePage,
-  MailMessageSummary,
   MailboxListScope,
-  MailboxPermission,
   SendMailMessageInput,
   UpdateMailMessageInput,
   UpdateMailMessagesInput,
 } from '@/features/mailbox/types';
 
 export const MAIL_PAGE_SIZE = 20;
-/** How often a domain whose setup runs is read again. */
-const setupRefreshMs = 3_000;
-/**
- * While a managed zone waits for its registrar's name servers, the API looks at it every few
- * minutes; reading the list once a minute shows the change soon after without asking Cloudflare.
- */
-const zoneRefreshMs = 60_000;
 export const MAIL_STATS_DAYS = 7;
 export {
   MAIL_REFRESH_MS,
@@ -49,6 +32,33 @@ export {
   mailboxKeys,
   validId,
 } from '@/features/mailbox/hooks/mailbox-keys';
+export {
+  useConnectMailDomain,
+  useCreateDnsRecord,
+  useDeleteDnsRecord,
+  useDeleteMailZone,
+  useEnableReceiving,
+  useListDnsRecords,
+  useListMailZones,
+  useMailDomains,
+  useMailZone,
+  useMailboxDomains,
+  usePreviewMailDomain,
+  useRefreshMailDomain,
+  useRemoveMailDomain,
+  useSetDefaultMailDomain,
+  useUpdateDnsRecord,
+} from '@/features/mailbox/hooks/use-mail-domains';
+export {
+  MAILBOX_ACCESS_EVENTS_PAGE_SIZE,
+  useDeleteMailboxSealedHistory,
+  useHandOverMailbox,
+  useMailboxAccessEvents,
+  useMailboxMembers,
+  useRemoveMailboxMember,
+  useSetMailboxMember,
+  useSetMailboxWebhooks,
+} from '@/features/mailbox/hooks/use-mailbox-access';
 
 
 /** The log and the per-day counts span every mailbox, so any message change touches them. */
@@ -88,194 +98,6 @@ export function invalidateMail(
 
 
 // The workspace renders every error inline, so the global error toast stays quiet.
-
-export function useMailboxDomains(organizationId: number) {
-  return useQuery({
-    queryKey: mailboxKeys.domains(organizationId),
-    queryFn: () => mailboxService.domains(organizationId),
-    enabled: validId(organizationId),
-    staleTime: 5 * 60_000,
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-/** Connected domains; only loaded when the instance allows them. */
-export function useMailDomains(organizationId: number, enabled: boolean) {
-  return useQuery({
-    queryKey: mailboxKeys.mailDomains(organizationId),
-    queryFn: () => mailboxService.mailDomains(organizationId),
-    enabled: enabled && validId(organizationId),
-    // A setup runs in the background on the API, and a pending zone activates there; follow both.
-    refetchInterval: query =>
-      query.state.data?.some(domain => domain.setting_up)
-        ? setupRefreshMs
-        : query.state.data?.some(domain => domain.zone?.status === 'pending')
-          ? zoneRefreshMs
-          : false,
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-/**
- * A connected domain changes which domains new mailboxes may use; connecting can create a managed
- * zone, a check can activate one, and a setup writes its records.
- */
-function refreshDomains(queryClient: QueryClient, organizationId: number) {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: mailboxKeys.mailDomains(organizationId) }),
-    queryClient.invalidateQueries({ queryKey: mailboxKeys.domains(organizationId) }),
-    queryClient.invalidateQueries({ queryKey: mailboxKeys.mailZones(organizationId) }),
-  ]);
-}
-
-/**
- * Puts a domain the API just answered with into the cached list, so its card shows the answer at
- * once instead of waiting for the list to be read again.
- */
-function storeDomain(queryClient: QueryClient, organizationId: number, domain: MailDomain) {
-  queryClient.setQueryData<MailDomain[]>(mailboxKeys.mailDomains(organizationId), current =>
-    current?.map(item => (item.id === domain.id ? domain : item))
-  );
-}
-
-export function useConnectMailDomain(organizationId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: MailDomainInput) => mailboxService.connectMailDomain(organizationId, input),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => refreshDomains(queryClient, organizationId),
-  });
-}
-
-export function useRefreshMailDomain(organizationId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ domain, action }: { domain: MailDomain; action: 'setups' | 'checks' }) =>
-      mailboxService.refreshMailDomain(organizationId, domain.id, action),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSuccess: domain => storeDomain(queryClient, organizationId, domain),
-    onSettled: () => refreshDomains(queryClient, organizationId),
-  });
-}
-
-export function useRemoveMailDomain(organizationId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (domainId: number) => mailboxService.removeMailDomain(organizationId, domainId),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => refreshDomains(queryClient, organizationId),
-  });
-}
-
-/** Changes nothing on the server, so nothing is invalidated. */
-export function usePreviewMailDomain(organizationId: number) {
-  return useMutation({
-    mutationFn: (name: string) => mailboxService.previewMailDomain(organizationId, name),
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-export function useEnableReceiving(organizationId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (domainId: number) => mailboxService.enableReceiving(organizationId, domainId),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSuccess: domain => storeDomain(queryClient, organizationId, domain),
-    onSettled: () => refreshDomains(queryClient, organizationId),
-  });
-}
-
-/** Moves the default mark, which changes every listed domain, so both lists are read again. */
-export function useSetDefaultMailDomain(organizationId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (domainId: number) => mailboxService.setDefaultMailDomain(organizationId, domainId),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSuccess: domain =>
-      queryClient.setQueryData<MailDomain[]>(mailboxKeys.mailDomains(organizationId), current =>
-        current?.map(item => (item.id === domain.id ? domain : { ...item, default: false }))
-      ),
-    onSettled: () => refreshDomains(queryClient, organizationId),
-  });
-}
-
-/** Managed zones; only loaded when the instance allows custom domains. */
-export function useListMailZones(organizationId: number, enabled: boolean) {
-  return useQuery({
-    queryKey: mailboxKeys.mailZones(organizationId),
-    queryFn: () => mailboxService.listMailZones(organizationId),
-    enabled: enabled && validId(organizationId),
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-export function useMailZone(organizationId: number, zoneId: number) {
-  return useQuery({
-    queryKey: mailboxKeys.mailZone(organizationId, zoneId),
-    queryFn: () => mailboxService.getMailZone(organizationId, zoneId),
-    enabled: validId(organizationId) && validId(zoneId),
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-export function useDeleteMailZone(organizationId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (zoneId: number) => mailboxService.deleteMailZone(organizationId, zoneId),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSuccess: (_result, zoneId) => {
-      queryClient.removeQueries({ queryKey: mailboxKeys.mailZone(organizationId, zoneId) });
-    },
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: mailboxKeys.mailZones(organizationId) }),
-  });
-}
-
-/** Read from Cloudflare on every request; the API keeps no copy. */
-export function useListDnsRecords(organizationId: number, zoneId: number) {
-  return useQuery({
-    queryKey: mailboxKeys.dnsRecords(organizationId, zoneId),
-    queryFn: () => mailboxService.listDnsRecords(organizationId, zoneId),
-    enabled: validId(organizationId) && validId(zoneId),
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-function refreshDnsRecords(queryClient: QueryClient, organizationId: number, zoneId: number) {
-  return queryClient.invalidateQueries({
-    queryKey: mailboxKeys.dnsRecords(organizationId, zoneId),
-  });
-}
-
-export function useCreateDnsRecord(organizationId: number, zoneId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: MailDnsRecordInput) =>
-      mailboxService.createDnsRecord(organizationId, zoneId, input),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => refreshDnsRecords(queryClient, organizationId, zoneId),
-  });
-}
-
-export function useUpdateDnsRecord(organizationId: number, zoneId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ recordId, input }: { recordId: string; input: MailDnsRecordPatch }) =>
-      mailboxService.updateDnsRecord(organizationId, zoneId, recordId, input),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => refreshDnsRecords(queryClient, organizationId, zoneId),
-  });
-}
-
-export function useDeleteDnsRecord(organizationId: number, zoneId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (recordId: string) =>
-      mailboxService.deleteDnsRecord(organizationId, zoneId, recordId),
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => refreshDnsRecords(queryClient, organizationId, zoneId),
-  });
-}
 
 /** `live` keeps the list (and its unread counts) fresh while a mailbox is open. */
 export function useMailboxes(
@@ -372,110 +194,6 @@ export function useSendMailMessage(organizationId: number, mailboxId: number) {
     // A reply joins the thread it answers.
     onSettled: () => invalidateMail(queryClient, organizationId, mailboxId, true),
   });
-}
-
-/** Read state, star, placement, folder, or the complete set of labels of one message. */
-/** A change of only the caller's own flags, which the caches can show before the server answers. */
-interface MailFlagChange {
-  read?: boolean;
-  starred?: boolean;
-}
-
-const flagFields = new Set(['read', 'starred', 'message_ids']);
-
-/** The flags `input` changes when it changes nothing else (no move, folder, or label); else null. */
-function flagChange(input: Record<string, unknown>): MailFlagChange | null {
-  const { read, starred } = input;
-  const others = Object.entries(input).filter(
-    ([name, value]) => value !== undefined && !flagFields.has(name)
-  );
-  if (others.length > 0) return null;
-  if (read === undefined && starred === undefined) return null;
-  return {
-    ...(typeof read === 'boolean' ? { read } : {}),
-    ...(typeof starred === 'boolean' ? { starred } : {}),
-  };
-}
-
-/** One message with the flags changed; `read` only means something for inbound mail. */
-function flagMessage<T extends MailMessageSummary>(message: T, change: MailFlagChange): T {
-  return {
-    ...message,
-    ...(change.starred === undefined ? {} : { starred: change.starred }),
-    ...(change.read === undefined || message.direction !== 'inbound' ? {} : { read: change.read }),
-  };
-}
-
-/**
- * A listed row with the flags of `ids` changed. A thread row is starred or unread as soon as one
- * of its messages is, and stops being so only when the change covers all of them.
- */
-function flagRow<T extends MailMessageSummary | InboxItem>(
-  row: T,
-  ids: ReadonlySet<number>,
-  change: MailFlagChange
-): T {
-  const threadIds = row.thread?.message_ids ?? [row.id];
-  if (!ids.has(row.id) && !threadIds.some(id => ids.has(id))) return row;
-  const next = ids.has(row.id) ? flagMessage(row, change) : { ...row };
-  if (!row.thread) return next;
-  const all = threadIds.every(id => ids.has(id));
-  let { starred, unread } = row.thread;
-  if (change.starred === true || (change.starred === false && all)) starred = change.starred;
-  if (change.read === false) unread = true;
-  else if (change.read === true && all) unread = false;
-  return { ...next, thread: { ...row.thread, starred, unread } };
-}
-
-/**
- * Shows a flag change of `messageIds` in every cached view of the mailbox (the open message, its
- * thread, the mailbox's lists, the unified inbox) before the server answers. Answers the function
- * that puts those caches back, for a failed request.
- */
-function showFlagChange(
-  queryClient: QueryClient,
-  organizationId: number,
-  mailboxId: number,
-  messageIds: readonly number[],
-  change: MailFlagChange
-): () => void {
-  const ids = new Set(messageIds);
-  const keys = [
-    mailboxKeys.messageDetails(organizationId, mailboxId),
-    mailboxKeys.threads(organizationId, mailboxId),
-    mailboxKeys.messages(organizationId, mailboxId),
-    mailboxKeys.inboxes(organizationId),
-  ];
-  const snapshots = keys.flatMap(queryKey => queryClient.getQueriesData<unknown>({ queryKey }));
-  queryClient.setQueriesData<MailMessage>({ queryKey: keys[0] }, message =>
-    message && ids.has(message.id) ? flagMessage(message, change) : message
-  );
-  queryClient.setQueriesData<MailMessage[]>({ queryKey: keys[1] }, thread =>
-    Array.isArray(thread)
-      ? thread.map(message => (ids.has(message.id) ? flagMessage(message, change) : message))
-      : thread
-  );
-  queryClient.setQueriesData<MailMessagePage>({ queryKey: keys[2] }, page =>
-    page && Array.isArray(page.items)
-      ? { ...page, items: page.items.map(row => flagRow(row, ids, change)) }
-      : page
-  );
-  queryClient.setQueriesData<InfiniteData<InboxPage, unknown>>({ queryKey: keys[3] }, listing =>
-    listing?.pages
-      ? {
-          ...listing,
-          pages: listing.pages.map(page => ({
-            ...page,
-            items: page.items.map(row =>
-              row.mailbox_id === mailboxId ? flagRow(row, ids, change) : row
-            ),
-          })),
-        }
-      : listing
-  );
-  return () => {
-    for (const [key, data] of snapshots) queryClient.setQueryData(key, data);
-  };
 }
 
 /**
@@ -720,99 +438,5 @@ export function useUpdateMailLabel(organizationId: number, mailboxId: number) {
 export function useDeleteMailLabel(organizationId: number, mailboxId: number) {
   return useOrganizeMutation(organizationId, mailboxId, 'labels', (labelId: number) =>
     mailboxService.deleteLabel(organizationId, mailboxId, labelId)
-  );
-}
-
-export const MAILBOX_ACCESS_EVENTS_PAGE_SIZE = 20;
-
-/** Members of a shared mailbox; only asked for when the caller may manage them. */
-export function useMailboxMembers(organizationId: number, mailboxId: number, enabled: boolean) {
-  return useQuery({
-    queryKey: mailboxKeys.members(organizationId, mailboxId),
-    queryFn: () => mailboxService.members(organizationId, mailboxId),
-    enabled: enabled && validId(organizationId) && validId(mailboxId),
-    staleTime: 15_000,
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-/** One page of the access history; only asked for with `see_history`. */
-export function useMailboxAccessEvents(
-  organizationId: number,
-  mailboxId: number,
-  page: number,
-  enabled: boolean
-) {
-  return useQuery({
-    queryKey: mailboxKeys.accessEventPage(organizationId, mailboxId, page),
-    queryFn: () =>
-      mailboxService.accessEvents(organizationId, mailboxId, {
-        page,
-        perPage: MAILBOX_ACCESS_EVENTS_PAGE_SIZE,
-      }),
-    enabled: enabled && validId(organizationId) && validId(mailboxId),
-    placeholderData: keepPreviousData,
-    staleTime: 15_000,
-    meta: LOCAL_ERROR_HANDLING_META,
-  });
-}
-
-/**
- * An access change can change what the caller may do with the mailbox, its members, its
- * history, and, after a handover or a sealed deletion, which mail is visible anywhere.
- */
-function invalidateAccess(queryClient: QueryClient, organizationId: number, mailboxId: number) {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
-    // The directory counts members.
-    queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
-    queryClient.invalidateQueries({ queryKey: mailboxKeys.mailbox(organizationId, mailboxId) }),
-    invalidateLog(queryClient, organizationId),
-  ]);
-}
-
-function useAccessMutation<Variables, Result>(
-  organizationId: number,
-  mailboxId: number,
-  mutationFn: (variables: Variables) => Promise<Result>
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn,
-    meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => invalidateAccess(queryClient, organizationId, mailboxId),
-  });
-}
-
-export function useSetMailboxMember(organizationId: number, mailboxId: number) {
-  return useAccessMutation(
-    organizationId,
-    mailboxId,
-    ({ userId, permission }: { userId: number; permission: MailboxPermission }) =>
-      mailboxService.setMember(organizationId, mailboxId, userId, permission)
-  );
-}
-
-export function useRemoveMailboxMember(organizationId: number, mailboxId: number) {
-  return useAccessMutation(organizationId, mailboxId, (userId: number) =>
-    mailboxService.removeMember(organizationId, mailboxId, userId)
-  );
-}
-
-export function useHandOverMailbox(organizationId: number, mailboxId: number) {
-  return useAccessMutation(organizationId, mailboxId, (successorUserId: number) =>
-    mailboxService.handOver(organizationId, mailboxId, successorUserId)
-  );
-}
-
-export function useDeleteMailboxSealedHistory(organizationId: number, mailboxId: number) {
-  return useAccessMutation(organizationId, mailboxId, (confirmAddress: string) =>
-    mailboxService.deleteSealedHistory(organizationId, mailboxId, confirmAddress)
-  );
-}
-
-export function useSetMailboxWebhooks(organizationId: number, mailboxId: number) {
-  return useAccessMutation(organizationId, mailboxId, (enabled: boolean) =>
-    mailboxService.setWebhooks(organizationId, mailboxId, enabled)
   );
 }
