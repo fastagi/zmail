@@ -30,6 +30,7 @@ const (
 // logged without content and never fails receipt; without the notification starter it does
 // nothing.
 func (s *service) publishMailReceived(ctx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) {
+	s.publishInboundEvent(ctx, mailbox, message)
 	if s.notifications == nil || mailbox == nil || message == nil || message.ID == 0 {
 		return
 	}
