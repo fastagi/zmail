@@ -213,6 +213,7 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 		return nil, false, err
 	}
 	binding.address, binding.accountDirectoryID = account.Address, account.DirectoryID
+	binding.sends = connector.Capabilities.Send
 	return s.saveExternalBinding(ctx, viewer, connector, token, binding)
 }
 
