@@ -1,20 +1,15 @@
 # Zmail
 
-Team mailboxes on your own domain, built on Cloudflare Email Service. An organization claims
-addresses on the deployment's mail domain; its members read mail sent to them and send mail from
-them, through the Web console or the HTTP API. Zmail is built on the FastBuild scaffold: a Go API on PostgreSQL, a
-Next.js Web application, and an Admin Console.
+**Team email on your own domain.** Zmail gives your team a shared inbox for customer replies,
+a way to send product updates, and an HTTP API for email from your app.
 
-| Piece | Where | What it does |
-|---|---|---|
-| `mailbox` starter | [`api/internal/modules/mailbox`](api/internal/modules/mailbox) | Mailboxes, messages, ownership, send limits, signed inbound delivery |
-| Mail transports | [`api/internal/infra/mailtransport`](api/internal/infra/mailtransport) | Cloudflare Email Sending REST adapter and a development log transport |
-| Email Worker | [`deploy/cloudflare/email-worker`](deploy/cloudflare/email-worker) | Receives mail from Cloudflare Email Routing and delivers it to the API |
-| Web console | [`web/src/features/mailbox`](web/src/features/mailbox) | Mailbox list, inbox, sent folder, reading, composing |
+[Visit Zmail](https://zmail.im/) · [Run locally](#run-zmail-locally) · [Send with the API](#send-from-a-backend-service) · [Self-hosting guide](deploy/self-host/README.md)
 
-The HTTP behavior is in [`contracts/MAILBOXES.md`](contracts/MAILBOXES.md) and the design record in
-[`docs/plans/mailbox.md`](docs/plans/mailbox.md) and
-[`docs/plans/mailbox-organizations.md`](docs/plans/mailbox-organizations.md).
+| When you need to… | Use Zmail to… |
+|---|---|
+| Answer a customer | Give teammates access to a shared address such as `support@`, read the conversation, and reply from that address. |
+| Announce a release | Build a reusable template, select a contact list, and send to a test group before the wider broadcast. |
+| Send an order receipt | Call the HTTP API from your backend and retry with the same idempotency key to avoid a duplicate send. |
 
 ## Run Zmail Locally
 
@@ -29,8 +24,8 @@ delivers nothing, so no Cloudflare account is needed. Sign in to the Web applica
 
 ## Send From A Backend Service
 
-Create an API key with the `mail:send` scope, then send from any mailbox of an organization the
-key's owner belongs to, naming the organization in `Organization-Id`:
+Create an API key with the `mail:send` scope, use a sender mailbox the key owner has permission to send from,
+and pass the mailbox’s organization in `Organization-Id`:
 
 ```bash
 curl https://<api host>/v1/outbound-mail-messages \
@@ -56,12 +51,12 @@ A message the provider rejects answers `502` and is kept as `failed`.
 5. Build the Web application with `NEXT_PUBLIC_OPTIONAL_FEATURES` containing `organization` and
    `mailbox`.
 
-Attachments, background retry, and per-mailbox access rules are not built yet; the plans list
-them as later slices.
+For mailbox permissions, delivery events, and API scopes, see the [mailbox contract](contracts/MAILBOXES.md).
 
-The rest of this document is the guide to the FastBuild scaffold underneath.
+<details>
+<summary>FastBuild scaffold and contributor guide</summary>
 
-# FastBuild
+## FastBuild
 
 **The enterprise application framework for the AI era.** Build complete business applications as
 fast as FastAPI builds APIs: a Go API, a Next.js application, and an Admin Console, with
@@ -435,3 +430,5 @@ sensitive details in a public issue.
 ## License
 
 FastBuild is available under the [MIT License](LICENSE).
+
+</details>
