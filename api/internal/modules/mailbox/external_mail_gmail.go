@@ -499,11 +499,7 @@ func (m gmailMessage) external() ExternalMessage {
 		Subject:    strings.Join(strings.Fields(truncateRunes(decodeHeader(header.Get("Subject")), domain.MaxMailSubjectLength)), " "),
 		References: parseReferences(header.Get("References")),
 	}
-	parser := mail.AddressParser{WordDecoder: headerDecoder}
-	if from, err := parser.Parse(header.Get("From")); err == nil {
-		external.FromAddress = strings.ToLower(from.Address)
-		external.FromName = truncateText(cleanText(from.Name), 255)
-	}
+	external.FromAddress, external.FromName = parseFromHeader(header.Get("From"))
 	if id, ok := normalizeMessageID(header.Get("Message-Id")); ok {
 		external.RFCMessageID = id
 	}

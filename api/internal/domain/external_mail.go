@@ -74,7 +74,7 @@ const (
 const ExternalMailAuthorizationTTL = 10 * time.Minute
 
 // MaxExternalMailBackfillDays bounds how far back the first sync of a connection may read.
-const MaxExternalMailBackfillDays = 90
+const MaxExternalMailBackfillDays = 3650
 
 // ExternalMailAuthorization is one pending sign-in to an outside account. It is completed once,
 // by the member who started it, before it expires.

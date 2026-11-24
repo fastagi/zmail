@@ -624,12 +624,12 @@ func (m outlookMessage) message() (ExternalMessage, bool) {
 	}
 	message := ExternalMessage{
 		ExternalID: m.ID,
-		Subject:    strings.Join(strings.Fields(truncateRunes(cleanText(m.Subject), domain.MaxMailSubjectLength)), " "),
+		Subject:    strings.Join(strings.Fields(truncateRunes(decodeMIMEHeader(m.Subject), domain.MaxMailSubjectLength)), " "),
 		To:         outlookAddresses(m.ToRecipients), Cc: outlookAddresses(m.CcRecipients),
 	}
 	if m.From != nil {
 		message.FromAddress = strings.ToLower(strings.TrimSpace(cleanText(m.From.EmailAddress.Address)))
-		message.FromName = truncateText(strings.TrimSpace(cleanText(m.From.EmailAddress.Name)), 255)
+		message.FromName = truncateText(strings.TrimSpace(decodeMIMEHeader(m.From.EmailAddress.Name)), 255)
 	}
 	if id, ok := normalizeMessageID(m.InternetMessageID); ok {
 		message.RFCMessageID = id

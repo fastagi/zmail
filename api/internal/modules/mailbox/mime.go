@@ -86,11 +86,7 @@ func readMail(raw []byte, strict bool) (*parsedMail, error) {
 	}
 	parsed.References = parseReferences(message.Header.Get("References"))
 
-	parser := mail.AddressParser{WordDecoder: headerDecoder}
-	if from, err := parser.Parse(message.Header.Get("From")); err == nil {
-		parsed.FromAddress = strings.ToLower(from.Address)
-		parsed.FromName = truncateText(cleanText(from.Name), 255)
-	}
+	parsed.FromAddress, parsed.FromName = parseFromHeader(message.Header.Get("From"))
 
 	walker := &mimeWalker{strict: strict}
 	walker.walk(textproto(message.Header), message.Body, 0, false)
@@ -299,11 +295,7 @@ func charsetReader(label string, input io.Reader) (io.Reader, error) {
 }
 
 func decodeHeader(raw string) string {
-	decoded, err := headerDecoder.DecodeHeader(raw)
-	if err != nil {
-		decoded = raw
-	}
-	return cleanText(decoded)
+	return decodeMIMEHeader(raw)
 }
 
 func headerAddresses(header mail.Header, key string) []string {

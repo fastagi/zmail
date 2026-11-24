@@ -331,7 +331,7 @@ func TestExternalMailStartRules(t *testing.T) {
 		"an admin's reconnect":        {f.admin, ExternalMailAuthorizationInput{ConnectionID: &f.connection.ID}, ErrExternalMailConnectionNotFound},
 		"another provider":            {f.b, ExternalMailAuthorizationInput{ConnectionID: &f.connection.ID, Provider: domain.ExternalMailProviderOutlook}, ErrExternalMailAuthorizationInvalid},
 		"an unknown connector":        {f.b, ExternalMailAuthorizationInput{Provider: "imap"}, ErrExternalMailProviderUnavailable},
-		"too long a backfill":         {f.b, ExternalMailAuthorizationInput{Provider: domain.ExternalMailProviderGmail, BackfillDays: 91}, ErrExternalMailAuthorizationInvalid},
+		"too long a backfill":         {f.b, ExternalMailAuthorizationInput{Provider: domain.ExternalMailProviderGmail, BackfillDays: domain.MaxExternalMailBackfillDays + 1}, ErrExternalMailAuthorizationInvalid},
 	} {
 		if _, err := f.service.StartExternalMailAuthorization(ctx, tc.viewer, tc.input); !errors.Is(err, tc.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
@@ -438,7 +438,7 @@ func TestExternalMailBindingHTTP(t *testing.T) {
 	if _, code, answer := start(`{}`); code != http.StatusUnprocessableEntity || answer["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
 		t.Fatalf("start without provider = %d %v", code, answer)
 	}
-	for _, payload := range []string{`{"provider":"gmail","backfill_days":91}`, `{"provider":"gmail","backfill_days":-1}`} {
+	for _, payload := range []string{fmt.Sprintf(`{"provider":"gmail","backfill_days":%d}`, domain.MaxExternalMailBackfillDays+1), `{"provider":"gmail","backfill_days":-1}`} {
 		if _, code, answer := start(payload); code != http.StatusUnprocessableEntity || answer["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
 			t.Fatalf("start with %s = %d %v", payload, code, answer)
 		}

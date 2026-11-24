@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -325,8 +326,8 @@ func (s *service) externalCopies(connection *domain.ExternalMailConnection, fetc
 		}
 		copies = append(copies, &domain.MailMessage{
 			MailboxID: connection.MailboxID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
-			FromAddress: truncateText(external.FromAddress, 320), FromName: truncateText(external.FromName, 255),
-			To: external.To, Cc: external.Cc, Subject: truncateRunes(external.Subject, domain.MaxMailSubjectLength),
+			FromAddress: truncateText(external.FromAddress, 320), FromName: truncateText(strings.TrimSpace(decodeMIMEHeader(external.FromName)), 255),
+			To: external.To, Cc: external.Cc, Subject: truncateRunes(decodeMIMEHeader(external.Subject), domain.MaxMailSubjectLength),
 			TextBody: external.TextBody, HTMLBody: external.HTMLBody,
 			MessageID: truncateText(external.RFCMessageID, 998), RFCMessageID: truncateText(external.RFCMessageID, 998),
 			InReplyTo: truncateText(external.InReplyTo, 998), References: external.References,

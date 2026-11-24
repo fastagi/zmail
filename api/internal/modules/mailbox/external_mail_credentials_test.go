@@ -332,7 +332,7 @@ func TestIMAPCredentialsHTTP(t *testing.T) {
 		"long password": {f.d, payload("dave@imap.test", "guess-"+strings.Repeat("x", 400), server.port), http.StatusUnprocessableEntity, domain.CodeValidationFailed},
 		"oauth":         {f.d, `{"provider":"gmail","host":"127.0.0.1","username":"d@x.test","password":"guess-4"}`, http.StatusNotFound, domain.CodeExternalMailProviderUnavailable},
 		// The backfill range is the binding's own rule, answered as on the OAuth start route.
-		"long backfill":     {f.d, `{"provider":"imap","host":"127.0.0.1","username":"d@x.test","password":"guess-5","backfill_days":91}`, http.StatusUnprocessableEntity, domain.CodeExternalMailAuthorizationInvalid},
+		"long backfill":     {f.d, fmt.Sprintf(`{"provider":"imap","host":"127.0.0.1","username":"d@x.test","password":"guess-5","backfill_days":%d}`, domain.MaxExternalMailBackfillDays+1), http.StatusUnprocessableEntity, domain.CodeExternalMailAuthorizationInvalid},
 		"negative backfill": {f.d, `{"provider":"imap","host":"127.0.0.1","username":"d@x.test","password":"guess-6","backfill_days":-1}`, http.StatusUnprocessableEntity, domain.CodeExternalMailAuthorizationInvalid},
 	} {
 		status, raw, body := call(want.viewer, want.body)
