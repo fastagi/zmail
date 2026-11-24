@@ -1,361 +1,48 @@
 'use client';
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { AlertCircle, Inbox, Mail, Plus, Settings2 } from 'lucide-react';
-import { toast } from 'sonner';
-
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { lazy, Suspense } from 'react';
+import { Mail, Plus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { isWebFeatureEnabled } from '@/config/features';
 import {
-  emptyDraft,
-  forwardDraft,
-  quotedReplyDraft,
-  replyAllDraft,
-  type ComposeDraft,
-} from '@/features/mailbox/components/compose-drafts';
+  ComposeDialog,
+  ExternalMailboxDialogs,
+  InboxFrame,
+  InboxOverlayDialogs,
+  InboxSkeleton,
+  MailShortcuts,
+  ManageMailboxesAction,
+} from '@/features/mailbox/components/inbox/inbox-dialogs';
+import { InboxListPane } from '@/features/mailbox/components/inbox/inbox-list-pane';
+import { InboxReadingSection } from '@/features/mailbox/components/inbox/inbox-reading-section';
 import {
-  InboxList,
-  InboxListHeader,
-  InboxListHeaderSkeleton,
-  InboxListSkeleton,
-} from '@/features/mailbox/components/inbox-list';
-import type {
-  InboxPaneActions,
-  InboxReaderNavigation,
-} from '@/features/mailbox/components/inbox-reading-pane';
-import {
-  InboxSidebar,
-  visibleRoles,
-  type InboxRoleFilter,
-  type InboxSidebarExternal,
-} from '@/features/mailbox/components/inbox-sidebar';
-import { useComposeFocusReturn } from '@/features/mailbox/components/compose-focus';
-import {
-  COMPOSE_PARAM,
-  COMPOSE_RESUME,
-  MAILBOX_PARAM,
-  readStoredMailboxId,
-} from '@/features/mailbox/components/mailbox-params';
+  NEW_PARAM,
+  OPEN_PARAM,
+  type InboxDateRange,
+  type ReadyScope,
+} from '@/features/mailbox/components/inbox/inbox-url';
+import { useInboxWorkspace } from '@/features/mailbox/components/inbox/use-inbox-workspace';
+import { InboxSidebar } from '@/features/mailbox/components/inbox-sidebar';
 import {
   MailOrganizationBoundary,
   MailOrganizationName,
   MailPageHeader,
   OrganizationLostState,
   mailPageClassName,
-  useMailOrganizationId,
 } from '@/features/mailbox/components/mail-organization';
-import {
-  EmptyState,
-  ErrorAlert,
-  ReaderArticleSkeleton,
-  useDateTimeFormat,
-} from '@/features/mailbox/components/mail-shared';
-import { MailTimeZoneContext } from '@/features/mailbox/components/mail-time';
-import type { PaletteCommand } from '@/features/mailbox/components/command-palette';
-import type { ExternalConnectPreset } from '@/features/mailbox/components/external-connect-dialog';
-import {
-  useInboxCounts,
-  useInboxMessages,
-  useInboxTimezone,
-  useMailRoles,
-} from '@/features/mailbox/hooks/use-inbox';
-import { useMailDrafts, useOpenMailDraft } from '@/features/mailbox/hooks/use-mail-drafts';
-import type { MailDraftSummary } from '@/features/mailbox/draft-schemas';
-import {
-  useExternalMailConnections,
-  useExternalMailConnectors,
-} from '@/features/mailbox/hooks/use-external-mail';
-import { useMailShortcuts, type MailShortcut } from '@/features/mailbox/hooks/use-mail-shortcuts';
-import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
-import {
-  useMailOrganization,
-  type MailOrganizationScope,
-} from '@/features/mailbox/hooks/use-mail-organization';
-import {
-  INBOX_ASSIGNMENTS,
-  INBOX_DATE_RANGES,
-  INBOX_VIEWS,
-  MAIL_SEARCH_MAX_LENGTH,
-} from '@/features/mailbox/schemas';
-import {
-  INBOX_TRIAGE_TABS,
-  triageTabCategories,
-  type InboxTriageTab,
-} from '@/features/mailbox/triage-tabs';
-import type {
-  InboxCounts,
-  InboxAssignment,
-  InboxFilters,
-  InboxItem,
-  InboxView,
-  MailMessage,
-  MailRole,
-  Mailbox,
-} from '@/features/mailbox/types';
-import { canComposeFrom, isConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
+import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
+import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
-import { ApiErrorCode } from '@/http/codes';
-import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-// Administration dialogs load when opened, not with the mail page.
-const DraftsDialog = lazy(() => import('./drafts-dialog'));
-const ManageRolesDialog = lazy(async () => {
-  const feature = await import('@/features/mailbox/components/manage-roles-dialog');
-  return { default: feature.ManageRolesDialog };
-});
-const ManageMailboxesDialog = lazy(async () => {
-  const feature = await import('@/features/mailbox/components/manage-mailboxes-dialog');
-  return { default: feature.ManageMailboxesDialog };
-});
-// The reading pane, with the thread and message readers, loads when a row first opens.
-const InboxReadingPane = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/inbox-reading-pane')).InboxReadingPane,
-}));
-const ShortcutHelpDialog = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/shortcut-help-dialog')).ShortcutHelpDialog,
-}));
-// The composer loads when it first opens.
-const ComposeDialog = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/compose-dialog')).ComposeDialog,
-}));
-// The triage tabs load only for an organization with AI triage on.
-const InboxTriageTabs = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/inbox-triage')).InboxTriageTabs,
-}));
-const CommandPalette = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/command-palette')).CommandPalette,
-}));
-// The sidebar sheet of narrow screens loads when first opened.
-const Sheet = lazy(async () => ({ default: (await import('@/components/ui/sheet')).Sheet }));
-const SheetContent = lazy(async () => ({
-  default: (await import('@/components/ui/sheet')).SheetContent,
-}));
-const SheetTitle = lazy(async () => ({
-  default: (await import('@/components/ui/sheet')).SheetTitle,
-}));
-// External mailboxes: the connect and manage dialogs load when opened, the reconnect notice only
-// when a connection needs it.
-const ExternalConnectDialog = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/external-connect-dialog'))
-    .ExternalConnectDialog,
-}));
-const ConnectedMailboxesDialog = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/connected-mailboxes-dialog'))
-    .ConnectedMailboxesDialog,
-}));
-const ExternalReconnectBanner = lazy(async () => ({
-  default: (await import('@/features/mailbox/components/external-reconnect-banner'))
-    .ExternalReconnectBanner,
-}));
-// The new-mail alerts offer exists only with the notification feature, which owns web push.
-const webPushOffered = isWebFeatureEnabled('notification');
-const WebPushBanner = lazy(async () => ({
-  default: (await import('@/features/notification/components/web-push-banner')).WebPushBanner,
-}));
-const MailboxAccessPanel = lazy(async () => {
-  const feature = await import('@/features/mailbox/components/mailbox-access-panel');
-  return { default: feature.MailboxAccessPanel };
-});
-
-/** Query parameter naming the open row of the unified inbox, so a reload keeps it open. */
-export const OPEN_PARAM = 'open';
-/**
- * The URL state of the unified inbox (D20): the view, one mailbox or one mail role (`none` for the
- * mailboxes without one), the search, the Unread tab.
- */
-const VIEW_PARAM = 'view';
-const BOX_PARAM = 'box';
-const ROLE_PARAM = 'role';
-const SEARCH_PARAM = 'q';
-const TAB_PARAM = 'tab';
-const TRIAGE_PARAM = 'triage';
-const DATE_PARAM = 'date';
-/** `new=mailbox`: the team was just created, so mailbox creation opens at once. */
-const NEW_PARAM = 'new';
-const NEW_TYPE_PARAM = 'type';
+export { OPEN_PARAM, type InboxDateRange };
 
 // Only someone without a team sees it, so it loads on demand.
 const TeamSetupCard = lazy(async () => {
   const feature = await import('@/features/organization/components/team-setup-card');
   return { default: feature.TeamSetupCard };
 });
-const UNREAD_TAB = 'unread';
-const ATTACHMENTS_TAB = 'attachments';
-const NO_ROLE = 'none';
-const filterParams = [
-  VIEW_PARAM,
-  BOX_PARAM,
-  ROLE_PARAM,
-  SEARCH_PARAM,
-  TAB_PARAM,
-  TRIAGE_PARAM,
-  DATE_PARAM,
-] as const;
-const rowIdPattern = /^[1-9]\d{0,15}$/u;
-const fallbackTimeZone = 'UTC';
-
-/** What the URL asks the inbox to list. */
-interface InboxUrlState {
-  view: InboxView;
-  box: number | null;
-  role: InboxRoleFilter | null;
-  q: string;
-  unread: boolean;
-  /** The With attachments tab: only messages with files. */
-  attachments: boolean;
-  /** The AI triage tab; it applies only to `all` and `today` without a search. */
-  triage: InboxTriageTab | null;
-  /** The assignment tab of shared conversations. */
-  assignment: InboxAssignment | null;
-  /** How far back the list reaches, in the inbox's zone. */
-  date: InboxDateRange | null;
-}
-
-export type InboxDateRange = (typeof INBOX_DATE_RANGES)[number];
-
-/** The calendar day `YYYY-MM-DD` that is `days` before today in `tz`. */
-function daysAgo(tz: string, days: number): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    timeZone: tz,
-  }).formatToParts(new Date());
-  const part = (type: 'year' | 'month' | 'day') =>
-    Number(parts.find(item => item.type === type)?.value);
-  const [year, month, day] = [part('year'), part('month'), part('day')];
-  return new Date(Date.UTC(year, month - 1, day - days)).toISOString().slice(0, 10);
-}
-
-/** The `since` or `until` day of a date range; the past week includes today and six days back. */
-function dateBounds(range: InboxDateRange, tz: string): Pick<InboxFilters, 'since' | 'until'> {
-  switch (range) {
-    case 'week':
-      return { since: daysAgo(tz, 6) };
-    case 'month':
-      return { since: daysAgo(tz, 29) };
-    case 'year':
-      return { since: daysAgo(tz, 364) };
-    case 'older':
-      return { until: daysAgo(tz, 365) };
-  }
-}
-
-/**
- * The inbox's URL state; a value it cannot use falls back to the default without a word. A
- * search lists `all`, the only view it combines with.
- */
-function readInboxUrl(params: URLSearchParams): InboxUrlState {
-  const rawSearch = params.get(SEARCH_PARAM) ?? '';
-  const q =
-    Array.from(rawSearch).length <= MAIL_SEARCH_MAX_LENGTH && !/\p{Cc}/u.test(rawSearch)
-      ? rawSearch.trim()
-      : '';
-  const rawView = params.get(VIEW_PARAM) ?? '';
-  const view =
-    q === '' && (INBOX_VIEWS as readonly string[]).includes(rawView)
-      ? (rawView as InboxView)
-      : 'all';
-  const rawBox = params.get(BOX_PARAM) ?? '';
-  const rawRole = params.get(ROLE_PARAM) ?? '';
-  let role: InboxRoleFilter | null = null;
-  if (rawRole === NO_ROLE) role = NO_ROLE;
-  else if (rowIdPattern.test(rawRole)) role = Number(rawRole);
-  const rawTriage = params.get(TRIAGE_PARAM) ?? '';
-  const triage =
-    q === '' &&
-    (view === 'all' || view === 'today') &&
-    (INBOX_TRIAGE_TABS as readonly string[]).includes(rawTriage)
-      ? (rawTriage as InboxTriageTab)
-      : null;
-  return {
-    view,
-    box: rowIdPattern.test(rawBox) ? Number(rawBox) : null,
-    role,
-    q,
-    unread: params.get(TAB_PARAM) === UNREAD_TAB,
-    attachments: params.get(TAB_PARAM) === ATTACHMENTS_TAB,
-    triage,
-    assignment: (INBOX_ASSIGNMENTS as readonly string[]).includes(params.get(TAB_PARAM) ?? '')
-      ? (params.get(TAB_PARAM) as InboxAssignment)
-      : null,
-    date: (INBOX_DATE_RANGES as readonly string[]).includes(params.get(DATE_PARAM) ?? '')
-      ? (params.get(DATE_PARAM) as InboxDateRange)
-      : null,
-  };
-}
-
-/**
- * The list query for the URL state. `all` and `sent` group by thread, except for the Unread tab,
- * a search, and an AI triage tab, which list single messages. The triage tab applies only while
- * the organization's triage is on.
- */
-function inboxFilters(
-  { view, box, role, q, unread, attachments, triage, assignment, date }: InboxUrlState,
-  tz: string,
-  triageOn: boolean
-): InboxFilters {
-  const triageTab = triageOn ? triage : null;
-  const grouped =
-    !unread &&
-    !attachments &&
-    date === null &&
-    q === '' &&
-    triageTab === null &&
-    (view === 'all' || view === 'sent');
-  return {
-    view,
-    ...(role === null ? {} : { roleId: role }),
-    ...(box === null ? {} : { mailboxId: box }),
-    ...(unread ? { unread: true } : {}),
-    ...(attachments ? { hasAttachments: true } : {}),
-    ...(q === '' ? {} : { q }),
-    ...(grouped ? { group: 'thread' as const } : {}),
-    ...(triageTab === null ? {} : { triage: triageTabCategories(triageTab) }),
-    ...(assignment === null ? {} : { assignment }),
-    ...(date === null ? {} : dateBounds(date, tz)),
-    tz,
-  };
-}
-
-/** The unread number the counts hold for this listing, where they hold one. */
-function listingUnread(counts: InboxCounts | undefined, state: InboxUrlState): number | undefined {
-  if (!counts || state.q !== '') return undefined;
-  if (state.box !== null) {
-    if (state.view !== 'all' || state.role !== null) return undefined;
-    return counts.mailboxes.find(item => item.mailbox_id === state.box)?.unread;
-  }
-  if (state.role !== null) {
-    if (state.view !== 'all') return undefined;
-    if (state.role === NO_ROLE) return counts.ungrouped_unread;
-    const role = state.role;
-    return counts.roles.find(item => item.role_id === role)?.unread ?? 0;
-  }
-  if (state.view === 'all') return counts.views.all_unread;
-  return state.view === 'today' ? counts.views.today_unread : undefined;
-}
-
-/** The inbox refused the query: a filter of the URL, or else the zone, is not one it takes. */
-function isRejectedQuery(error: unknown): boolean {
-  return (
-    error instanceof ApiError &&
-    error.status === 400 &&
-    error.errorCode === ApiErrorCode.COMMON_INVALID_INPUT
-  );
-}
-
-function isSearchTooBroad(error: unknown): boolean {
-  return error instanceof ApiError && error.errorCode === ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD;
-}
-
-type ReadyScope = Extract<MailOrganizationScope, { status: 'ready' }>;
 
 /**
  * The default mail page: every mailbox the user reads in one list, as three panes (§11.0: the
@@ -368,23 +55,6 @@ type ReadyScope = Extract<MailOrganizationScope, { status: 'ready' }>;
  * the mailboxes load, the three panes show as skeletons; without an organization, and when
  * there is nothing to list, the page keeps the console's ordinary header and frame.
  */
-/**
- * The sender of a new message: the narrowed mailbox when it may send, else the mailbox last
- * opened, else the first that may (D26). `sendable` is not empty.
- */
-function newMessageSender(
-  sendable: readonly Mailbox[],
-  box: number | null,
-  organizationId: number
-): Mailbox {
-  const stored = readStoredMailboxId(organizationId);
-  return (
-    sendable.find(mailbox => mailbox.id === box) ??
-    sendable.find(mailbox => mailbox.id === stored) ??
-    sendable[0]
-  );
-}
-
 export function InboxWorkspace() {
   const t = useT('mailbox');
   const scope = useMailOrganization();
@@ -416,311 +86,52 @@ export function InboxWorkspace() {
   );
 }
 
-/** A state of the page with nothing to list, in the console's ordinary frame and header. */
-function InboxFrame({ scope, children }: { scope: ReadyScope; children: React.ReactNode }) {
-  const t = useT('mailbox');
-  return (
-    <div className={cn(mailPageClassName, 'space-y-5')}>
-      <MailPageHeader title={t('inbox.title')} description={t('inbox.description')} scope={scope} />
-      {children}
-    </div>
-  );
-}
-
 function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadyScope }) {
   const t = useT('mailbox');
-  const organizationId = useMailOrganizationId();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const sortKey = 'zmail.mailbox-sort';
-  const [sort, setSort] = useState('default');
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(sortKey);
-      if (saved === 'address' || saved === 'unread') setSort(saved);
-    } catch {
-      /* Storage may be unavailable in private browsing. */
-    }
-  }, []);
-  const changeSort = (value: string) => {
-    setSort(value);
-    try {
-      window.localStorage.setItem(sortKey, value);
-    } catch {
-      /* Keep the session preference. */
-    }
-  };
-  const mailboxes = useMailboxes(organizationId, { live: true });
-  const roles = useMailRoles(organizationId);
-  // External mail is on while the instance lists a connector; the caller's connections are read
-  // only then, since their route answers 404 while it is off.
-  const connectors = useExternalMailConnectors(organizationId);
-  const connectorList = connectors.data ?? [];
-  const externalOn = connectorList.length > 0;
-  // Connections are also read for connected mailboxes the list already holds, so their status
-  // shows even after the instance stops offering connectors.
-  const hasConnected = (mailboxes.data ?? []).some(isConnectedMailbox);
-  const connections = useExternalMailConnections(organizationId, {
-    enabled: externalOn || hasConnected,
-  });
-  const connectionList = connections.data ?? [];
-  // Mounted from the first open on, so the dialogs can animate closed.
-  const [connectOpen, setConnectOpen] = useState(false);
-  const [connectMounted, setConnectMounted] = useState(false);
-  const [manageExternalOpen, setManageExternalOpen] = useState(false);
-  const [manageExternalMounted, setManageExternalMounted] = useState(false);
-  // Where focus goes back when the external mailbox dialogs close, shared because each opens the
-  // other: the sidebar control that started the flow.
-  const externalReturnFocus = useRef<HTMLElement | null>(null);
-  // A password connection being restored opens the connect dialog on its form.
-  const [connectPreset, setConnectPreset] = useState<ExternalConnectPreset | null>(null);
-  // Every open starts the dialog afresh, so a second Reconnect of the same account opens on its
-  // form again rather than on whatever step the last one ended.
-  const [connectSession, setConnectSession] = useState(0);
-  const openConnect = (preset: ExternalConnectPreset | null = null) => {
-    setManageExternalOpen(false);
-    setConnectPreset(preset);
-    setConnectSession(session => session + 1);
-    setConnectMounted(true);
-    setConnectOpen(true);
-  };
-  const openManageExternal = () => {
-    setManageExternalMounted(true);
-    setManageExternalOpen(true);
-  };
-  const { zone: inboxZone, ready: zoneReady } = useInboxTimezone();
-  // The zone the inbox refused; UTC stands in for it only while it is still the inbox's zone.
-  const [refusedZone, setRefusedZone] = useState<string | null>(null);
-  const timeZone = refusedZone === inboxZone ? fallbackTimeZone : inboxZone;
-  const urlParsed = readInboxUrl(searchParams);
-  // The assignment tabs show while the listing reaches a shared mailbox that is not connected.
-  const assignable = (mailboxes.data ?? []).filter(
-    mailbox => mailbox.access.view && mailbox.type === 'shared' && !isConnectedMailbox(mailbox)
-  );
-  const assignmentTabs =
-    urlParsed.box === null
-      ? assignable.length > 0
-      : assignable.some(mailbox => mailbox.id === urlParsed.box);
-  const urlState = assignmentTabs ? urlParsed : { ...urlParsed, assignment: null };
-  const counts = useInboxCounts(organizationId, timeZone, { enabled: zoneReady });
-  // AI triage shows only while the organization has it on, which its counts say by not being null.
-  const triageCounts = counts.data?.triage ?? null;
-  const filters = inboxFilters(urlState, timeZone, triageCounts !== null);
-  const inbox = useInboxMessages(organizationId, filters, { enabled: zoneReady });
-  const openDraft = useOpenMailDraft(organizationId);
-  const savedDrafts = useMailDrafts(organizationId, mailboxes.data?.some(canComposeFrom) ?? false);
-  const [triageMenuOpen, setTriageMenuOpen] = useState(false);
-  const [managingRoles, setManagingRoles] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Mounted from the first open on, so the sheet can animate closed.
-  const [sidebarSheet, setSidebarSheet] = useState(false);
-  const [held, setHeld] = useState<InboxItem | null>(null);
-  const [draft, setDraft] = useState<{
-    mailbox: Mailbox;
-    draft: ComposeDraft;
-    /** The mailboxes a new message may be sent from; replies keep their own. */
-    fromOptions?: readonly Mailbox[];
-  } | null>(null);
-  // Undo send opens the composer again on what it held.
-  const reopenDraft = (value: NonNullable<typeof draft>) => () => setDraft(value);
-  const [draftsOpen, setDraftsOpen] = useState(false);
-  const [draftsMounted, setDraftsMounted] = useState(false);
-  // Quoted dates read in the zone the list shows, as the reader's do.
-  const formatter = useDateTimeFormat(timeZone);
-  // The page's composer replaces the workspace; closing it gives the focus back.
-  useComposeFocusReturn(draft?.draft.mode === 'compose');
-  // Mounted from the first open on, so the dialog can animate closed.
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [helpMounted, setHelpMounted] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const returnFocus = useRef<HTMLElement | null>(null);
-  const [paletteMounted, setPaletteMounted] = useState(false);
-  const [managingMailboxes, setManagingMailboxes] = useState(false);
-  const [newMailboxType, setNewMailboxType] = useState<'personal' | undefined>(undefined);
-  const paneActions = useRef<InboxPaneActions | null>(null);
-  const searchRef = useRef<HTMLInputElement | null>(null);
-  /** `j` on the last loaded row asked for the next page: that row, whose successor opens next. */
-  const [advanceAfter, setAdvanceAfter] = useState<number | null>(null);
-
-  /** Changes the URL state in place; every change of what is listed closes the open row. */
-  const replaceParams = useCallback(
-    (change: (next: URLSearchParams) => void) => {
-      const next = new URLSearchParams(window.location.search);
-      change(next);
-      const query = next.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-    },
-    [pathname, router]
-  );
-  const dropNewParam = useCallback(
-    () =>
-      replaceParams(next => {
-        next.delete(NEW_PARAM);
-        next.delete(NEW_TYPE_PARAM);
-      }),
-    [replaceParams]
-  );
-  // Back from signing in again after a refused send: the composer opens on the kept draft.
-  const resumeCompose = searchParams.get(COMPOSE_PARAM) === COMPOSE_RESUME;
-  const mailboxList = mailboxes.data;
-  // `new=mailbox` from the console home's setup guide: open mailbox creation here too, once the
-  // team has mailboxes (without any, the empty state's own action opens it).
-  const createRequested = searchParams.get(NEW_PARAM) === 'mailbox';
-  // `type=personal` comes with it from "give colleagues a mailbox".
-  const requestedType = searchParams.get(NEW_TYPE_PARAM) === 'personal' ? 'personal' : undefined;
-  const hasReadable = mailboxList?.some(mailbox => mailbox.access.view) ?? false;
-  useEffect(() => {
-    if (!createRequested || !hasReadable) return;
-    if (canManage) {
-      setNewMailboxType(requestedType);
-      setManagingMailboxes(true);
-    }
-    dropNewParam();
-  }, [createRequested, hasReadable, canManage, requestedType, dropNewParam]);
-  useEffect(() => {
-    if (!resumeCompose || !mailboxList) return;
-    const sendable = mailboxList.filter(canComposeFrom);
-    if (sendable.length > 0) {
-      setDraft({
-        mailbox: newMessageSender(sendable, urlState.box, organizationId),
-        draft: emptyDraft,
-        fromOptions: sendable,
-      });
-    }
-    replaceParams(next => next.delete(COMPOSE_PARAM));
-  }, [resumeCompose, mailboxList, urlState.box, organizationId, replaceParams]);
-  const setListing = (changes: Partial<Record<(typeof filterParams)[number], string | null>>) => {
-    setAdvanceAfter(null);
-    replaceParams(next => {
-      next.delete(OPEN_PARAM);
-      for (const [name, value] of Object.entries(changes)) {
-        if (value === null) next.delete(name);
-        else next.set(name, value);
-      }
-    });
-  };
-
-  // A 400 means the inbox refused the query (§11.3). With filters in the URL they are the cause,
-  // so the URL goes back to `view=all` and the open row closes; without any, only the zone can be,
-  // and UTC is always known. A listing already on screen keeps its URL when a later page fails.
-  const rejected = !inbox.data && isRejectedQuery(inbox.error);
-  const filtered = filterParams.some(name => searchParams.has(name));
-  const resetting = rejected && (filtered || timeZone !== fallbackTimeZone);
-  useEffect(() => {
-    if (!rejected) return;
-    if (filtered) {
-      replaceParams(next => {
-        for (const name of [OPEN_PARAM, ...filterParams]) next.delete(name);
-      });
-    } else if (timeZone !== fallbackTimeZone) {
-      setRefusedZone(timeZone);
-    }
-  }, [rejected, filtered, timeZone, replaceParams]);
-
-  const { refetch: refetchInbox, hasNextPage, isFetchingNextPage, fetchNextPage } = inbox;
-  const refetchCounts = counts.refetch;
-  const refetchMailboxes = mailboxes.refetch;
-  const loadMore = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-  const refreshListing = useCallback(() => {
-    void refetchInbox();
-    void refetchMailboxes();
-    void refetchCounts();
-  }, [refetchInbox, refetchMailboxes, refetchCounts]);
-
-  const pages = inbox.data?.pages ?? [];
-  const rows = pages.flatMap(page => page.items);
-
-  // Once the next page asked for by `j` arrives, the row after the last one opens; with no more
-  // pages, or with that row gone from the list, the wait ends.
-  const advanceIndex = advanceAfter === null ? -1 : rows.findIndex(row => row.id === advanceAfter);
-  const advanceTo = advanceIndex < 0 ? undefined : rows[advanceIndex + 1];
-  const advanceDone =
-    advanceAfter !== null && (advanceIndex < 0 || (!hasNextPage && !isFetchingNextPage));
-  useEffect(() => {
-    if (advanceTo) {
-      setAdvanceAfter(null);
-      replaceParams(next => next.set(OPEN_PARAM, String(advanceTo.id)));
-    } else if (advanceDone) {
-      setAdvanceAfter(null);
-    }
-  }, [advanceTo, advanceDone, replaceParams]);
-  const rawOpen = searchParams.get(OPEN_PARAM) ?? '';
-  const openId = rowIdPattern.test(rawOpen) ? Number(rawOpen) : null;
-  const listed = openId === null ? undefined : rows.find(row => row.id === openId);
-  // The open row stays in the pane when a refresh drops it from the list.
-  if (listed && listed !== held) setHeld(listed);
-  const openItem = listed ?? (held !== null && held.id === openId ? held : null);
-
-  const setOpenParam = (id: number | null) =>
-    replaceParams(next => {
-      if (id === null) next.delete(OPEN_PARAM);
-      else next.set(OPEN_PARAM, String(id));
-    });
-  const mailboxHref = (mailboxId: number) => {
-    const next = new URLSearchParams(searchParams.toString());
-    for (const name of [OPEN_PARAM, ...filterParams]) next.delete(name);
-    next.set(MAILBOX_PARAM, String(mailboxId));
-    return `${pathname}?${next.toString()}`;
-  };
+  const state = useInboxWorkspace({ canManage });
 
   const externalDialogs = (
-    <>
-      {connectMounted ? (
-        <Suspense fallback={null}>
-          <ExternalConnectDialog
-            key={connectSession}
-            open={connectOpen}
-            onOpenChange={setConnectOpen}
-            organizationId={organizationId}
-            connectors={connectorList}
-            preset={connectPreset}
-            returnFocusRef={externalReturnFocus}
-          />
-        </Suspense>
-      ) : null}
-      {manageExternalMounted ? (
-        <Suspense fallback={null}>
-          <ConnectedMailboxesDialog
-            open={manageExternalOpen}
-            onOpenChange={setManageExternalOpen}
-            organizationId={organizationId}
-            connections={connections.data}
-            connectors={connectors.data}
-            error={!connections.data && connections.isError}
-            onAdd={externalOn ? () => openConnect() : null}
-            onReconnectWithPassword={openConnect}
-            returnFocusRef={externalReturnFocus}
-          />
-        </Suspense>
-      ) : null}
-    </>
+    <ExternalMailboxDialogs
+      organizationId={state.organizationId}
+      connectMounted={state.connectMounted}
+      connectSession={state.connectSession}
+      connectOpen={state.connectOpen}
+      onConnectOpenChange={state.setConnectOpen}
+      connectorList={state.connectorList}
+      connectPreset={state.connectPreset}
+      manageExternalMounted={state.manageExternalMounted}
+      manageExternalOpen={state.manageExternalOpen}
+      onManageExternalOpenChange={state.setManageExternalOpen}
+      connections={state.connections.data}
+      connectors={state.connectors.data}
+      connectionsError={!state.connections.data && state.connections.isError}
+      externalOn={state.externalOn}
+      onOpenConnect={state.openConnect}
+      returnFocusRef={state.externalReturnFocus}
+    />
   );
 
-  if (mailboxes.isPending) return <InboxSkeleton />;
-  if (isOrganizationLost(mailboxes.error) || isOrganizationLost(inbox.error)) {
+  if (state.mailboxes.isPending) return <InboxSkeleton />;
+  if (isOrganizationLost(state.mailboxes.error) || isOrganizationLost(state.inbox.error)) {
     return (
       <InboxFrame scope={scope}>
         <OrganizationLostState />
       </InboxFrame>
     );
   }
-  if (!mailboxes.data) {
+  if (!state.mailboxes.data) {
     return (
       <InboxFrame scope={scope}>
         <ErrorAlert
-          message={t(resolveMailboxErrorKey(mailboxes.error))}
+          message={t(resolveMailboxErrorKey(state.mailboxes.error))}
           retryLabel={t('actions.retry')}
-          onRetry={() => void mailboxes.refetch()}
+          onRetry={() => void state.mailboxes.refetch()}
         />
       </InboxFrame>
     );
   }
 
-  const readable = mailboxes.data.filter(mailbox => mailbox.access.view);
-  if (readable.length === 0) {
+  if (state.readable.length === 0) {
     return (
       <InboxFrame scope={scope}>
         <EmptyState
@@ -730,23 +141,23 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             canManage ? 'inbox.empty.noMailboxesManage' : 'inbox.empty.noMailboxesMember'
           )}
           action={
-            canManage || externalOn ? (
+            canManage || state.externalOn ? (
               <div className="flex flex-wrap justify-center gap-2">
                 {canManage ? (
                   <ManageMailboxesAction
-                    mailboxes={mailboxes.data}
-                    onRefresh={() => void mailboxes.refetch()}
-                    autoOpen={searchParams.get(NEW_PARAM) === 'mailbox'}
-                    onAutoOpened={dropNewParam}
+                    mailboxes={state.mailboxes.data}
+                    onRefresh={() => void state.mailboxes.refetch()}
+                    autoOpen={state.searchParams.get(NEW_PARAM) === 'mailbox'}
+                    onAutoOpened={state.dropNewParam}
                   />
                 ) : null}
-                {externalOn ? (
+                {state.externalOn ? (
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
                     icon={<Plus className="size-4" />}
-                    onClick={() => openConnect()}
+                    onClick={() => state.openConnect()}
                   >
                     {t('external.sidebar.add')}
                   </Button>
@@ -760,364 +171,16 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     );
   }
 
-  const openMailbox = openItem
-    ? (mailboxes.data.find(mailbox => mailbox.id === openItem.mailbox_id) ?? null)
-    : null;
-  const openIndex = openItem ? rows.findIndex(row => row.id === openItem.id) : -1;
-  const replyCopy = {
-    prefixSubject: (subject: string) => t('compose.replySubject', { subject }),
-    quotedHeader: (params: { date: string; sender: string }) => t('compose.quotedHeader', params),
-    formatDate: (iso: string) => formatter.format(new Date(iso)),
-  };
-  const withSender = (build: (mailbox: Mailbox) => ComposeDraft) => {
-    if (openMailbox && canComposeFrom(openMailbox)) {
-      setDraft({ mailbox: openMailbox, draft: build(openMailbox) });
-    }
-  };
-  const navigation: InboxReaderNavigation = {
-    onPrevious: openIndex > 0 ? () => setOpenParam(rows[openIndex - 1].id) : null,
-    onNext:
-      openIndex >= 0 && openIndex < rows.length - 1
-        ? () => setOpenParam(rows[openIndex + 1].id)
-        : null,
-    onClose: () => setOpenParam(null),
-    onReply: (message: MailMessage) => withSender(() => quotedReplyDraft(message, replyCopy)),
-    onReplyAll: (message: MailMessage) =>
-      withSender(mailbox => replyAllDraft(message, mailbox.address, replyCopy)),
-    onForward: (message: MailMessage) =>
-      withSender(() =>
-        forwardDraft(message, {
-          prefixSubject: subject => t('compose.forwardSubject', { subject }),
-          forwardedHeader: t('compose.forwardedHeader'),
-          formatDate: iso => formatter.format(new Date(iso)),
-          labels: {
-            from: t('message.from'),
-            date: t('message.date'),
-            subject: t('emails.subject'),
-            to: t('message.to'),
-            cc: t('message.cc'),
-          },
-        })
-      ),
-  };
-
-  const narrowedTo =
-    urlState.box === null ? null : (readable.find(mailbox => mailbox.id === urlState.box) ?? null);
-  const roleList = roles.data ?? [];
-  const narrowedRole =
-    typeof urlState.role === 'number'
-      ? (roleList.find(role => role.id === urlState.role) ?? null)
-      : null;
-  let title: string;
-  if (urlState.box !== null) title = narrowedTo?.address ?? t('inbox.views.all');
-  else if (urlState.role === NO_ROLE) title = t('inbox.groups.ungrouped');
-  else if (urlState.role !== null) title = narrowedRole?.name ?? t('inbox.views.all');
-  else if (urlState.q !== '') title = t('inbox.search.results', { q: urlState.q });
-  else if (urlState.view === 'all') title = t('inbox.title');
-  else title = t(`inbox.views.${urlState.view}`);
-  // Unnarrowed, the subtitle counts what the caller reads: readable mailboxes and visible roles
-  // (the roles only when there are any).
-  const shownRoleCount = visibleRoles(mailboxes.data, roleList, canManage).length;
-  const subtitle =
-    urlState.box === null && urlState.role === null && urlState.q === ''
-      ? shownRoleCount > 0
-        ? t('inbox.subtitle', { mailboxes: readable.length, roles: shownRoleCount })
-        : t('inbox.subtitleMailboxes', { mailboxes: readable.length })
-      : undefined;
-  const sendable = mailboxes.data.filter(canComposeFrom);
-  const sendableIds = new Set(sendable.map(mailbox => mailbox.id));
-  const compose =
-    sendable.length > 0
-      ? () =>
-          setDraft({
-            mailbox: newMessageSender(sendable, urlState.box, organizationId),
-            draft: emptyDraft,
-            fromOptions: sendable,
-          })
-      : null;
-  const openSavedDraft = (summary: MailDraftSummary) => {
-    openDraft.mutate(summary.id, {
-      onSuccess: saved => {
-        setDraftsOpen(false);
-        setDraft({
-          mailbox:
-            sendable.find(mailbox => mailbox.id === saved.mailbox_id) ??
-            newMessageSender(sendable, urlState.box, organizationId),
-          draft: {
-            ...emptyDraft,
-            to: saved.to,
-            cc: saved.cc,
-            subject: saved.subject,
-            body: saved.body,
-            inReplyTo: saved.in_reply_to,
-            savedId: saved.id,
-          },
-          fromOptions: sendable,
-        });
-      },
-      onError: () => toast.error(t('drafts.openFailed')),
-    });
-  };
-  // Rows name their mailbox, tinted by its role, unless the list is one mailbox.
-  const roleTags = new Map<number, MailRole>(roleList.map(role => [role.id, role]));
-  // A date or attachment filter that hides every row is not an empty mailbox.
-  const dateOrFiles = urlState.date !== null || urlState.attachments;
-  const narrowed = urlState.q === '' && dateOrFiles;
-  const emptyTitle =
-    urlState.q !== ''
-      ? t('inbox.empty.search')
-      : narrowed
-        ? t('inbox.empty.filtered')
-        : urlState.assignment
-          ? t(`inbox.empty.${urlState.assignment}`)
-          : urlState.unread
-            ? t('inbox.empty.unread')
-            : urlState.view === 'all'
-              ? t('inbox.empty.view')
-              : t(`inbox.empty.${urlState.view}`);
-  const emptyHint =
-    urlState.q !== ''
-      ? t(dateOrFiles ? 'inbox.empty.searchFilteredHint' : 'inbox.empty.searchHint')
-      : narrowed
-        ? t('inbox.empty.filteredHint')
-        : urlState.assignment
-          ? t(`inbox.empty.${urlState.assignment}Hint`)
-          : urlState.unread
-            ? t('inbox.empty.unreadHint')
-            : urlState.view === 'all'
-              ? t('inbox.empty.viewHint')
-              : t(`inbox.empty.${urlState.view}Hint`);
-
-  /** Moves the open row by `delta`; past the last loaded row, opens the first of the next page. */
-  const step = (delta: 1 | -1) => {
-    if (rows.length === 0) return;
-    const target = openIndex < 0 ? 0 : openIndex + delta;
-    if (target >= 0 && target < rows.length) {
-      setOpenParam(rows[target].id);
-    } else if (delta > 0 && hasNextPage) {
-      setAdvanceAfter(rows[rows.length - 1].id);
-      loadMore();
-    }
-  };
-  /** An action on the open row that its mailbox's `send` allows; without it nothing is sent. */
-  const sending = (action: keyof InboxPaneActions) => () => {
-    if (!openItem) return;
-    if (!openMailbox?.access.send) {
-      toast.error(t('inbox.noSendPermission'));
-      return;
-    }
-    paneActions.current?.[action]();
-  };
-  // The help dialog and the palette open from a key or a button; closing puts focus back there.
-  const rememberFocus = () => {
-    returnFocus.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  };
-  const restoreFocus = (event: Event) => {
-    const target = returnFocus.current;
-    returnFocus.current = null;
-    if (!target?.isConnected) return;
-    event.preventDefault();
-    target.focus();
-  };
-  const showHelp = () => {
-    rememberFocus();
-    setHelpMounted(true);
-    setHelpOpen(true);
-  };
-  const shortcuts: Partial<Record<MailShortcut, () => void>> = {
-    next: () => step(1),
-    previous: () => step(-1),
-    open: () => {
-      if (!openItem && rows.length > 0) setOpenParam(rows[0].id);
-    },
-    archive: sending('archive'),
-    trash: sending('trash'),
-    reply: sending('reply'),
-    replyAll: sending('replyAll'),
-    forward: sending('forward'),
-    triage: () => {
-      if (triageCounts !== null && openItem?.direction === 'inbound') setTriageMenuOpen(true);
-    },
-    star: () => paneActions.current?.star(),
-    compose: compose ?? (() => toast.error(t('inbox.noSendableMailbox'))),
-    search: () => searchRef.current?.focus(),
-    help: showHelp,
-    palette: () => {
-      if (!paletteOpen) rememberFocus();
-      setPaletteMounted(true);
-      setPaletteOpen(open => !open);
-    },
-    escape: () => {
-      if (openItem) setOpenParam(null);
-    },
-  };
-
-  // Narrowing starts a new listing: a search typed for the previous one no longer applies.
-  const onBox = (mailboxId: number) =>
-    setListing({ [BOX_PARAM]: String(mailboxId), [ROLE_PARAM]: null, [SEARCH_PARAM]: null });
-  let list: React.ReactNode;
-  if (inbox.isPending || resetting) {
-    list = <InboxListSkeleton />;
-  } else if (!inbox.data && isSearchTooBroad(inbox.error)) {
-    list = (
-      <Alert className="mx-3 w-auto">
-        <AlertCircle className="size-4" aria-hidden="true" />
-        <AlertDescription>{t(resolveMailboxErrorKey(inbox.error))}</AlertDescription>
-      </Alert>
-    );
-  } else if (!inbox.data) {
-    list = (
-      <div className="space-y-3 px-3">
-        <ErrorAlert
-          message={t(resolveMailboxErrorKey(inbox.error))}
-          retryLabel={t('actions.retry')}
-          onRetry={() => void inbox.refetch()}
-        />
-        <Button asChild size="sm" variant="outline">
-          <Link href={mailboxHref(readable[0].id)}>{t('inbox.viewByMailbox')}</Link>
-        </Button>
-      </div>
-    );
-  } else if (rows.length === 0) {
-    list = (
-      <div className="px-3">
-        <EmptyState
-          icon={<Inbox className="size-5" aria-hidden="true" />}
-          title={emptyTitle}
-          description={emptyHint}
-          action={
-            dateOrFiles ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setListing({
-                    [DATE_PARAM]: null,
-                    ...(urlState.attachments ? { [TAB_PARAM]: null } : {}),
-                  })
-                }
-              >
-                {t('inbox.empty.clearFilters')}
-              </Button>
-            ) : undefined
-          }
-        />
-      </div>
-    );
-  } else {
-    const lastPage = pages[pages.length - 1];
-    list = (
-      <InboxList
-        label={title}
-        pages={pages}
-        roles={roleTags}
-        // A single mailbox needs no label on every row.
-        showMailbox={urlState.box === null && (mailboxList?.length ?? 0) > 1}
-        sendable={sendableIds}
-        timeZone={timeZone}
-        onFilterMailbox={onBox}
-        selectedId={openItem?.id ?? null}
-        onOpen={row => setOpenParam(row.id)}
-        onLoadMore={loadMore}
-        hasMore={lastPage.meta.has_more && lastPage.meta.next_cursor !== null}
-        loadingMore={isFetchingNextPage}
-      />
-    );
-  }
-
-  const external: InboxSidebarExternal = {
-    connections: connections.data,
-    onAdd: externalOn ? () => openConnect() : null,
-    onManage: openManageExternal,
-  };
-  const externalProvider = (mailboxId: number): string | null => {
-    const mailbox = mailboxes.data.find(item => item.id === mailboxId);
-    const bound = connectionList.find(connection => connection.mailbox_id === mailboxId);
-    if (!bound && !(mailbox && isConnectedMailbox(mailbox))) return null;
-    return bound?.provider ?? openItem?.source ?? '';
-  };
-  const sidebarProps = {
-    external,
-    sort,
-    onSort: changeSort,
-    counts: counts.data,
-    mailboxes: mailboxes.data,
-    roles: roles.data,
-    canManage,
-    view: urlState.view,
-    box: urlState.box,
-    role: urlState.role,
-    onManageRoles: () => setManagingRoles(true),
-    onShortcuts: showHelp,
-    drafts:
-      sendable.length > 0
-        ? {
-            count: savedDrafts.data?.length,
-            onOpen: () => {
-              setDraftsMounted(true);
-              setDraftsOpen(true);
-            },
-          }
-        : null,
-  };
-  const onView = (view: InboxView) =>
-    setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null });
-  const onRole = (role: InboxRoleFilter) =>
-    setListing({ [ROLE_PARAM]: String(role), [BOX_PARAM]: null, [SEARCH_PARAM]: null });
-  const runCommand = (command: PaletteCommand) => {
-    switch (command.kind) {
-      case 'mailbox':
-        onBox(command.mailboxId);
-        break;
-      case 'role':
-        onRole(command.roleId);
-        break;
-      case 'mail':
-        // The chosen mail shows at once; the search lists it with its neighbours.
-        setAdvanceAfter(null);
-        setHeld(command.item);
-        replaceParams(next => {
-          for (const name of filterParams) next.delete(name);
-          next.set(SEARCH_PARAM, command.q);
-          next.set(OPEN_PARAM, String(command.item.id));
-        });
-        break;
-      case 'compose':
-        compose?.();
-        break;
-      case 'view':
-        onView(command.view);
-        break;
-      case 'help':
-        showHelp();
-        break;
-      case 'manageMailboxes':
-        setManagingMailboxes(true);
-        break;
-      case 'manageRoles':
-        setManagingRoles(true);
-        break;
-    }
-  };
-  /** In the sheet, every choice also closes it. */
-  const closing =
-    <A extends unknown[]>(action: (...args: A) => void) =>
-    (...args: A) => {
-      setSidebarOpen(false);
-      action(...args);
-    };
-
-  if (draft?.draft.mode === 'compose' && sendableIds.has(draft.mailbox.id)) {
+  if (state.draft?.draft.mode === 'compose' && state.sendableIds.has(state.draft.mailbox.id)) {
     return (
       <Suspense fallback={null}>
         <ComposeDialog
           inline
-          mailbox={draft.mailbox}
-          fromOptions={sendable}
-          draft={draft.draft}
-          onClose={() => setDraft(null)}
-          onReopen={reopenDraft(draft)}
+          mailbox={state.draft.mailbox}
+          fromOptions={state.sendable}
+          draft={state.draft.draft}
+          onClose={() => state.setDraft(null)}
+          onReopen={state.reopenDraft(state.draft)}
         />
       </Suspense>
     );
@@ -1125,370 +188,124 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
   return (
     <div className="flex h-full min-h-0 bg-bg-canvas text-[13px] leading-normal antialiased">
-      <MailShortcuts bindings={shortcuts} />
+      <MailShortcuts bindings={state.shortcuts} />
       <aside className="hidden w-14 flex-none flex-col overflow-y-auto px-2 pt-[18px] pb-3.5 md:flex lg:w-[248px] lg:px-3">
         <InboxSidebar
-          {...sidebarProps}
+          {...state.sidebarProps}
           rail
           organization={<MailOrganizationName scope={scope} compact />}
-          onView={onView}
-          onBox={onBox}
-          onRole={onRole}
-          onCompose={compose}
+          onView={state.onView}
+          onBox={state.onBox}
+          onRole={state.onRole}
+          onCompose={state.compose}
         />
       </aside>
 
-      <section
-        aria-label={title}
-        className={cn(
-          'my-2.5 ml-2.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-border-main bg-bg-surface shadow-sm max-lg:mr-2.5 md:ml-0',
-          'lg:w-[380px] lg:flex-none lg:rounded-r-none lg:border-y-0 xl:w-[470px]',
-          openItem && 'max-lg:hidden'
-        )}
-      >
-        <InboxListHeader
-          onRefresh={refreshListing}
-          refreshing={!zoneReady || inbox.isFetching || counts.isFetching || mailboxes.isFetching}
-          title={title}
-          mailboxSelected={narrowedTo !== null}
-          subtitle={subtitle}
-          unread={urlState.unread}
-          unreadCount={listingUnread(counts.data, urlState)}
-          onUnreadChange={unread => setListing({ [TAB_PARAM]: unread ? UNREAD_TAB : null })}
-          attachments={urlState.attachments}
-          onAttachmentsChange={on => setListing({ [TAB_PARAM]: on ? ATTACHMENTS_TAB : null })}
-          dateRange={urlState.date}
-          onDateRangeChange={date => setListing({ [DATE_PARAM]: date })}
-          assignment={urlState.assignment}
-          onAssignmentChange={
-            assignmentTabs ? assignment => setListing({ [TAB_PARAM]: assignment }) : undefined
-          }
-          q={urlState.q}
-          onSearch={q => setListing({ [SEARCH_PARAM]: q === '' ? null : q, [VIEW_PARAM]: null })}
-          mailboxHref={urlState.box === null ? null : mailboxHref(urlState.box)}
-          onClearMailbox={
-            urlState.box === null && urlState.role === null
-              ? undefined
-              : () => setListing({ [BOX_PARAM]: null, [ROLE_PARAM]: null })
-          }
-          onShowSidebar={() => {
-            setSidebarSheet(true);
-            setSidebarOpen(true);
-          }}
-          searchRef={searchRef}
-        />
-        {connectionList.some(connection => connection.status === 'needs_reconnect') ? (
-          <Suspense fallback={null}>
-            <ExternalReconnectBanner
-              organizationId={organizationId}
-              connections={connectionList}
-              connectors={connectors.data}
-              onReconnectWithPassword={openConnect}
-            />
-          </Suspense>
-        ) : null}
-        {webPushOffered ? (
-          <Suspense fallback={null}>
-            <WebPushBanner />
-          </Suspense>
-        ) : null}
-        {triageCounts !== null &&
-        urlState.q === '' &&
-        (urlState.view === 'all' || urlState.view === 'today') ? (
-          <Suspense fallback={null}>
-            <InboxTriageTabs
-              counts={triageCounts}
-              active={urlState.triage}
-              onChange={tab => setListing({ [TRIAGE_PARAM]: tab })}
-            />
-          </Suspense>
-        ) : null}
-        <div data-scroll-pane className="min-h-0 flex-1 overflow-y-auto">
-          {list}
-        </div>
-      </section>
+      <InboxListPane
+        organizationId={state.organizationId}
+        title={state.title}
+        subtitle={state.subtitle}
+        narrowedTo={state.narrowedTo}
+        urlState={state.urlState}
+        counts={state.counts.data}
+        triageCounts={state.triageCounts}
+        assignmentTabs={state.assignmentTabs}
+        zoneReady={state.zoneReady}
+        timeZone={state.timeZone}
+        inboxPending={state.inbox.isPending}
+        inboxFetching={
+          state.inbox.isFetching || state.counts.isFetching || state.mailboxes.isFetching
+        }
+        inboxHasData={Boolean(state.inbox.data)}
+        inboxError={state.inbox.error}
+        resetting={state.resetting}
+        pages={state.pages}
+        rows={state.rows}
+        roleTags={state.roleTags}
+        showMailbox={state.showMailbox}
+        sendableIds={state.sendableIds}
+        openItem={state.openItem}
+        readable={state.readable}
+        isFetchingNextPage={state.isFetchingNextPage}
+        connectionList={state.connectionList}
+        connectors={state.connectors.data}
+        searchRef={state.searchRef}
+        onRefresh={state.refreshListing}
+        onRefetchInbox={() => void state.inbox.refetch()}
+        onSetListing={state.setListing}
+        onBox={state.onBox}
+        onOpenRow={state.setOpenParam}
+        onLoadMore={state.loadMore}
+        onShowSidebar={() => {
+          state.setSidebarSheet(true);
+          state.setSidebarOpen(true);
+        }}
+        onReconnectWithPassword={state.openConnect}
+        mailboxHref={state.mailboxHref}
+      />
 
-      <section
-        aria-label={t('inbox.readingPane')}
-        data-reading-pane=""
-        className={cn(
-          'my-2.5 mr-2.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-border-main bg-bg-surface max-md:ml-2.5',
-          'lg:rounded-l-none lg:border-l-0',
-          !openItem && 'max-lg:hidden'
-        )}
-      >
-        {openItem ? (
-          <Suspense fallback={<ReaderSkeleton />}>
-            {/* The reader shows times in the list's zone, so a row and its mail agree. */}
-            <MailTimeZoneContext value={timeZone}>
-              <InboxReadingPane
-                key={openItem.id}
-                item={openItem}
-                access={openMailbox?.access ?? null}
-                shared={openMailbox?.type === 'shared'}
-                externalProvider={externalProvider(openItem.mailbox_id)}
-                roleName={
-                  openItem.role_id === null
-                    ? null
-                    : (roleList.find(role => role.id === openItem.role_id)?.name ?? null)
-                }
-                navigation={navigation}
-                onUnavailable={refreshListing}
-                actionsRef={paneActions}
-                triage={
-                  triageCounts === null
-                    ? null
-                    : {
-                        menuOpen: triageMenuOpen,
-                        onMenuOpenChange: setTriageMenuOpen,
-                        onUseDraft: (message, body) =>
-                          withSender(() => {
-                            const reply = quotedReplyDraft(message, replyCopy);
-                            return { ...reply, body: `${body}\n\n${reply.body ?? ''}` };
-                          }),
-                      }
-                }
-              />
-            </MailTimeZoneContext>
-          </Suspense>
-        ) : (
-          <div className="flex h-full min-h-48 flex-col items-center justify-center gap-5 px-6 text-center">
-            <span
-              aria-hidden="true"
-              className="h-28 w-40 bg-[url('/inbox-letters.svg')] bg-contain bg-center bg-no-repeat motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 dark:brightness-75"
-            />
-            <p className="text-sm text-text-muted">{t('list.readerEmpty')}</p>
-          </div>
-        )}
-      </section>
-
-      {sidebarSheet ? (
-        <Suspense fallback={null}>
-          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-            <SheetContent
-              side="left"
-              closeLabel={t('actions.close')}
-              className="w-[280px] gap-0 overflow-y-auto bg-bg-canvas px-3 pt-12 pb-3.5 motion-reduce:data-[state=closed]:animate-none motion-reduce:data-[state=open]:animate-none"
-            >
-              <SheetTitle className="sr-only">{t('inbox.groups.label')}</SheetTitle>
-              <InboxSidebar
-                {...sidebarProps}
-                organization={<MailOrganizationName scope={scope} compact />}
-                onView={closing(onView)}
-                onBox={closing(onBox)}
-                onRole={closing(onRole)}
-                onCompose={compose ? closing(compose) : null}
-              />
-            </SheetContent>
-          </Sheet>
-        </Suspense>
-      ) : null}
-
-      {helpMounted ? (
-        <Suspense fallback={null}>
-          <ShortcutHelpDialog
-            open={helpOpen}
-            onOpenChange={setHelpOpen}
-            onCloseAutoFocus={restoreFocus}
-          />
-        </Suspense>
-      ) : null}
-
-      {paletteMounted ? (
-        <Suspense fallback={null}>
-          <CommandPalette
-            open={paletteOpen}
-            onOpenChange={setPaletteOpen}
-            onCloseAutoFocus={restoreFocus}
-            organizationId={organizationId}
-            timeZone={timeZone}
-            mailboxes={mailboxes.data}
-            roles={visibleRoles(mailboxes.data, roleList, canManage)}
-            canManage={canManage}
-            canCompose={compose !== null}
-            onCommand={runCommand}
-          />
-        </Suspense>
-      ) : null}
-
-      {canManage ? (
-        <ManageMailboxesFlow
-          open={managingMailboxes}
-          initialType={newMailboxType}
-          onOpenChange={open => {
-            setManagingMailboxes(open);
-            if (!open) setNewMailboxType(undefined);
-          }}
-          mailboxes={mailboxes.data}
-          onRefresh={() => void mailboxes.refetch()}
-        />
-      ) : null}
+      <InboxReadingSection
+        openItem={state.openItem}
+        openMailbox={state.openMailbox}
+        timeZone={state.timeZone}
+        externalProvider={state.openItem ? state.externalProvider(state.openItem.mailbox_id) : null}
+        roleName={
+          state.openItem && state.openItem.role_id !== null
+            ? (state.roleList.find(role => role.id === state.openItem?.role_id)?.name ?? null)
+            : null
+        }
+        navigation={state.navigation}
+        onUnavailable={state.refreshListing}
+        actionsRef={state.paneActions}
+        triageEnabled={state.triageCounts !== null}
+        triageMenuOpen={state.triageMenuOpen}
+        onTriageMenuOpenChange={state.setTriageMenuOpen}
+        onUseTriageDraft={state.useTriageDraft}
+      />
 
       {externalDialogs}
 
-      {canManage && managingRoles ? (
-        <Suspense fallback={null}>
-          <ManageRolesDialog open onOpenChange={open => setManagingRoles(open)} />
-        </Suspense>
-      ) : null}
-
-      {draftsMounted ? (
-        <Suspense fallback={null}>
-          <DraftsDialog
-            organizationId={organizationId}
-            mailboxes={sendable}
-            open={draftsOpen}
-            onOpenChange={setDraftsOpen}
-            onOpenDraft={openSavedDraft}
-          />
-        </Suspense>
-      ) : null}
-
-      {draft && canComposeFrom(draft.mailbox) ? (
-        <Suspense fallback={null}>
-          <ComposeDialog
-            mailbox={draft.mailbox}
-            fromOptions={draft.fromOptions}
-            draft={draft.draft}
-            onClose={() => setDraft(null)}
-            onStored={() => setDraft(null)}
-            onReopen={reopenDraft(draft)}
-          />
-        </Suspense>
-      ) : null}
-    </div>
-  );
-}
-
-/** The inbox keys, bound while the three panes are on screen. */
-function MailShortcuts({ bindings }: { bindings: Partial<Record<MailShortcut, () => void>> }) {
-  useMailShortcuts(bindings, { enabled: true });
-  return null;
-}
-
-/**
- * Manage mailboxes for an owner or admin with nothing to read: create a mailbox or open one's
- * access to add themselves. The domains load only when this is shown.
- */
-function ManageMailboxesAction({
-  mailboxes,
-  onRefresh,
-  autoOpen = false,
-  onAutoOpened,
-}: {
-  mailboxes: Mailbox[];
-  onRefresh: () => void;
-  /** Opens the dialog as soon as the domains are known: the team was just created. */
-  autoOpen?: boolean;
-  onAutoOpened?: () => void;
-}) {
-  const t = useT('mailbox');
-  const organizationId = useMailOrganizationId();
-  const domains = useMailboxDomains(organizationId);
-  const [open, setOpen] = useState(false);
-  const domainsReady = domains.data !== undefined;
-  useEffect(() => {
-    if (!autoOpen || !domainsReady) return;
-    setOpen(true);
-    onAutoOpened?.();
-  }, [autoOpen, domainsReady, onAutoOpened]);
-
-  return (
-    <>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        icon={<Settings2 className="size-4" />}
-        disabled={!domains.data}
-        onClick={() => setOpen(true)}
-      >
-        {t('switcher.manage')}
-      </Button>
-      <ManageMailboxesFlow
-        open={open}
-        onOpenChange={setOpen}
-        mailboxes={mailboxes}
-        onRefresh={onRefresh}
+      <InboxOverlayDialogs
+        scope={scope}
+        organizationId={state.organizationId}
+        timeZone={state.timeZone}
+        canManage={canManage}
+        mailboxes={state.mailboxes.data}
+        roleList={state.roleList}
+        sendable={state.sendable}
+        sidebarSheet={state.sidebarSheet}
+        sidebarOpen={state.sidebarOpen}
+        onSidebarOpenChange={state.setSidebarOpen}
+        sidebarProps={state.sidebarProps}
+        onView={state.onView}
+        onBox={state.onBox}
+        onRole={state.onRole}
+        compose={state.compose}
+        helpMounted={state.helpMounted}
+        helpOpen={state.helpOpen}
+        onHelpOpenChange={state.setHelpOpen}
+        paletteMounted={state.paletteMounted}
+        paletteOpen={state.paletteOpen}
+        onPaletteOpenChange={state.setPaletteOpen}
+        restoreFocus={state.restoreFocus}
+        runCommand={state.runCommand}
+        managingMailboxes={state.managingMailboxes}
+        newMailboxType={state.newMailboxType}
+        onManagingMailboxesChange={open => {
+          state.setManagingMailboxes(open);
+          if (!open) state.setNewMailboxType(undefined);
+        }}
+        onRefreshMailboxes={() => void state.mailboxes.refetch()}
+        managingRoles={state.managingRoles}
+        onManagingRolesChange={state.setManagingRoles}
+        draftsMounted={state.draftsMounted}
+        draftsOpen={state.draftsOpen}
+        onDraftsOpenChange={state.setDraftsOpen}
+        onOpenSavedDraft={state.openSavedDraft}
+        draft={state.draft}
+        onCloseDraft={() => state.setDraft(null)}
+        onReopenDraft={state.reopenDraft}
       />
-    </>
-  );
-}
-
-/** Manage mailboxes, then the access panel of the mailbox it opens; each loads when first shown. */
-function ManageMailboxesFlow({
-  open,
-  onOpenChange,
-  mailboxes,
-  onRefresh,
-  initialType,
-}: {
-  open: boolean;
-  initialType?: 'personal';
-  onOpenChange: (open: boolean) => void;
-  mailboxes: Mailbox[];
-  onRefresh: () => void;
-}) {
-  const organizationId = useMailOrganizationId();
-  const domains = useMailboxDomains(organizationId);
-  const [accessTargetId, setAccessTargetId] = useState<number | null>(null);
-  const domainList = domains.data ?? [];
-  const domain = domainList.find(item => item.kind === 'shared') ?? domainList[0] ?? null;
-  const accessTarget = mailboxes.find(item => item.id === accessTargetId) ?? null;
-
-  return (
-    <Suspense fallback={null}>
-      {open && domains.data ? (
-        <ManageMailboxesDialog
-          open
-          mailboxes={mailboxes}
-          domain={domain}
-          domains={domainList}
-          initialType={initialType}
-          onClose={() => onOpenChange(false)}
-          onCreated={() => onOpenChange(false)}
-          onOpenAccess={mailbox => {
-            onOpenChange(false);
-            setAccessTargetId(mailbox.id);
-          }}
-        />
-      ) : null}
-      {accessTarget ? (
-        <MailboxAccessPanel
-          mailbox={accessTarget}
-          onClose={() => setAccessTargetId(null)}
-          onRefresh={onRefresh}
-        />
-      ) : null}
-    </Suspense>
-  );
-}
-
-/** The reading pane while its code loads: the 52px bar over the article column. */
-function ReaderSkeleton() {
-  return (
-    <div className="flex h-full min-h-0 flex-col" aria-hidden="true">
-      <div className="h-[52px] shrink-0 border-b border-border-subtle" />
-      <div className="py-[34px]">
-        <ReaderArticleSkeleton className="mx-auto w-full max-w-[640px] space-y-4 px-5 sm:px-7" />
-      </div>
-    </div>
-  );
-}
-
-/** The three panes while the mailboxes load, at their finished sizes. */
-function InboxSkeleton() {
-  return (
-    <div className="flex h-full min-h-0 bg-bg-canvas" aria-hidden="true" data-inbox-skeleton="">
-      <div className="hidden w-14 flex-none flex-col gap-2 px-2 pt-[18px] md:flex lg:w-[248px] lg:px-3">
-        <Skeleton className="h-9 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-      <div className="my-2.5 ml-2.5 flex-1 overflow-hidden rounded-[14px] border border-border-main bg-bg-surface max-lg:mr-2.5 md:ml-0 lg:w-[380px] lg:flex-none lg:rounded-r-none lg:border-y-0 xl:w-[470px]">
-        <InboxListHeaderSkeleton />
-        <InboxListSkeleton />
-      </div>
-      <div className="my-2.5 mr-2.5 hidden flex-1 rounded-r-[14px] border border-l-0 border-border-main bg-bg-surface lg:block" />
     </div>
   );
 }
