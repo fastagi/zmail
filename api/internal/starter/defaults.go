@@ -62,19 +62,19 @@ var ProviderSet = wire.NewSet(
 // *Handlers describes starters without runtime modules: catalog, validation, migration, and seeder
 // resolution only need that static metadata.
 type Handlers struct {
-	Audit        *audit.Handler
-	APIKey       *apikey.Handler
-	User         *user.Handler
-	Organization *organization.Handler
-	Permission   *permissionstarter.Handler
-	Notification *notification.Handler
-	Asset        *asset.Handler
-	Setting      *setting.Handler
-	Usage        *usage.Handler
-	Webhook      *webhook.Handler
-	Operator     *operator.Handler
-	Roster       *roster.Handler
-	Triage       *triage.Handler
+	Audit         *audit.Handler
+	APIKey        *apikey.Handler
+	User          *user.Handler
+	Organization  *organization.Handler
+	Permission    *permissionstarter.Handler
+	Notification  *notification.Handler
+	Asset         *asset.Handler
+	Setting       *setting.Handler
+	Usage         *usage.Handler
+	Webhook       *webhook.Handler
+	Operator      *operator.Handler
+	Roster        *roster.Handler
+	Triage        *triage.Handler
 	AgentGrant    *agentgrant.Handler
 	Transactional *transactional.Handler
 	Broadcast     *broadcast.Handler
