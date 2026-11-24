@@ -26,6 +26,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/modules/permission"
 	"github.com/fastagi/zmail/api/internal/modules/roster"
 	"github.com/fastagi/zmail/api/internal/modules/setting"
+	"github.com/fastagi/zmail/api/internal/modules/triage"
 	"github.com/fastagi/zmail/api/internal/modules/usage"
 	"github.com/fastagi/zmail/api/internal/modules/user"
 	"github.com/fastagi/zmail/api/internal/modules/webhook"
@@ -153,6 +154,7 @@ func InitApplication() (*app.Application, error) {
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, configConfig, surfaces)
 	rosterService := roster.NewService(rosterRepository)
 	rosterHandler := roster.NewHandler(rosterService)
+	triageHandler := triage.NewHandler(mailboxService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -167,6 +169,7 @@ func InitApplication() (*app.Application, error) {
 		Webhook:      webhookHandler,
 		Operator:     handler2,
 		Roster:       rosterHandler,
+		Triage:       triageHandler,
 		Mailbox:      mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(configConfig, migrator, handlers)
@@ -331,6 +334,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, cfg, surfaces)
 	rosterService := roster.NewService(rosterRepository)
 	rosterHandler := roster.NewHandler(rosterService)
+	triageHandler := triage.NewHandler(mailboxService)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -345,6 +349,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		Webhook:      webhookHandler,
 		Operator:     handler2,
 		Roster:       rosterHandler,
+		Triage:       triageHandler,
 		Mailbox:      mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(cfg, migrator, handlers)

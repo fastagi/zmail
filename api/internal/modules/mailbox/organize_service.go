@@ -72,6 +72,11 @@ func (e *ValidationError) Error() string {
 	return "validation failed: " + strings.Join(keys, ", ")
 }
 
+// ValidationFields exposes field-level errors without coupling callers to package mailbox.
+func (e *ValidationError) ValidationFields() map[string][]string {
+	return e.Fields
+}
+
 func (e *ValidationError) add(field, message string) {
 	if e.Fields == nil {
 		e.Fields = map[string][]string{}

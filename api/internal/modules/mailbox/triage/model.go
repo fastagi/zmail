@@ -3,7 +3,6 @@ package triage
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -35,9 +34,9 @@ const (
 
 var (
 	// ErrUnavailable means AI triage is not offered: no provider, or a switch is off.
-	ErrUnavailable = errors.New("AI triage is unavailable")
+	ErrUnavailable = domain.ErrMailTriageUnavailable
 	// ErrModelFailed means the model call failed or returned nothing usable.
-	ErrModelFailed = errors.New("AI triage model failed")
+	ErrModelFailed = domain.ErrMailTriageModelFailed
 )
 
 // MaskedContent is the secret-masked representation of one message.
