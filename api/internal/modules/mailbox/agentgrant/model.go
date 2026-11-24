@@ -2,8 +2,6 @@ package agentgrant
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -11,13 +9,13 @@ import (
 
 var (
 	// ErrNotFound answers a grant id that is not a grant of the mailbox.
-	ErrNotFound = errors.New("mail agent grant not found")
+	ErrNotFound = domain.ErrMailAgentGrantNotFound
 	// ErrInvalid rejects a grant request that cannot be applied: its key, capabilities, filters, or expiry.
-	ErrInvalid = errors.New("mail agent grant is invalid")
+	ErrInvalid = domain.ErrMailAgentGrantInvalid
 	// ErrLimit rejects a grant past the mailbox's live grants.
-	ErrLimit = fmt.Errorf("a mailbox has at most %d live agent grants", domain.MaxLiveMailAgentGrantsPerMailbox)
+	ErrLimit = domain.ErrMailAgentGrantLimit
 	// ErrExists rejects a second live grant of one key on one mailbox.
-	ErrExists = errors.New("the key already holds a live grant of this mailbox")
+	ErrExists = domain.ErrMailAgentGrantExists
 )
 
 // ScopeMailAgent lets an API key use the agent routes: the feed, message reads, and drafts.

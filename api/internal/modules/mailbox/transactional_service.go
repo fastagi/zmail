@@ -54,6 +54,9 @@ func (e *RetryAfterError) Error() string { return e.Err.Error() }
 
 func (e *RetryAfterError) Unwrap() error { return e.Err }
 
+// RetryAfterDuration exposes the retry delay without coupling callers to package mailbox.
+func (e *RetryAfterError) RetryAfterDuration() time.Duration { return e.RetryAfter }
+
 // FieldsError is a refusal with a reason per request field, answered with the code of Err.
 type FieldsError struct {
 	Err    error

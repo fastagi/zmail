@@ -16,6 +16,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/router"
+	topagentgrant "github.com/fastagi/zmail/api/internal/modules/agentgrant"
 	"github.com/fastagi/zmail/api/internal/modules/apikey"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 	"github.com/fastagi/zmail/api/pkg/response"
@@ -585,6 +586,7 @@ func TestTenantRoutes(t *testing.T) {
 			c.Next()
 		})
 		handler.RegisterRoutes(routes)
+		topagentgrant.NewHandler(f.service).RegisterRoutes(routes)
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
 		if body != "" {
 			request.Header.Set("Content-Type", "application/json")

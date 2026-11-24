@@ -107,9 +107,7 @@ var featureGatedRoutes = map[domain.MemberFeature][]featureRoute{
 	domain.MemberFeatureAPIKeys: {
 		{http.MethodPost, "/outbound-mail-messages", `{}`},
 		{http.MethodGet, "/outbound-mail-messages/1", ""},
-		{http.MethodGet, "/agent-mail-events", ""},
 		{http.MethodGet, "/agent-mail-messages/1", ""},
-		{http.MethodPost, "/agent-mail-drafts", `{}`},
 		{http.MethodPost, "/transactional-messages", `{}`},
 		{http.MethodGet, "/transactional-messages/1", ""},
 	},

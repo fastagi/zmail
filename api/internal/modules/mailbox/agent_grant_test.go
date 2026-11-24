@@ -17,6 +17,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/router"
+	topagentgrant "github.com/fastagi/zmail/api/internal/modules/agentgrant"
 	"github.com/fastagi/zmail/api/internal/modules/apikey"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
@@ -631,6 +632,9 @@ func (f *agentFixture) agentRouter() *gin.Engine {
 		c.Next()
 	})
 	handler.RegisterRoutes(routes)
+	agentHandler := topagentgrant.NewHandler(f.service)
+	agentHandler.RegisterErrorMappings(response.DefaultErrorMapper)
+	agentHandler.RegisterRoutes(routes)
 	return engine
 }
 
