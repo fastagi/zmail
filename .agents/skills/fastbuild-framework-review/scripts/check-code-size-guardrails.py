@@ -29,10 +29,6 @@ LEGACY_LARGE_FILE_CEILINGS: dict[str, int] = {
     "api/internal/modules/mailbox/repository.go": 1205,
     "api/internal/modules/mailbox/service.go": 1446,
     "api/internal/modules/webhook/repository.go": 1108,
-    "web/src/features/mailbox/components/admin/roster-import-dialog.tsx": 910,
-    "web/src/features/mailbox/components/compose-dialog.tsx": 901,
-    "web/src/features/mailbox/components/mailbox-access-panel.tsx": 859,
-    "web/src/features/mailbox/hooks/use-mailbox.ts": 818,
     "web/src/features/organization/server/mock-organization-store.ts": 910,
     "web/src/features/webhook/components/webhook-management.tsx": 984,
 }

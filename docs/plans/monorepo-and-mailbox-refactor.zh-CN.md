@@ -148,7 +148,7 @@ contracts/
   - **验收**：`make check`（`governance` + `contract-check` + `api-check` + `web-check` + `admin-check`）全绿。
 
 ### P3：多端后端能力、客户端交付与开源准备
-- [ ] **T3.1** 后端多端 3 件套：`Delta Sync` 增量同步接口（复用 IMAP UID 体系）+ 前台 `SSE` 实时推送 + `notification` 新增 `mobile_push`（APNs/FCM）。
+- [ ] **T3.1** 后端多端 3 件套：已完成 `api/internal/modules/mailbox/syncfeed`（与 `@zmail/mail-core` 1:1 对齐的 Delta Sync 游标/协议 + `EventBus` 桥接 SSE `Broker` 与并发竞态单测）；待挂载 HTTP 路由与 `notification` `mobile_push`（APNs/FCM）。
 - [ ] **T3.2** 桌面端落地 `apps/desktop`（Electron）：主进程本地 SQLite + FTS5 全文搜索 + Keychain + 托盘 + 自动更新；渲染进程挂载 `packages/mail-ui`。
 - [ ] **T3.3** 手机端落地 `apps/mobile`（Expo / React Native）：复用 `packages/mail-core`，聚焦收信、读信、搜索、回复、AI Triage、原生推送 6 个高频场景。
-- [ ] **T3.4** AI/MCP 收敛与开源发布准备：`api/internal/infra/mcp` 收敛为 5~8 个意图工具 + `zmail` CLI；为高频 `.agents/skills/` 建立真实失败 Trace 回归评测集；脱敏清理未跟踪内部文件与历史截图，补齐中英文开源 README 与一键 `docker compose`。
+- [ ] **T3.4** AI/MCP 收敛与开源发布准备：已在 `api/internal/infra/mcp/mail_tools.go` 落地 6 个高内聚意图工具（`search_mail`、`read_thread`、`triage_summary`、`draft_reply`、`organize_thread`、`send_mail`）与完整 JSON-RPC 2.0 单测；待补 `zmail` CLI 与开源脱敏 README。
