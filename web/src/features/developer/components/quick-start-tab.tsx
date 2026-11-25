@@ -132,6 +132,7 @@ export function QuickStartTab({
     setCreated(null);
   }
   const [chosenTemplateId, setChosenTemplateId] = useState<number | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>();
   const [snippetKind, setSnippetKind] = useState<'direct' | 'template'>('direct');
   const [sent, setSent] = useState<TransactionalMessage | null>(null);
   const [now] = useState(() => Date.now());
@@ -174,6 +175,7 @@ export function QuickStartTab({
       ? snippetKind === 'direct'
         ? buildDirectSnippets({
             apiOrigin: apiOrigin.origin,
+            idempotencyKey,
             organizationId: organization.id,
             omitOrganizationHeader,
             apiKey: sampleKey,
@@ -181,6 +183,7 @@ export function QuickStartTab({
           })
         : buildSnippets({
             apiOrigin: apiOrigin.origin,
+            idempotencyKey,
             organizationId: organization.id,
             omitOrganizationHeader,
             apiKey: sampleKey,
@@ -308,6 +311,17 @@ export function QuickStartTab({
           <p className="text-xs text-muted-foreground">{t('start.noTemplate')}</p>
         ) : null}
         <CodeSamples snippets={snippets} unavailable={apiOrigin.status === 'unavailable'} />
+        <div className="space-y-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIdempotencyKey(crypto.randomUUID())}
+          >
+            {t(idempotencyKey ? 'start.replaceRetryKey' : 'start.addRetryKey')}
+          </Button>
+          <p className="text-xs text-muted-foreground">{t('start.retryHint')}</p>
+        </div>
         {showsDeveloperApiOriginHint() ? (
           <p className="text-xs text-muted-foreground">
             {t('start.originDevHint', { name: 'NEXT_PUBLIC_DEVELOPER_API_ORIGIN' })}

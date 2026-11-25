@@ -37,7 +37,7 @@ describe('developer snippets', () => {
       expect(code).toContain('Bearer fastbuild_test_abcd1234');
       expect(code).toContain('Organization-Id');
       expect(code).toContain('42');
-      expect(code).toContain('Idempotency-Key');
+      expect(code).not.toContain('Idempotency-Key');
       expect(code).toContain('signup-code');
       expect(code).toContain('482913');
       expect(code).not.toMatch(/\brequire\(/u);

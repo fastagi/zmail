@@ -4,6 +4,7 @@ const exampleRecipient = 'user@example.com';
 export interface SnippetInput {
   /** The public API origin the samples call; the caller resolves it, there is no placeholder. */
   apiOrigin: string;
+  idempotencyKey?: string;
   organizationId: number;
   /** When true (e.g. an organization-bound key), omit the Organization-Id header. */
   omitOrganizationHeader?: boolean;
@@ -18,6 +19,7 @@ export interface SnippetInput {
 export interface DirectSnippetInput {
   /** The public API origin the samples call; the caller resolves it, there is no placeholder. */
   apiOrigin: string;
+  idempotencyKey?: string;
   organizationId: number;
   /** When true (e.g. an organization-bound key), omit the Organization-Id header. */
   omitOrganizationHeader?: boolean;
@@ -115,6 +117,7 @@ function renderHttpSnippets({
 export function buildDirectSnippets({
   apiOrigin,
   organizationId,
+  idempotencyKey,
   omitOrganizationHeader = false,
   apiKey,
   from,
@@ -123,6 +126,7 @@ export function buildDirectSnippets({
   if (!omitOrganizationHeader) {
     headers.push(['Organization-Id', String(organizationId)]);
   }
+  if (idempotencyKey) headers.push(['Idempotency-Key', idempotencyKey]);
   headers.push(['Content-Type', 'application/json']);
 
   return renderHttpSnippets({
@@ -144,17 +148,18 @@ export function buildDirectSnippets({
 export function buildSnippets({
   apiOrigin,
   organizationId,
+  idempotencyKey,
   omitOrganizationHeader = false,
   apiKey,
   template,
   variables,
 }: SnippetInput): Snippets {
-  const idempotencyKey = `${template}-user-42`;
   const headers: [string, string][] = [['Authorization', `Bearer ${apiKey}`]];
   if (!omitOrganizationHeader) {
     headers.push(['Organization-Id', String(organizationId)]);
   }
-  headers.push(['Idempotency-Key', idempotencyKey], ['Content-Type', 'application/json']);
+  if (idempotencyKey) headers.push(['Idempotency-Key', idempotencyKey]);
+  headers.push(['Content-Type', 'application/json']);
 
   return renderHttpSnippets({
     url: endpoint(apiOrigin),

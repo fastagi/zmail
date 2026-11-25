@@ -54,6 +54,9 @@ const messages = {
     holderNote:
       'The key belongs to you. If you leave the organization it stops working at once, and codes your production backend sends stop going out.',
     samples: 'Code samples',
+    addRetryKey: 'Add an idempotency key',
+    replaceRetryKey: 'Generate a key for a new email',
+    retryHint: 'Without a key, each request sends a new email. To retry after a timeout, use the original key and body. Changing the recipient or content with that key returns 409.',
     snippetMode: 'Send style',
     directMode: 'Direct HTML',
     templateMode: 'Template',

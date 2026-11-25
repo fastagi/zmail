@@ -121,6 +121,18 @@ describe('developer quick start and send log', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     expect(samples).toHaveTextContent('signup-code');
+    expect(samples).not.toHaveTextContent('Idempotency-Key');
+    fireEvent.click(screen.getByRole('button', { name: 'Add an idempotency key' }));
+    const key = samples.textContent?.match(/Idempotency-Key: ([0-9a-f-]{36})/u)?.[1];
+    expect(key).toBeDefined();
+    for (const name of ['Node.js', 'Python']) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      expect(samples.textContent).toContain(key);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Generate a key for a new email' }));
+    expect(samples.textContent).not.toContain(key);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenLastCalledWith(samples.textContent));
   });
 
   it('creating a key shows it once then only the prefix', async () => {
