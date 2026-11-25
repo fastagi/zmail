@@ -1,7 +1,18 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
-import { AlertCircle, ArrowLeft, ChevronLeft, ChevronRight, Inbox } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowUpRight,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Inbox,
+  Link2,
+} from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +37,10 @@ import {
   useRevealMailMessage,
 } from '@/features/mailbox/hooks/use-mailbox';
 import type { MailMessage } from '@/features/mailbox/types';
+import {
+  extractMagicLoginLink,
+  type MagicLoginLink,
+} from '@/features/mailbox/utils/magic-link';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -375,6 +390,11 @@ function MessageCard({
   const reveal = useRevealMailMessage(useMailOrganizationId(), reader.mailboxId);
   const message = revealed?.id === stored.id ? revealed : stored;
   const showSecretsPanel = stored.secrets_masked === true;
+  const isMasked = showSecretsPanel && message === stored;
+  const magicLink = useMemo(
+    () => (isMasked ? null : extractMagicLoginLink(message.html_body, message.text_body)),
+    [isMasked, message.html_body, message.text_body]
+  );
   const onReveal = () => {
     reveal
       .mutateAsync(stored.id)
@@ -424,6 +444,8 @@ function MessageCard({
           onReveal={onReveal}
         />
       ) : null}
+
+      {magicLink ? <MagicLinkBanner key={magicLink.url} link={magicLink} /> : null}
 
       {hasHtml && hasText ? (
         <div role="group" aria-label={t('message.viewLabel')} className="flex gap-2">
@@ -568,5 +590,84 @@ function RecipientLines({ message }: { message: MailMessage }) {
         </p>
       ) : null}
     </>
+  );
+}
+
+/** Quick-copy and open banner surfaced above emails containing a magic login link. */
+function MagicLinkBanner({ link }: { link: MagicLoginLink }) {
+  const t = useT('mailbox');
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(link.url);
+      setCopied(true);
+      toast.success(t('message.magicLinkCopied'));
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => {
+        setCopied(false);
+        timerRef.current = null;
+      }, 2_000);
+    } catch {
+      setCopied(false);
+      toast.error(t('message.magicLinkCopyFailed'));
+    }
+  };
+
+  return (
+    <div
+      role="region"
+      aria-label={t('message.magicLinkTitle')}
+      data-magic-link-banner=""
+      className="flex flex-wrap items-center justify-between gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2.5"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          aria-hidden="true"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"
+        >
+          <Link2 className="size-3.5" />
+        </span>
+        <span className="text-sm font-medium text-foreground">{t('message.magicLinkTitle')}</span>
+        <Badge variant="secondary" className="max-w-[200px] truncate font-mono text-[11px]">
+          {link.host}
+        </Badge>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          type="button"
+          size="xs"
+          variant="default"
+          icon={
+            copied ? (
+              <Check className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Copy className="size-3.5" aria-hidden="true" />
+            )
+          }
+          onClick={() => void handleCopy()}
+        >
+          {copied ? t('message.magicLinkCopied') : t('message.magicLinkCopy')}
+        </Button>
+        <Button
+          asChild
+          size="xs"
+          variant="outline"
+          icon={<ArrowUpRight className="size-3.5" aria-hidden="true" />}
+          iconPosition="right"
+        >
+          <a href={link.url} target="_blank" rel="noopener noreferrer">
+            {t('message.magicLinkOpen')}
+          </a>
+        </Button>
+      </div>
+    </div>
   );
 }
