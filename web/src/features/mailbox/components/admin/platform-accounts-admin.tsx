@@ -13,6 +13,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -36,11 +43,7 @@ import {
 } from '@/features/mailbox/components/mail-organization';
 import { memberName } from '@/features/mailbox/components/mailbox-people';
 import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
-import {
-  EmptyState,
-  ErrorAlert,
-  nativeSelectClassName,
-} from '@/features/mailbox/components/mail-shared';
+import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import {
   useDeletePlatformAccount,
@@ -321,6 +324,8 @@ function PlatformAccounts() {
   );
 }
 
+const ALL_FILTER_VALUE = '__all__';
+
 function FilterSelect({
   label,
   value,
@@ -335,20 +340,22 @@ function FilterSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <select
-      aria-label={label}
-      title={label}
-      className={cn(nativeSelectClassName, 'w-full sm:w-auto sm:max-w-48')}
-      value={value}
-      onChange={event => onChange(event.target.value)}
+    <Select
+      value={value === '' ? ALL_FILTER_VALUE : value}
+      onValueChange={next => onChange(next === ALL_FILTER_VALUE ? '' : next)}
     >
-      <option value="">{anyLabel}</option>
-      {options.map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger aria-label={label} title={label} className="w-full sm:w-auto sm:max-w-48">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL_FILTER_VALUE}>{anyLabel}</SelectItem>
+        {options.map(option => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

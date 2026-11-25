@@ -8,6 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   BroadcastPreview,
   SharedValues,
 } from '@/features/mailbox/components/broadcasts/broadcast-preview';
@@ -19,7 +26,6 @@ import {
   maxScheduleAheadMs,
 } from '@/features/mailbox/components/broadcasts/broadcast-shared';
 import { useBroadcastEditor } from '@/features/mailbox/components/broadcasts/use-broadcast-editor';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import {
   MAIL_BROADCAST_LABEL_MAX_LENGTH,
   MAIL_BROADCAST_NAME_MAX_LENGTH,
@@ -71,22 +77,22 @@ export function BroadcastEditor({
   ) => (
     <div className="space-y-2">
       <Label htmlFor={id}>{labelText}</Label>
-      <select
-        id={id}
-        className={cn(nativeSelectClassName, 'w-full')}
+      <Select
         value={value === null ? '' : String(value)}
         disabled={editor.pending}
-        onChange={event => onChange(Number(event.target.value))}
+        onValueChange={next => onChange(Number(next))}
       >
-        <option value="" disabled>
-          {t('broadcasts.choose')}
-        </option>
-        {options.map(option => (
-          <option key={option.id} value={String(option.id)}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue placeholder={t('broadcasts.choose')} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(option => (
+            <SelectItem key={option.id} value={String(option.id)}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 
@@ -129,19 +135,22 @@ export function BroadcastEditor({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor={ids.domain}>{t('broadcasts.fromDomain')}</Label>
-              <select
-                id={ids.domain}
-                className={cn(nativeSelectClassName, 'w-full')}
+              <Select
                 value={editor.currentDomain ?? ''}
                 disabled={editor.pending || editor.senderDomains.length === 0}
-                onChange={event => editor.selectDomain(event.target.value)}
+                onValueChange={value => editor.selectDomain(value)}
               >
-                {editor.senderDomains.map(domain => (
-                  <option key={domain} value={domain}>
-                    {domain}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id={ids.domain} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {editor.senderDomains.map(domain => (
+                    <SelectItem key={domain} value={domain}>
+                      {domain}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {select(
               ids.from,

@@ -313,7 +313,7 @@ describe('developer quick start and send log', () => {
         { perPage: 50 }
       )
     );
-    expect(screen.getByLabelText('Template')).toHaveValue('signup-code');
+    expect(screen.getByLabelText('Template')).toHaveTextContent('signup-code');
 
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Filter by outcome' })).getByRole('button', {

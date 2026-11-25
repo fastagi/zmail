@@ -15,9 +15,15 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { memberName, useOrganizationPeople } from '@/features/mailbox/components/mailbox-people';
 import {
@@ -39,7 +45,8 @@ import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
+
+const NO_OWNER_VALUE = '__none__';
 
 /** The form's values; the owner is the user id as a string, empty for none. */
 interface RoleDraft {
@@ -411,18 +418,21 @@ function RoleForm({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={ids.color}>{t('roles.color')}</Label>
-          <select
-            id={ids.color}
-            className={nativeSelectClassName}
+          <Select
             value={draft.color}
-            onChange={event => change({ color: event.target.value as MailLabelColor })}
+            onValueChange={value => change({ color: value as MailLabelColor })}
           >
-            {MAIL_LABEL_COLORS.map(option => (
-              <option key={option} value={option}>
-                {t(`labelColors.${option}`)}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id={ids.color} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MAIL_LABEL_COLORS.map(option => (
+                <SelectItem key={option} value={option}>
+                  {t(`labelColors.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
       <div className="space-y-1.5">
@@ -444,24 +454,27 @@ function RoleForm({
       </div>
       <div className="space-y-1.5">
         <Label htmlFor={ids.owner}>{t('roles.owner')}</Label>
-        <select
-          id={ids.owner}
-          className={cn(nativeSelectClassName)}
-          value={draft.owner}
-          onChange={event => change({ owner: event.target.value })}
+        <Select
+          value={draft.owner === '' ? NO_OWNER_VALUE : draft.owner}
+          onValueChange={value => change({ owner: value === NO_OWNER_VALUE ? '' : value })}
         >
-          <option value="">{t('roles.noOwner')}</option>
-          {ownerKnown ? null : (
-            <option value={draft.owner}>
-              {t('access.unknownUser', { id: Number(draft.owner) })}
-            </option>
-          )}
-          {people.map(person => (
-            <option key={person.user_id} value={String(person.user_id)}>
-              {memberName(person)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={ids.owner} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_OWNER_VALUE}>{t('roles.noOwner')}</SelectItem>
+            {ownerKnown ? null : (
+              <SelectItem value={draft.owner}>
+                {t('access.unknownUser', { id: Number(draft.owner) })}
+              </SelectItem>
+            )}
+            {people.map(person => (
+              <SelectItem key={person.user_id} value={String(person.user_id)}>
+                {memberName(person)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {formError ? (
         <p role="alert" className="text-xs text-error">

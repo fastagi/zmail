@@ -265,11 +265,12 @@ describe('mailbox Agent tab', () => {
     const dialog = await openForm();
 
     const select = await within(dialog).findByRole('combobox', { name: 'Agent key' });
-    expect(
-      within(select)
-        .getAllByRole('option')
-        .map(option => option.textContent)
-    ).toEqual(['Choose a key', 'Support agent · fastbuild_12']);
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
+      'Choose a key',
+      'Support agent · fastbuild_12',
+    ]);
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Authorize' }));
     const keyError = await within(dialog).findByText('Choose an agent key.');
     expect(keyError).toHaveAttribute('role', 'alert');
@@ -277,7 +278,8 @@ describe('mailbox Agent tab', () => {
     expect(select.getAttribute('aria-describedby')).toContain(keyError.id);
     expect(service.issue).not.toHaveBeenCalled();
 
-    fireEvent.change(select, { target: { value: '12' } });
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.click(screen.getByRole('option', { name: 'Support agent · fastbuild_12' }));
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Only mail matching filters' }));
     expect(within(dialog).getByText(/they are not authentication/u)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Authorize' }));
@@ -449,9 +451,9 @@ describe('mailbox Agent tab', () => {
     );
     await openAgents(mailbox());
     const dialog = await openForm();
-    fireEvent.change(await within(dialog).findByRole('combobox', { name: 'Agent key' }), {
-      target: { value: '12' },
-    });
+    const agentKeySelect = await within(dialog).findByRole('combobox', { name: 'Agent key' });
+    fireEvent.keyDown(agentKeySelect, { key: 'ArrowDown' });
+    fireEvent.click(screen.getByRole('option', { name: 'Support agent · fastbuild_12' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Authorize' }));
     expect(
       await within(dialog).findByText('This key already has an active grant on this mailbox.')

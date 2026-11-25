@@ -24,8 +24,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import {
   blockAligns,
   blockIssues,
@@ -398,22 +404,25 @@ function SelectField<T extends string | number>({
   return (
     <Field label={label}>
       {id => (
-        <select
-          id={id}
-          className={cn(nativeSelectClassName, 'w-full')}
+        <Select
           value={String(value)}
           disabled={disabled}
-          onChange={event => {
-            const picked = options.find(option => String(option.value) === event.target.value);
+          onValueChange={next => {
+            const picked = options.find(option => String(option.value) === next);
             if (picked) onChange(picked.value);
           }}
         >
-          {options.map(option => (
-            <option key={String(option.value)} value={String(option.value)}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={id} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map(option => (
+              <SelectItem key={String(option.value)} value={String(option.value)}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       )}
     </Field>
   );
@@ -542,22 +551,28 @@ function FieldPicker({
 }) {
   const t = useT('mailbox');
   return (
-    <select
-      aria-label={t('templates.visual.insertField')}
-      className={cn(nativeSelectClassName, 'h-7 text-xs')}
+    <Select
       value=""
       disabled={disabled}
-      onChange={event => {
-        if (event.target.value) onPick(event.target.value);
+      onValueChange={value => {
+        if (value) onPick(value);
       }}
     >
-      <option value="">{t('templates.visual.insertField')}</option>
-      {fields.map(name => (
-        <option key={name} value={name}>
-          {name}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger
+        size="sm"
+        aria-label={t('templates.visual.insertField')}
+        className="h-7 text-xs"
+      >
+        <SelectValue placeholder={t('templates.visual.insertField')} />
+      </SelectTrigger>
+      <SelectContent>
+        {fields.map(name => (
+          <SelectItem key={name} value={name}>
+            {name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

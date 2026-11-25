@@ -17,8 +17,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import {
   useDeleteMailTemplate,
@@ -31,7 +37,6 @@ import {
 } from '@/features/mailbox/schemas';
 import { resolveMailboxErrorKey, type MailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
 
 export function TemplateTestDialog({
   templateId,
@@ -102,19 +107,22 @@ export function TemplateTestDialog({
             ) : (
               <div className="space-y-2">
                 <Label htmlFor={ids.from}>{t('templates.testFrom')}</Label>
-                <select
-                  id={ids.from}
-                  className={cn(nativeSelectClassName, 'w-full')}
+                <Select
                   value={from === null ? '' : String(from)}
                   disabled={send.isPending || options.length === 0}
-                  onChange={event => setMailboxId(Number(event.target.value))}
+                  onValueChange={value => setMailboxId(Number(value))}
                 >
-                  {options.map(option => (
-                    <option key={option.id} value={String(option.id)}>
-                      {option.address}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id={ids.from} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {options.map(option => (
+                      <SelectItem key={option.id} value={String(option.id)}>
+                        {option.address}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
             <div className="space-y-2">

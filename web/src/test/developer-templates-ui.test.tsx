@@ -184,9 +184,11 @@ describe('developer console', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
     const dialog = screen.getByRole('dialog');
     const sender = within(dialog).getByLabelText('Sender domain');
-    expect(within(sender).getAllByRole('option').map(option => option.textContent)).toEqual([
+    fireEvent.keyDown(sender, { key: 'ArrowDown' });
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
       'acme.example',
     ]);
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
   });
 
   it('marks a template whose sender left the developer scope read-only', async () => {
@@ -219,7 +221,7 @@ describe('developer console', () => {
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Signup code');
     expect(within(dialog).getByLabelText('Key')).toHaveValue('signup-code');
     expect(within(dialog).getByLabelText('Sender local part')).toHaveValue('no-reply');
-    expect(within(dialog).getByLabelText('Sender domain')).toHaveValue('acme.example');
+    expect(within(dialog).getByLabelText('Sender domain')).toHaveTextContent('acme.example');
     // A secret is always required and never has a fallback.
     expect(within(dialog).getByLabelText('Fallback for code')).toBeDisabled();
     expect(within(dialog).getByRole('checkbox', { name: 'Secret: code' })).toBeChecked();

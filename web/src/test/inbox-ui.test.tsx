@@ -1505,13 +1505,11 @@ describe('unified inbox', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Manage mailboxes' }));
     const select = await screen.findByRole('combobox', { name: 'Role of hello@mail.example.com' });
-    expect(select).toHaveValue('');
-    await act(async () => {
-      fireEvent.change(select, { target: { value: '3' } });
-    });
+    expect(select).toHaveTextContent('No role');
+    chooseOption(select, 'Design');
 
     expect(state.assignRole.mutateAsync).toHaveBeenCalledWith({ mailboxId: 1, roleId: 3 });
-    expect(toast.success).toHaveBeenCalledWith('Role updated');
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Role updated'));
   });
 
   it('the roles dialog puts a readable mailbox in a role and the inbox follows', async () => {

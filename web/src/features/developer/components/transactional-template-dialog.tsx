@@ -18,8 +18,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { useSaveMailTemplate } from '@/features/mailbox/hooks/use-mail-templates';
 import { MAIL_TEMPLATE_NAME_MAX_LENGTH } from '@/features/mailbox/schemas';
@@ -349,20 +355,26 @@ export function TransactionalTemplateDialog({
                   <span className="text-muted-foreground" aria-hidden="true">
                     @
                   </span>
-                  <select
-                    id={ids.domain}
-                    aria-label={t('dialog.domain')}
-                    className={cn(nativeSelectClassName, 'min-w-0 flex-1')}
+                  <Select
                     value={domain}
                     disabled={options.length === 0}
-                    onChange={event => update({ domain: event.target.value })}
+                    onValueChange={value => update({ domain: value })}
                   >
-                    {options.map(name => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id={ids.domain}
+                      aria-label={t('dialog.domain')}
+                      className="min-w-0 flex-1"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options.map(name => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="space-y-1.5">

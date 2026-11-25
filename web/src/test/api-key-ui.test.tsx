@@ -67,6 +67,11 @@ const ready = {
   recipient: 'me@example.com',
 };
 
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
 describe('API key settings workflow', () => {
   beforeEach(() => {
     state.apiKeys.data = { items: [apiKey], meta: { total: 1 } };
@@ -99,7 +104,7 @@ describe('API key settings workflow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
     const organization = screen.getByRole('combobox', { name: 'Use only in one organization' });
-    expect(organization).toHaveValue('0');
+    expect(organization).toHaveTextContent('Any organization');
     expect(screen.queryByRole('group', { name: 'Send only from these domains' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
@@ -115,9 +120,7 @@ describe('API key settings workflow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Use only in one organization' }), {
-      target: { value: '12' },
-    });
+    chooseOption(screen.getByRole('combobox', { name: 'Use only in one organization' }), 'Acme');
     const domains = screen.getByRole('group', { name: 'Send only from these domains' });
     expect(within(domains).getAllByRole('checkbox')).toHaveLength(2);
     fireEvent.click(within(domains).getByRole('checkbox', { name: 'mail.acme.example' }));
@@ -140,9 +143,9 @@ describe('API key settings workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Deploy' } });
     const organization = screen.getByRole('combobox', { name: 'Use only in one organization' });
-    fireEvent.change(organization, { target: { value: '12' } });
+    chooseOption(organization, 'Acme');
     fireEvent.click(screen.getByRole('checkbox', { name: 'acme.zmail.im' }));
-    fireEvent.change(organization, { target: { value: '13' } });
+    chooseOption(organization, 'Globex');
     expect(screen.getByText('This organization has no domains to send from yet.')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Create key' }).at(-1)!);
 

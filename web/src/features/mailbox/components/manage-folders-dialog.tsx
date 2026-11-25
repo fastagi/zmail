@@ -14,8 +14,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import {
   useCreateMailFolder,
@@ -26,7 +32,6 @@ import { MAIL_FOLDER_NAME_MAX_LENGTH, MAIL_LABEL_COLORS } from '@/features/mailb
 import type { MailFolder, MailLabelColor } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
 
 export interface NamedItem {
   id: number;
@@ -150,18 +155,18 @@ export function NamedItemsDialog({
     label: string,
     onChange: (next: MailLabelColor) => void
   ) => (
-    <select
-      aria-label={label}
-      className={cn(nativeSelectClassName, 'w-28 shrink-0')}
-      value={value}
-      onChange={event => onChange(event.target.value as MailLabelColor)}
-    >
-      {MAIL_LABEL_COLORS.map(option => (
-        <option key={option} value={option}>
-          {t(`labelColors.${option}`)}
-        </option>
-      ))}
-    </select>
+    <Select value={value} onValueChange={next => onChange(next as MailLabelColor)}>
+      <SelectTrigger aria-label={label} className="w-28 shrink-0">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {MAIL_LABEL_COLORS.map(option => (
+          <SelectItem key={option} value={option}>
+            {t(`labelColors.${option}`)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 
   return (

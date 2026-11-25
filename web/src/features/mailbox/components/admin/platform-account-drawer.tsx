@@ -7,6 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -18,11 +25,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { PlatformAccountLookups } from '@/features/mailbox/components/admin/platform-account-lookups';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { memberName } from '@/features/mailbox/components/mailbox-people';
-import {
-  ErrorAlert,
-  nativeSelectClassName,
-  useDateTimeFormat,
-} from '@/features/mailbox/components/mail-shared';
+import { ErrorAlert, useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
 import {
   useCreatePlatformAccount,
   usePlatformAccountEvents,
@@ -43,7 +46,8 @@ import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
+
+const NO_OPTION_VALUE = '__none__';
 
 /** The form's values; ids are text, empty for none. */
 interface AccountDraft {
@@ -325,7 +329,7 @@ function AccountForm({
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id={ids.role} label={t('platformAccounts.form.role')}>
-          <Select
+          <OptionalSelect
             id={ids.role}
             value={draft.roleId}
             noneLabel={none}
@@ -334,22 +338,25 @@ function AccountForm({
           />
         </Field>
         <Field id={ids.status} label={t('platformAccounts.form.status')}>
-          <select
-            id={ids.status}
-            className={cn(nativeSelectClassName, 'w-full')}
+          <Select
             value={draft.status}
-            onChange={event => change({ status: event.target.value as PlatformAccountStatus })}
+            onValueChange={value => change({ status: value as PlatformAccountStatus })}
           >
-            {PLATFORM_ACCOUNT_STATUSES.map(status => (
-              <option key={status} value={status}>
-                {t(`platformAccounts.statuses.${status}`)}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id={ids.status} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PLATFORM_ACCOUNT_STATUSES.map(status => (
+                <SelectItem key={status} value={status}>
+                  {t(`platformAccounts.statuses.${status}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
       </div>
       <Field id={ids.mailbox} label={t('platformAccounts.form.mailbox')}>
-        <Select
+        <OptionalSelect
           id={ids.mailbox}
           value={draft.mailboxId}
           noneLabel={none}
@@ -358,7 +365,7 @@ function AccountForm({
         />
       </Field>
       <Field id={ids.owner} label={t('platformAccounts.form.owner')}>
-        <Select
+        <OptionalSelect
           id={ids.owner}
           value={draft.ownerUserId}
           noneLabel={none}
@@ -414,7 +421,7 @@ function Field({
   );
 }
 
-function Select({
+function OptionalSelect({
   id,
   value,
   noneLabel,
@@ -428,19 +435,22 @@ function Select({
   onChange: (value: string) => void;
 }) {
   return (
-    <select
-      id={id}
-      className={cn(nativeSelectClassName, 'w-full')}
-      value={value}
-      onChange={event => onChange(event.target.value)}
+    <Select
+      value={value === '' ? NO_OPTION_VALUE : value}
+      onValueChange={next => onChange(next === NO_OPTION_VALUE ? '' : next)}
     >
-      <option value="">{noneLabel}</option>
-      {options.map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger id={id} className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NO_OPTION_VALUE}>{noneLabel}</SelectItem>
+        {options.map(option => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

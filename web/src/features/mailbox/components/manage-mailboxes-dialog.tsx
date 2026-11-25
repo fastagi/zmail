@@ -12,18 +12,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-form';
 import { hasAccessPanel } from '@/features/mailbox/components/mailbox-access-panel';
 import { MailboxMarks } from '@/features/mailbox/components/mailbox-switcher';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useAssignMailboxRole, useMailRoles } from '@/features/mailbox/hooks/use-inbox';
 import { useDeleteMailbox } from '@/features/mailbox/hooks/use-mailbox';
 import type { MailRole, Mailbox, MailboxDomain, MailboxType } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
+
+const NO_ROLE_VALUE = '__none__';
 
 /**
  * Mailbox administration, kept out of the reading workspace: every mailbox of the organization
@@ -149,7 +156,7 @@ function MailboxRoleSelect({ mailbox, roles }: { mailbox: Mailbox; roles: readon
   const current = mailbox.role_id ?? null;
 
   const choose = async (value: string) => {
-    const roleId = value === '' ? null : Number(value);
+    const roleId = value === NO_ROLE_VALUE ? null : Number(value);
     if (roleId === current) return;
     try {
       await assign.mutateAsync({ mailboxId: mailbox.id, roleId });
@@ -160,20 +167,26 @@ function MailboxRoleSelect({ mailbox, roles }: { mailbox: Mailbox; roles: readon
   };
 
   return (
-    <select
-      aria-label={t('roles.mailboxRole', { address: mailbox.address })}
-      className={cn(nativeSelectClassName, 'w-36 shrink-0')}
-      value={current === null ? '' : String(current)}
+    <Select
+      value={current === null ? NO_ROLE_VALUE : String(current)}
       disabled={assign.isPending}
-      onChange={event => void choose(event.target.value)}
+      onValueChange={value => void choose(value)}
     >
-      <option value="">{t('roles.noRole')}</option>
-      {roles.map(role => (
-        <option key={role.id} value={String(role.id)}>
-          {role.name}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger
+        aria-label={t('roles.mailboxRole', { address: mailbox.address })}
+        className="w-36 shrink-0"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NO_ROLE_VALUE}>{t('roles.noRole')}</SelectItem>
+        {roles.map(role => (
+          <SelectItem key={role.id} value={String(role.id)}>
+            {role.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

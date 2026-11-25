@@ -6,11 +6,19 @@ import { Plus, Search, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { MailContactStatus } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
 
 import { statuses, statusKey } from './contact-shared';
+
+const ALL_STATUSES_VALUE = '__all__';
 
 export function ContactsToolbar({
   query,
@@ -63,23 +71,24 @@ export function ContactsToolbar({
         <Label htmlFor={statusId} className="sr-only">
           {t('contacts.statusFilter')}
         </Label>
-        <select
-          id={statusId}
-          className={nativeSelectClassName}
-          value={status ?? ''}
-          onChange={event =>
-            onStatus(
-              event.target.value === '' ? undefined : (event.target.value as MailContactStatus)
-            )
+        <Select
+          value={status ?? ALL_STATUSES_VALUE}
+          onValueChange={value =>
+            onStatus(value === ALL_STATUSES_VALUE ? undefined : (value as MailContactStatus))
           }
         >
-          <option value="">{t('contacts.allStatuses')}</option>
-          {statuses.map(value => (
-            <option key={value} value={value}>
-              {t(statusKey[value])}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={statusId} className="min-w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_STATUSES_VALUE}>{t('contacts.allStatuses')}</SelectItem>
+            {statuses.map(value => (
+              <SelectItem key={value} value={value}>
+                {t(statusKey[value])}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {showClearFilters ? (
         <Button

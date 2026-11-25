@@ -21,6 +21,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import request, { ApiError } from '@/http/request';
@@ -474,19 +481,22 @@ export function CloudflareConnectionForm({ organizationId }: { organizationId: n
             <div className="space-y-2 rounded-md border bg-muted/20 p-3">
               <Label htmlFor="cf-zone-select">{t('domain.cfZone')}</Label>
               <div className="flex flex-wrap items-center gap-2">
-                <select
-                  id="cf-zone-select"
-                  aria-label={t('domain.cfZone')}
-                  className="h-9 min-w-56 flex-1 rounded-md border border-input bg-background px-3 text-sm shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                  value={zone}
-                  onChange={e => setZone(e.target.value)}
-                >
-                  {zones.map(z => (
-                    <option key={z.id} value={z.id}>
-                      {z.name} · {z.account_name}
-                    </option>
-                  ))}
-                </select>
+                <Select value={zone} onValueChange={setZone}>
+                  <SelectTrigger
+                    id="cf-zone-select"
+                    aria-label={t('domain.cfZone')}
+                    className="min-w-56 flex-1 bg-background"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {zones.map(z => (
+                      <SelectItem key={z.id} value={z.id}>
+                        {z.name} · {z.account_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   type="button"
                   disabled={busy || !zone}

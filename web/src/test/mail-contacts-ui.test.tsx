@@ -101,7 +101,7 @@ describe('mail contacts console', () => {
     expect(state.contactCalls.at(-1)).toEqual({ filters: { listId: 7 }, page: 1 });
     expect(screen.getByRole('button', { name: 'Rename list' })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'unsubscribed' } });
+    chooseOption(screen.getByLabelText('Status'), 'Unsubscribed');
     expect(state.contactCalls.at(-1)?.filters).toEqual({ listId: 7, status: 'unsubscribed' });
 
     fireEvent.change(screen.getByLabelText('Search contacts'), { target: { value: ' ann ' } });
@@ -189,7 +189,7 @@ describe('mail contacts console', () => {
     fireEvent.change(within(dialog).getByLabelText('CSV file'), {
       target: { files: [new File([csv], 'contacts.csv', { type: 'text/csv' })] },
     });
-    fireEvent.change(within(dialog).getByLabelText('Add to list'), { target: { value: '7' } });
+    chooseOption(within(dialog).getByLabelText('Add to list'), 'VIP');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
 
     await waitFor(() =>
@@ -201,6 +201,79 @@ describe('mail contacts console', () => {
     expect(within(dialog).getByText('Line 3')).toBeInTheDocument();
     expect(within(dialog).getByText('Not a usable address')).toBeInTheDocument();
     expect(within(dialog).getByText('Ignored columns: Phone #')).toBeInTheDocument();
+  });
+
+  it('shows a CSV-specific message on HTTP 413 payload too large instead of email send copy', async () => {
+    state.importContacts.mutateAsync.mockRejectedValueOnce(
+      new ApiError('payload too large', ApiErrorCode.COMMON_REQUEST_TOO_LARGE, 413)
+    );
+    renderContacts();
+    fireEvent.click(screen.getByRole('button', { name: 'Import CSV' }));
+    const dialog = screen.getByRole('dialog');
+    const csv = 'email,first_name\nann@example.com,Ann\n';
+    fireEvent.change(within(dialog).getByLabelText('CSV file'), {
+      target: { files: [new File([csv], 'large.csv', { type: 'text/csv' })] },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
+
+    expect(
+      await within(dialog).findByText(
+        'CSV file is too large. Split it into smaller files and try again.'
+      )
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/message is too large to send/iu)).toBeNull();
+  });
+
+  it('chunks large CSV imports on the client, shows progress, and aggregates results', async () => {
+    const header = 'email,first_name';
+    const dataRows = Array.from({ length: 650 }, (_, index) => `user${index}@example.com,User${index}`);
+    const bigCsv = `${header}\n${dataRows.join('\n')}\n`;
+
+    state.importContacts.mutateAsync
+      .mockResolvedValueOnce({
+        rows: 300,
+        created: 299,
+        updated: 0,
+        skipped_count: 1,
+        skipped: [{ line: 2, reason: 'invalid_email' }],
+        ignored_columns: ['Extra'],
+      })
+      .mockResolvedValueOnce({
+        rows: 300,
+        created: 250,
+        updated: 50,
+        skipped_count: 0,
+        skipped: [],
+        ignored_columns: ['Extra'],
+      })
+      .mockResolvedValueOnce({
+        rows: 50,
+        created: 49,
+        updated: 0,
+        skipped_count: 1,
+        skipped: [{ line: 5, reason: 'duplicate' }],
+        ignored_columns: ['Extra', 'Notes'],
+      });
+
+    renderContacts();
+    fireEvent.click(screen.getByRole('button', { name: 'Import CSV' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('CSV file'), {
+      target: { files: [new File([bigCsv], 'bulk.csv', { type: 'text/csv' })] },
+    });
+    expect(await within(dialog).findByText('bulk.csv')).toBeInTheDocument();
+    expect(await within(dialog).findByText(/650 rows/u)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
+
+    await waitFor(() => expect(state.importContacts.mutateAsync).toHaveBeenCalledTimes(3));
+    expect(
+      await within(dialog).findByText('650 rows read: 598 added, 50 updated, 2 skipped.')
+    ).toBeInTheDocument();
+    // Chunk 1 line 2 stays Line 2; Chunk 3 (startRowIndex=600) line 5 becomes Line 605.
+    expect(within(dialog).getByText('Line 2')).toBeInTheDocument();
+    expect(within(dialog).getByText('Line 605')).toBeInTheDocument();
+    expect(within(dialog).getByText('Ignored columns: Extra, Notes')).toBeInTheDocument();
   });
 
   it('downloads a sample CSV file from the import dialog', async () => {
@@ -291,7 +364,7 @@ describe('mail contacts console', () => {
     renderContacts();
     const vipButton = screen.getByRole('button', { name: /VIP/u });
     fireEvent.click(vipButton);
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'unsubscribed' } });
+    chooseOption(screen.getByLabelText('Status'), 'Unsubscribed');
     fireEvent.change(screen.getByLabelText('Search contacts'), { target: { value: 'bob' } });
     expect(state.contactCalls.at(-1)?.filters).toEqual({
       listId: 7,
@@ -302,7 +375,7 @@ describe('mail contacts console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(state.contactCalls.at(-1)).toEqual({ filters: { listId: 7 }, page: 1 });
     expect(screen.getByLabelText('Search contacts')).toHaveValue('');
-    expect(screen.getByLabelText('Status')).toHaveValue('');
+    expect(screen.getByLabelText('Status')).toHaveTextContent('All statuses');
 
     state.contacts.data = page([]);
     fireEvent.change(screen.getByLabelText('Search contacts'), { target: { value: 'nobody' } });
@@ -345,6 +418,11 @@ function page(items: unknown[]) {
 
 function now() {
   return '2026-11-16T10:00:00Z';
+}
+
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
 }
 
 function renderContacts() {

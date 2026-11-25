@@ -8,10 +8,16 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { SendReadiness } from '@/features/api-key/hooks/use-send-readiness';
 import { buildSendSnippets, type SendSnippets } from '@/features/api-key/utils/send-snippets';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
 import {
   showsDeveloperApiOriginHint,
@@ -185,18 +191,18 @@ function ReadyQuickStart({
           <Label htmlFor={senderId} className="shrink-0">
             {t('from')}
           </Label>
-          <select
-            id={senderId}
-            value={from}
-            onChange={event => setChosenSender(event.target.value)}
-            className={`${nativeSelectClassName} w-full sm:w-auto sm:max-w-sm`}
-          >
-            {senders.map(sender => (
-              <option key={sender} value={sender}>
-                {sender}
-              </option>
-            ))}
-          </select>
+          <Select value={from} onValueChange={setChosenSender}>
+            <SelectTrigger id={senderId} className="w-full sm:w-auto sm:max-w-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {senders.map(sender => (
+                <SelectItem key={sender} value={sender}>
+                  {sender}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       ) : null}
       <CodeSamples snippets={snippets} unavailable={apiOrigin.status === 'unavailable'} />

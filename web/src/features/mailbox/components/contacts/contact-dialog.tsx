@@ -18,8 +18,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import {
   useDeleteMailContact,
   useSaveMailContact,
@@ -28,7 +34,6 @@ import { MAIL_CONTACT_NAME_MAX_LENGTH } from '@/features/mailbox/schemas';
 import type { MailContact, MailContactList, MailContactStatus } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey, type MailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
 
 import { ConfirmDialog } from './contact-shared';
 
@@ -156,19 +161,22 @@ export function ContactDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor={ids.status}>{t('contacts.status')}</Label>
-              <select
-                id={ids.status}
-                className={cn(nativeSelectClassName, 'w-full')}
+              <Select
                 value={status}
                 disabled={pending}
-                onChange={event => setStatus(event.target.value as MailContactStatus)}
+                onValueChange={value => setStatus(value as MailContactStatus)}
               >
-                <option value="subscribed">{t('contacts.subscribed')}</option>
-                <option value="unsubscribed">{t('contacts.unsubscribed')}</option>
-                {contact?.status === 'suppressed' ? (
-                  <option value="suppressed">{t('contacts.suppressed')}</option>
-                ) : null}
-              </select>
+                <SelectTrigger id={ids.status} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="subscribed">{t('contacts.subscribed')}</SelectItem>
+                  <SelectItem value="unsubscribed">{t('contacts.unsubscribed')}</SelectItem>
+                  {contact?.status === 'suppressed' ? (
+                    <SelectItem value="suppressed">{t('contacts.suppressed')}</SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
               {contact?.status === 'suppressed' ? (
                 <p className="text-xs text-muted-foreground">{t('contacts.suppressedNote')}</p>
               ) : null}

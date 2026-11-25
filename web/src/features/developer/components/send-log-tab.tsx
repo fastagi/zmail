@@ -7,6 +7,13 @@ import { useLocale } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -27,11 +34,7 @@ import type { TransactionalLogFilters, TransactionalOutcome } from '@/features/d
 import { useDeveloperErrorMessage } from '@/features/developer/utils/developer-error';
 import { LOG_STATUS_CLASSES, logStatus } from '@/features/developer/utils/log-status';
 import { OrganizationLostState } from '@/features/mailbox/components/mail-organization';
-import {
-  EmptyState,
-  ErrorAlert,
-  nativeSelectClassName,
-} from '@/features/mailbox/components/mail-shared';
+import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import type { MailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
 import { isOrganizationLost } from '@/features/mailbox/utils/mailbox-error';
@@ -42,6 +45,7 @@ import { cn } from '@/utils';
 export const LOG_OUTCOME_PARAM = 'outcome';
 export const LOG_TEMPLATE_PARAM = 'template';
 
+const ALL_TEMPLATES_VALUE = '__all__';
 const CHIPS = ['all', 'delivered', 'problem', 'test'] as const;
 type Chip = (typeof CHIPS)[number];
 
@@ -171,22 +175,25 @@ export function SendLogTab({ organization }: { organization: MailOrganization })
           <Label htmlFor="send-log-template" className="text-xs text-muted-foreground">
             {t('log.template')}
           </Label>
-          <select
-            id="send-log-template"
-            className={cn(nativeSelectClassName, 'block w-48')}
-            value={template ?? ''}
-            onChange={event => {
+          <Select
+            value={template ?? ALL_TEMPLATES_VALUE}
+            onValueChange={value => {
               setSelectedId(null);
-              update({ [LOG_TEMPLATE_PARAM]: event.target.value || null });
+              update({ [LOG_TEMPLATE_PARAM]: value === ALL_TEMPLATES_VALUE ? null : value });
             }}
           >
-            <option value="">{t('log.allTemplates')}</option>
-            {templateKeys.map(key => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id="send-log-template" className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_TEMPLATES_VALUE}>{t('log.allTemplates')}</SelectItem>
+              {templateKeys.map(key => (
+                <SelectItem key={key} value={key}>
+                  {key}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

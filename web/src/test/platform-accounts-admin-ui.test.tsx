@@ -131,6 +131,11 @@ function mailbox(id: number, address: string) {
   };
 }
 
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -211,11 +216,10 @@ describe('platform account admin', () => {
       expect(ledger.list).toHaveBeenLastCalledWith(1, { q: 'med' }, { page: 1, perPage: 15 })
     );
 
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'needs_review' } });
-    fireEvent.change(screen.getByLabelText('Role'), { target: { value: '3' } });
-    await screen.findByRole('option', { name: 'ops@mail.example.com' });
-    fireEvent.change(screen.getByLabelText('Mailbox'), { target: { value: '15' } });
-    fireEvent.change(screen.getByLabelText('Owner'), { target: { value: '2' } });
+    chooseOption(screen.getByLabelText('Status'), 'Needs review');
+    chooseOption(screen.getByLabelText('Role'), 'Design');
+    await waitFor(() => chooseOption(screen.getByLabelText('Mailbox'), 'ops@mail.example.com'));
+    chooseOption(screen.getByLabelText('Owner'), 'operator');
     await waitFor(() =>
       expect(ledger.list).toHaveBeenLastCalledWith(
         1,
@@ -243,12 +247,11 @@ describe('platform account admin', () => {
     const drawer = await screen.findByRole('dialog', { name: 'New platform account' });
     fireEvent.change(within(drawer).getByLabelText('Platform'), { target: { value: ' Behance ' } });
     fireEvent.change(within(drawer).getByLabelText('Handle'), { target: { value: 'acme' } });
-    await within(drawer).findByRole('option', { name: 'ops@mail.example.com' });
-    fireEvent.change(within(drawer).getByLabelText('Registration mailbox'), {
-      target: { value: '15' },
-    });
-    fireEvent.change(within(drawer).getByLabelText('Owner'), { target: { value: '3' } });
-    fireEvent.change(within(drawer).getByLabelText('Status'), { target: { value: 'invited' } });
+    await waitFor(() =>
+      chooseOption(within(drawer).getByLabelText('Registration mailbox'), 'ops@mail.example.com')
+    );
+    chooseOption(within(drawer).getByLabelText('Owner'), 'member');
+    chooseOption(within(drawer).getByLabelText('Status'), 'Invited');
     fireEvent.click(within(drawer).getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(ledger.create).toHaveBeenCalledWith(1, {
@@ -336,8 +339,10 @@ describe('platform account admin', () => {
     );
     consoleError.mockRestore();
 
-    await within(drawer).findByRole('option', { name: 'Design' });
-    fireEvent.change(within(drawer).getByLabelText('Status'), { target: { value: 'retired' } });
+    await waitFor(() =>
+      expect(within(drawer).getByLabelText('Role')).toHaveTextContent('Design')
+    );
+    chooseOption(within(drawer).getByLabelText('Status'), 'Retired');
     fireEvent.click(within(drawer).getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(ledger.update).toHaveBeenCalledWith(1, 12, {
@@ -370,10 +375,11 @@ describe('platform account admin', () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Hand over' }));
     const dialog = await screen.findByRole('dialog', { name: 'Hand over accounts' });
-    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2' } });
+    chooseOption(within(dialog).getByLabelText('From'), 'operator');
     const to = within(dialog).getByLabelText('To');
-    expect(within(to).queryByRole('option', { name: 'operator' })).toBeNull();
-    fireEvent.change(to, { target: { value: '3' } });
+    fireEvent.keyDown(to, { key: 'ArrowDown' });
+    expect(screen.queryByRole('option', { name: 'operator' })).toBeNull();
+    fireEvent.click(screen.getByRole('option', { name: 'member' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Hand over' }));
     await waitFor(() =>
       expect(ledger.handOver).toHaveBeenCalledWith(1, { from_user_id: 2, to_user_id: 3 })

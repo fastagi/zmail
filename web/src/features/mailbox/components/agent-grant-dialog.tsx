@@ -17,6 +17,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { ROUTES } from '@/constants/routes';
@@ -30,7 +37,6 @@ import {
   type MailAgentGrant,
 } from '@/features/mailbox/agent-grant-schemas';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useIssueAgentGrant } from '@/features/mailbox/hooks/use-agent-grants';
 import { useDialogReturnFocus } from '@/features/mailbox/hooks/use-dialog-return-focus';
 import { useMailLabels } from '@/features/mailbox/hooks/use-mailbox';
@@ -45,6 +51,8 @@ import {
 } from '@/features/mailbox/utils/agent-grant-form';
 import { isConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
 import { useT } from '@/i18n';
+
+const NO_KEY_VALUE = '__none__';
 
 const initialValues: AgentGrantFormValues = {
   apiKeyId: null,
@@ -219,24 +227,30 @@ function GrantForm({
           </div>
         ) : (
           <>
-            <select
-              id={ids.key}
-              className={`${nativeSelectClassName} w-full`}
-              value={values.apiKeyId === null ? '' : String(values.apiKeyId)}
+            <Select
+              value={values.apiKeyId === null ? NO_KEY_VALUE : String(values.apiKeyId)}
               disabled={pending}
-              aria-invalid={keyError ? true : undefined}
-              aria-describedby={keyError ? `${ids.keyHint} ${ids.key}-error` : ids.keyHint}
-              onChange={event =>
-                set('apiKeyId', event.target.value === '' ? null : Number(event.target.value))
+              onValueChange={value =>
+                set('apiKeyId', value === NO_KEY_VALUE ? null : Number(value))
               }
             >
-              <option value="">{t('agents.form.chooseKey')}</option>
-              {usableKeys.map(key => (
-                <option key={key.id} value={String(key.id)}>
-                  {t('agents.grants.key', { name: key.name, prefix: key.key_prefix })}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                id={ids.key}
+                className="w-full"
+                aria-invalid={keyError ? true : undefined}
+                aria-describedby={keyError ? `${ids.keyHint} ${ids.key}-error` : ids.keyHint}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_KEY_VALUE}>{t('agents.form.chooseKey')}</SelectItem>
+                {usableKeys.map(key => (
+                  <SelectItem key={key.id} value={String(key.id)}>
+                    {t('agents.grants.key', { name: key.name, prefix: key.key_prefix })}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <p id={ids.keyHint} className="text-xs text-muted-foreground">
               {t('agents.form.keyHint')}
             </p>

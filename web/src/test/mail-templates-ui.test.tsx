@@ -277,7 +277,7 @@ describe('mail templates console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit Welcome' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByLabelText('From')).toHaveValue('2');
+    expect(within(dialog).getByLabelText('From')).toHaveTextContent('hello@mail.example.com');
 
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'not an address' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Send test' }));

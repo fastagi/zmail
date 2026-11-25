@@ -14,14 +14,21 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { PlatformAccountLookups } from '@/features/mailbox/components/admin/platform-account-lookups';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { memberName } from '@/features/mailbox/components/mailbox-people';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useHandOverPlatformAccounts } from '@/features/mailbox/hooks/use-platform-accounts';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
+
+const NO_CHOICE_VALUE = '__none__';
 
 /**
  * Moves every account one person is responsible for to another member. The person handing over
@@ -116,42 +123,53 @@ function HandOverForm({
     <form className="space-y-4" onSubmit={event => void submit(event)}>
       <div className="space-y-1.5">
         <Label htmlFor={ids.from}>{t('platformAccounts.handoverDialog.from')}</Label>
-        <select
-          id={ids.from}
-          className={cn(nativeSelectClassName, 'w-full')}
-          value={from}
-          onChange={event => {
-            setFrom(event.target.value);
-            if (event.target.value === to) setTo('');
+        <Select
+          value={from === '' ? NO_CHOICE_VALUE : from}
+          onValueChange={next => {
+            const value = next === NO_CHOICE_VALUE ? '' : next;
+            setFrom(value);
+            if (value === to) setTo('');
             setError(null);
           }}
         >
-          <option value="">{t('platformAccounts.handoverDialog.choose')}</option>
-          {fromOptions.map(option => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={ids.from} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_CHOICE_VALUE}>
+              {t('platformAccounts.handoverDialog.choose')}
+            </SelectItem>
+            {fromOptions.map(option => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor={ids.to}>{t('platformAccounts.handoverDialog.to')}</Label>
-        <select
-          id={ids.to}
-          className={cn(nativeSelectClassName, 'w-full')}
-          value={to}
-          onChange={event => {
-            setTo(event.target.value);
+        <Select
+          value={to === '' ? NO_CHOICE_VALUE : to}
+          onValueChange={next => {
+            setTo(next === NO_CHOICE_VALUE ? '' : next);
             setError(null);
           }}
         >
-          <option value="">{t('platformAccounts.handoverDialog.choose')}</option>
-          {toOptions.map(option => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={ids.to} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_CHOICE_VALUE}>
+              {t('platformAccounts.handoverDialog.choose')}
+            </SelectItem>
+            {toOptions.map(option => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {error ? (
         <p role="alert" className="text-xs text-error">

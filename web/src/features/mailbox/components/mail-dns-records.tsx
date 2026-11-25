@@ -19,6 +19,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -36,7 +43,7 @@ import {
   OrganizationLostState,
   useMailOrganizationId,
 } from '@/features/mailbox/components/mail-organization';
-import { ErrorAlert, nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
+import { ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import {
   useCreateDnsRecord,
   useDeleteDnsRecord,
@@ -453,21 +460,27 @@ function RecordDialog({
           <DialogBody className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="mail-dns-type">{t('dns.fieldType')}</Label>
-              <select
-                id="mail-dns-type"
-                className={cn(nativeSelectClassName, 'w-full')}
+              <Select
                 value={type}
                 disabled={editing || pending}
-                aria-invalid={invalid.has('type') || undefined}
-                aria-describedby={described('type')}
-                onChange={event => setType(event.target.value as MailDnsRecordType)}
+                onValueChange={value => setType(value as MailDnsRecordType)}
               >
-                {editableTypes.map(option => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  id="mail-dns-type"
+                  className="w-full"
+                  aria-invalid={invalid.has('type') || undefined}
+                  aria-describedby={described('type')}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {editableTypes.map(option => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {fieldError('type')}
             </div>
             <div className="space-y-1.5">

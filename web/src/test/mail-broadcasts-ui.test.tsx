@@ -197,10 +197,10 @@ describe('mail broadcasts console', () => {
     renderBroadcasts();
     fireEvent.click(screen.getByRole('button', { name: 'New broadcast' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'November' } });
-    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2' } });
-    fireEvent.change(screen.getByLabelText('Template'), { target: { value: '3' } });
-    fireEvent.change(screen.getByLabelText('Contact list'), { target: { value: '4' } });
-    expect(screen.getByRole('option', { name: 'Customers (12 contacts)' })).toBeInTheDocument();
+    chooseOption(screen.getByLabelText('From'), 'news@mail.example.com');
+    chooseOption(screen.getByLabelText('Template'), 'Newsletter');
+    chooseOption(screen.getByLabelText('Contact list'), 'Customers (12 contacts)');
+    expect(screen.getByLabelText('Contact list')).toHaveTextContent('Customers (12 contacts)');
     fireEvent.change(screen.getByLabelText('Unsubscribe link text'), { target: { value: '退订' } });
 
     // Contact fields fill themselves; the other variables can be shared by every message.
@@ -559,9 +559,9 @@ describe('mail broadcasts console', () => {
     renderBroadcasts();
     fireEvent.click(screen.getByRole('button', { name: 'New broadcast' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Flash sale' } });
-    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2' } });
-    fireEvent.change(screen.getByLabelText('Template'), { target: { value: '3' } });
-    fireEvent.change(screen.getByLabelText('Contact list'), { target: { value: '4' } });
+    chooseOption(screen.getByLabelText('From'), 'news@mail.example.com');
+    chooseOption(screen.getByLabelText('Template'), 'Newsletter');
+    chooseOption(screen.getByLabelText('Contact list'), 'Customers (12 contacts)');
     fireEvent.change(screen.getByRole('textbox', { name: 'code' }), {
       target: { value: 'FLASH50' },
     });
@@ -601,7 +601,7 @@ describe('mail broadcasts console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New broadcast' }));
     expect(screen.queryByRole('region', { name: 'Preview' })).toBeNull();
 
-    fireEvent.change(screen.getByLabelText('Template'), { target: { value: '3' } });
+    chooseOption(screen.getByLabelText('Template'), 'Newsletter');
     const preview = screen.getByRole('region', { name: 'Preview' });
     expect(
       within(preview).getByText(
@@ -697,6 +697,11 @@ describe('unsubscribe page', () => {
     expect(await screen.findByText('This link is not valid')).toBeInTheDocument();
   });
 });
+
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
 
 function domain(broadcastsEnabled: boolean) {
   return {

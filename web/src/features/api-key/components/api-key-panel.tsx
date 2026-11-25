@@ -28,6 +28,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Table,
   TableBody,
   TableCell,
@@ -48,7 +55,6 @@ import {
   useRestrictionOrganizations,
   type RestrictionOrganizations,
 } from '@/features/api-key/hooks/use-restriction-options';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { createApiKeySchema } from '@/features/api-key/schemas';
 import {
   API_KEY_EXPIRY_CHOICES,
@@ -64,7 +70,6 @@ import {
 } from '@/features/api-key/scopes';
 import type { ApiKey, CreateApiKeyResult } from '@/features/api-key/types';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
 
 export function ApiKeyPanel() {
   const t = useT('settings.api');
@@ -507,26 +512,32 @@ export function ApiKeyPanel() {
                     <legend className="text-sm font-medium">{t('restriction.title')}</legend>
                     <div className="space-y-2">
                       <Label htmlFor="api-key-organization">{t('restriction.organization')}</Label>
-                      <select
-                        id="api-key-organization"
-                        className={cn(nativeSelectClassName, 'w-full min-w-0')}
-                        value={organizationId}
+                      <Select
+                        value={String(organizationId)}
                         disabled={restrictionOrganizations.status !== 'ready'}
-                        aria-describedby="api-key-organization-hint"
-                        onChange={event => {
-                          setOrganizationId(Number(event.target.value));
+                        onValueChange={value => {
+                          setOrganizationId(Number(value));
                           setSendingDomains([]);
                         }}
                       >
-                        <option value={0}>{t('restriction.anyOrganization')}</option>
-                        {restrictionOrganizations.status === 'ready'
-                          ? restrictionOrganizations.organizations.map(organization => (
-                              <option key={organization.id} value={organization.id}>
-                                {organization.name}
-                              </option>
-                            ))
-                          : null}
-                      </select>
+                        <SelectTrigger
+                          id="api-key-organization"
+                          className="w-full min-w-0"
+                          aria-describedby="api-key-organization-hint"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">{t('restriction.anyOrganization')}</SelectItem>
+                          {restrictionOrganizations.status === 'ready'
+                            ? restrictionOrganizations.organizations.map(organization => (
+                                <SelectItem key={organization.id} value={String(organization.id)}>
+                                  {organization.name}
+                                </SelectItem>
+                              ))
+                            : null}
+                        </SelectContent>
+                      </Select>
                       <p id="api-key-organization-hint" className="text-sm text-muted-foreground">
                         {restrictionOrganizations.status === 'loading'
                           ? t('restriction.organizationsLoading')
