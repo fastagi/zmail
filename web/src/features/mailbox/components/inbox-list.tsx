@@ -29,6 +29,7 @@ import {
 } from '@/features/mailbox/schemas';
 import type { InboxAssignment, InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
 import { displayExternalProviderLabel } from '@/features/mailbox/utils/external-mail';
+import { senderAvatarProps } from '@/features/mailbox/utils/sender-avatar';
 
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -424,12 +425,14 @@ export function InboxList({
 
   return (
     <div className="px-3 pb-3">
-      <ul ref={list} role="listbox" aria-label={label} className="flex flex-col">
+      <ul ref={list} role="listbox" aria-label={label} className="flex flex-col gap-0.5">
         {items.map(item => {
           const unread = rowUnread(item);
           const selected = item.id === selectedId;
           const count = item.thread?.message_count ?? 1;
           const role = item.role_id === null ? undefined : roles?.get(item.role_id);
+          const senderLabel = item.from.name || item.from.address;
+          const avatar = senderAvatarProps(senderLabel);
           return (
             <li key={item.id} role="presentation" className="relative min-w-0">
               <div
@@ -438,83 +441,100 @@ export function InboxList({
                 aria-selected={selected}
                 tabIndex={item.id === focusable ? 0 : -1}
                 className={cn(
-                  'group cursor-pointer rounded-[10px] p-3 focus-ring motion-reduce:transition-none',
-                  showMailbox && 'pb-9',
+                  'group relative flex cursor-pointer items-start gap-2.5 overflow-hidden rounded-[10px] px-3 py-2.5 transition-[background-color,box-shadow] duration-[120ms] focus-ring motion-reduce:transition-none',
+                  showMailbox && 'pb-8',
+                  unread &&
+                    'before:absolute before:inset-y-2 before:left-0 before:w-[2.5px] before:rounded-r-full before:bg-brand',
                   selected
                     ? 'bg-blue-50 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/65 dark:ring-blue-800'
-                    : 'hover:bg-row-hover'
+                    : unread
+                      ? 'bg-bg-surface/70 hover:bg-row-hover hover:shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+                      : 'hover:bg-row-hover hover:shadow-[0_1px_2px_rgba(15,23,42,0.03)]'
                 )}
                 onClick={() => onOpen(item)}
                 onKeyDown={event => keyDown(event, item)}
               >
-                <span className="flex min-w-0 items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tracking-tight select-none',
+                    avatar.className
+                  )}
+                >
+                  {avatar.monogram}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'size-1.5 shrink-0 rounded-full',
+                        unread ? 'bg-brand' : 'bg-transparent'
+                      )}
+                    />
+                    {unread ? <span className="sr-only">{t('list.unread')}</span> : null}
+                    <span
+                      className={cn(
+                        'min-w-0 truncate text-[13.5px] leading-snug',
+                        unread ? 'font-semibold text-text-main' : 'text-text-subtle'
+                      )}
+                    >
+                      {senderLabel}
+                    </span>
+                    {count > 1 ? (
+                      <span className="shrink-0 text-xs text-text-muted">
+                        {t('inbox.threadCount', { count })}
+                      </span>
+                    ) : null}
+                    {item.source && item.source !== 'zmail' ? (
+                      <span
+                        data-source={item.source}
+                        title={t('inbox.sourceTitle', {
+                          name: displayExternalProviderLabel(item.source, item.mailbox_address),
+                        })}
+                        className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
+                      >
+                        {displayExternalProviderLabel(item.source, item.mailbox_address)}
+                      </span>
+                    ) : null}
+                    {role ? (
+                      <span className="flex min-w-0 shrink items-center gap-1 rounded-full bg-row-selected px-[7px] text-[11px] text-text-muted group-aria-selected:bg-bg-surface">
+                        <LabelDot color={role.color} className="size-1.5" />
+                        <span className="truncate">{role.name}</span>
+                      </span>
+                    ) : null}
+                    <span className="flex-1" />
+                    {sendable.has(item.mailbox_id) ? (
+                      <span
+                        aria-hidden="true"
+                        className="flex shrink-0 gap-1 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 motion-reduce:transition-none max-sm:hidden"
+                      >
+                        <Kbd>E</Kbd>
+                        <Kbd>#</Kbd>
+                      </span>
+                    ) : null}
+                    <time
+                      dateTime={item.created_at}
+                      className="shrink-0 text-xs text-text-faint tabular-nums"
+                    >
+                      {rowTime(item.created_at)}
+                    </time>
+                  </span>
                   <span
-                    aria-hidden="true"
                     className={cn(
-                      'size-1.5 shrink-0 rounded-full',
-                      unread ? 'bg-brand' : 'bg-transparent'
-                    )}
-                  />
-                  {unread ? <span className="sr-only">{t('list.unread')}</span> : null}
-                  <span
-                    className={cn(
-                      'min-w-0 truncate text-[13.5px]',
+                      'mt-0.5 block truncate leading-snug',
                       unread ? 'font-semibold text-text-main' : 'text-text-subtle'
                     )}
                   >
-                    {item.from.name || item.from.address}
+                    {item.subject || t('list.noSubject')}
                   </span>
-                  {count > 1 ? (
-                    <span className="shrink-0 text-xs text-text-muted">
-                      {t('inbox.threadCount', { count })}
+                  {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
+                  {item.snippet ? (
+                    <span className="mt-0.5 block truncate text-[12.5px] text-text-muted">
+                      {item.snippet}
                     </span>
                   ) : null}
-                  {item.source && item.source !== 'zmail' ? (
-                    <span
-                      data-source={item.source}
-                      title={t('inbox.sourceTitle', {
-                        name: displayExternalProviderLabel(item.source, item.mailbox_address),
-                      })}
-                      className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
-                    >
-                      {displayExternalProviderLabel(item.source, item.mailbox_address)}
-                    </span>
-                  ) : null}
-                  {role ? (
-                    <span className="flex min-w-0 shrink items-center gap-1 rounded-full bg-row-selected px-[7px] text-[11px] text-text-muted group-aria-selected:bg-bg-surface">
-                      <LabelDot color={role.color} className="size-1.5" />
-                      <span className="truncate">{role.name}</span>
-                    </span>
-                  ) : null}
-                  <span className="flex-1" />
-                  {sendable.has(item.mailbox_id) ? (
-                    <span
-                      aria-hidden="true"
-                      className="flex shrink-0 gap-1 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 motion-reduce:transition-none max-sm:hidden"
-                    >
-                      <Kbd>E</Kbd>
-                      <Kbd>#</Kbd>
-                    </span>
-                  ) : null}
-                  <time
-                    dateTime={item.created_at}
-                    className="shrink-0 text-xs text-text-faint tabular-nums"
-                  >
-                    {rowTime(item.created_at)}
-                  </time>
                 </span>
-                <span
-                  className={cn(
-                    'mt-0.5 block truncate',
-                    unread ? 'font-semibold text-text-main' : 'text-text-subtle'
-                  )}
-                >
-                  {item.subject || t('list.noSubject')}
-                </span>
-                {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
-                {item.snippet ? (
-                  <span className="block truncate text-text-muted">{item.snippet}</span>
-                ) : null}
               </div>
               {showMailbox && (
                 <button
@@ -522,7 +542,7 @@ export function InboxList({
                   title={t('inbox.filterMailbox', { address: item.mailbox_address })}
                   aria-label={t('inbox.filterMailbox', { address: item.mailbox_address })}
                   onClick={() => onFilterMailbox(item.mailbox_id)}
-                  className="absolute bottom-1.5 left-2 inline-flex h-6 max-w-[calc(100%-1.5rem)] items-center gap-1.5 rounded-md px-1.5 text-xs text-text-muted focus-ring hover:bg-blue-50 hover:text-blue-800 focus-visible:text-blue-800 motion-safe:transition-colors dark:hover:bg-blue-950 dark:hover:text-blue-200 dark:focus-visible:text-blue-200"
+                  className="absolute bottom-1.5 left-[44px] inline-flex h-6 max-w-[calc(100%-3.5rem)] items-center gap-1.5 rounded-md px-1.5 text-xs text-text-muted focus-ring hover:bg-blue-50 hover:text-blue-800 focus-visible:text-blue-800 motion-safe:transition-colors dark:hover:bg-blue-950 dark:hover:text-blue-200 dark:focus-visible:text-blue-200"
                 >
                   <Inbox className="size-3.5 shrink-0" aria-hidden="true" />
                   <span className="truncate">{item.mailbox_address}</span>
@@ -562,17 +582,20 @@ export function InboxListSkeleton({ rows = 6 }: { rows?: number }) {
   return (
     <div aria-hidden="true" data-list-skeleton="" className="px-3 pb-3">
       {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="p-3">
-          <span className="flex items-center gap-2">
-            <span className="size-1.5 shrink-0" />
-            <SkeletonLine className="w-28" />
-            <span className="flex-1" />
-            <SkeletonLine className="w-9" />
-          </span>
-          <span className="mt-0.5 block">
-            <SkeletonLine className="w-3/5" />
-          </span>
-          <SkeletonLine className="w-11/12" />
+        <div key={index} className="flex items-start gap-2.5 px-3 py-2.5">
+          <Skeleton className="mt-0.5 size-7 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className="size-1.5 shrink-0" />
+              <SkeletonLine className="w-28" />
+              <span className="flex-1" />
+              <SkeletonLine className="w-9" />
+            </span>
+            <span className="mt-0.5 block">
+              <SkeletonLine className="w-3/5" />
+            </span>
+            <SkeletonLine className="w-11/12" />
+          </div>
         </div>
       ))}
     </div>

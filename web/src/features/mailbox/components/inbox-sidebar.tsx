@@ -229,14 +229,20 @@ export function InboxSidebar({
           aria-label={rail ? t('actions.compose') : undefined}
           title={rail ? t('actions.compose') : undefined}
           className={cn(
-            'mx-1 mb-3.5 flex h-9 shrink-0 items-center gap-2 rounded-[9px] border border-border-main bg-bg-surface px-3 text-left text-text-main shadow-xs transition-colors focus-ring hover:bg-nav-hover motion-reduce:transition-none',
+            'mx-1 mb-3.5 flex h-9 shrink-0 items-center gap-2 rounded-[9px] border border-transparent bg-brand px-3 text-left font-medium text-white shadow-sm transition-all focus-ring hover:bg-brand/90 active:scale-[0.99] motion-reduce:transition-none motion-reduce:active:scale-100',
             rail && 'justify-center px-0 lg:justify-start lg:px-3'
           )}
           onClick={onCompose}
         >
           <PenLine className="size-[15px] shrink-0" aria-hidden="true" />
           <span className={label}>{t('actions.compose')}</span>
-          <Kbd aria-hidden="true" className={cn(rail && 'hidden lg:inline-flex')}>
+          <Kbd
+            aria-hidden="true"
+            className={cn(
+              'border-white/25 bg-white/15 text-white',
+              rail && 'hidden lg:inline-flex'
+            )}
+          >
             C
           </Kbd>
         </button>
