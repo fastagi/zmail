@@ -7,6 +7,7 @@ export const ROUTES = {
   // Public site routes
   SITE: {
     HOME: '/',
+    DOCS: '/docs',
   },
 
   // Auth routes

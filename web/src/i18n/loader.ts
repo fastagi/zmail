@@ -91,6 +91,10 @@ const moduleRegistry: ModuleRegistry = {
     'zh-Hans': () => import('./modules/legal/zh-Hans'),
     'en-US': () => import('./modules/legal/en-US'),
   },
+  docs: {
+    'zh-Hans': () => import('./modules/docs/zh-Hans'),
+    'en-US': () => import('./modules/docs/en-US'),
+  },
   // fastbuild:slot web.i18n.loaders
 };
 

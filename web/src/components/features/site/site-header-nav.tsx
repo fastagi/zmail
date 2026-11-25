@@ -26,6 +26,12 @@ export async function SiteHeaderNav() {
   return (
     <div className="flex items-center gap-2 sm:gap-4">
       <Link
+        href={ROUTES.SITE.DOCS}
+        className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'interactive rounded-md')}
+      >
+        {t('site.nav.docs')}
+      </Link>
+      <Link
         href={ROUTES.AUTH.LOGIN}
         className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'interactive rounded-md')}
       >

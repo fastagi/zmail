@@ -70,6 +70,9 @@ export default async function SiteLayout({ children }: PropsWithChildren) {
 
             {/* Links & Copyright */}
             <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-text-muted">
+              <Link href="/docs" className="hover:text-primary transition-colors">
+                {t('nav.docs')}
+              </Link>
               <Link href="/privacy" className="hover:text-primary transition-colors">
                 {legal('footer.privacy')}
               </Link>

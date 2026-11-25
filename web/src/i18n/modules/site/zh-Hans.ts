@@ -4,6 +4,7 @@ import type { SiteMessages } from './en-US';
 const messages = {
   nav: {
     home: '产品概览',
+    docs: '文档',
     console: '控制台',
   },
   footer: {

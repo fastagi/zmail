@@ -1,6 +1,7 @@
 const messages = {
   nav: {
     home: 'Overview',
+    docs: 'Docs',
     console: 'Console',
   },
   footer: {
