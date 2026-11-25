@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { History, Search } from 'lucide-react';
+import { History, RefreshCw, Search } from 'lucide-react';
 import { useLocale } from 'next-intl';
 
 import { Button } from '@/components/ui/button';
@@ -86,6 +86,16 @@ export function SendLogTab({ organization }: { organization: MailOrganization })
   const total24h = log.data?.pages[0]?.meta.total_24h;
   const selected = entries.find(entry => entry.id === selectedId) ?? null;
   const filtered = outcome !== undefined || template !== undefined || to !== '';
+  const summary = useMemo(() => {
+    let delivered = 0;
+    let problem = 0;
+    for (const entry of entries) {
+      const status = logStatus(entry);
+      if (status === 'delivered') delivered += 1;
+      else if (status === 'bounced' || status === 'blocked' || status === 'failed') problem += 1;
+    }
+    return { delivered, problem };
+  }, [entries]);
 
   const timeFormat = useMemo(
     () =>
@@ -135,6 +145,21 @@ export function SendLogTab({ organization }: { organization: MailOrganization })
         </div>
         <span className="flex-1" />
         <p className="text-xs text-muted-foreground">{t('log.banner')}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={log.isFetching}
+          icon={
+            <RefreshCw
+              className={cn('size-3.5', log.isFetching && 'animate-spin')}
+              aria-hidden="true"
+            />
+          }
+          onClick={() => void log.refetch()}
+        >
+          {t('log.refresh')}
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -197,10 +222,41 @@ export function SendLogTab({ organization }: { organization: MailOrganization })
         </div>
       </div>
 
-      {total24h !== undefined ? (
-        <p className="text-xs text-muted-foreground">
-          {t('log.total24h', { count: total24h.toLocaleString(locale) })}
-        </p>
+      {total24h !== undefined || entries.length > 0 ? (
+        <div
+          role="status"
+          aria-label={t('log.summaryLabel')}
+          className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"
+        >
+          {total24h !== undefined ? (
+            <span className="tabular-nums">
+              {t('log.total24h', { count: total24h.toLocaleString(locale) })}
+            </span>
+          ) : null}
+          {entries.length > 0 ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 tabular-nums">
+                <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+                {t('log.summaryDelivered', { count: summary.delivered.toLocaleString(locale) })}
+              </span>
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1.5 tabular-nums',
+                  summary.problem > 0 && 'font-medium text-error'
+                )}
+              >
+                <span
+                  className={cn(
+                    'size-1.5 rounded-full',
+                    summary.problem > 0 ? 'bg-error' : 'bg-muted-foreground/40'
+                  )}
+                  aria-hidden="true"
+                />
+                {t('log.summaryProblem', { count: summary.problem.toLocaleString(locale) })}
+              </span>
+            </>
+          ) : null}
+        </div>
       ) : null}
 
       {log.isPending ? (
@@ -246,6 +302,7 @@ export function SendLogTab({ organization }: { organization: MailOrganization })
                   {entries.map(entry => {
                     const status = logStatus(entry);
                     const active = entry.id === selectedId;
+                    const templateLabel = entry.template || t('log.directEmail');
                     return (
                       <TableRow
                         key={entry.id}
@@ -260,7 +317,7 @@ export function SendLogTab({ organization }: { organization: MailOrganization })
                           <button
                             type="button"
                             aria-label={t('log.open', {
-                              template: entry.template,
+                              template: templateLabel,
                               to: entry.to_masked,
                             })}
                             aria-pressed={active}
@@ -270,7 +327,13 @@ export function SendLogTab({ organization }: { organization: MailOrganization })
                               setSelectedId(entry.id);
                             }}
                           >
-                            {entry.template}
+                            {entry.template ? (
+                              entry.template
+                            ) : (
+                              <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 font-sans text-xs font-medium text-muted-foreground">
+                                {t('log.directEmail')}
+                              </span>
+                            )}
                           </button>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{entry.to_masked}</TableCell>

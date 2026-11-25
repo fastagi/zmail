@@ -4,6 +4,10 @@ import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeveloperConsole } from '@/features/developer';
+import {
+  computeDeliveryLatencyMs,
+  formatDeliveryLatency,
+} from '@/features/developer/components/send-log-detail';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import {
@@ -431,6 +435,115 @@ describe('developer quick start and send log', () => {
       { cursor: '7012', perPage: 50 }
     );
     expect(screen.queryByRole('button', { name: 'Older' })).toBeNull();
+  });
+
+  it('shows direct-send badge, delivery summary, refresh button, latency, event detail, and copies debug info without secrets', async () => {
+    state.search = 'org=1&tab=logs&mode=live';
+    const directEntry = entry({
+      id: 8001,
+      template: '',
+      subject: 'Welcome direct mail',
+      to_masked: 'al••@example.com',
+      status: 'sent',
+      last_event: 'delivered',
+      failure_code: null,
+      idempotency_key: null,
+      created_at: '2026-11-19T14:22:08.000Z',
+      sent_at: '2026-11-19T14:22:08.880Z',
+    });
+    const failedEntry = entry({
+      id: 8002,
+      template: 'signup-code',
+      to_masked: 'bo••@example.com',
+      status: 'failed',
+      last_event: 'bounced',
+      failure_code: 'smtp_550_user_unknown',
+      created_at: '2026-11-19T14:20:00.000Z',
+      sent_at: null,
+    });
+    developer.log.mockResolvedValue(page([directEntry, failedEntry], { total_24h: 42 }));
+    developer.logEntry.mockResolvedValue(
+      detail({
+        ...directEntry,
+        from: { address: 'no-reply@acme.example', name: 'Acme' },
+        variables: { code: '••••••' },
+        events: [
+          {
+            type: 'accepted',
+            detail: '250 OK queued as msg-8001',
+            occurred_at: '2026-11-19T14:22:08.420Z',
+          },
+          {
+            type: 'delivered',
+            detail: '250 2.0.0 Delivered',
+            occurred_at: '2026-11-19T14:22:08.880Z',
+          },
+        ],
+      })
+    );
+
+    renderConsole();
+
+    const table = await screen.findByRole('table', { name: 'Transactional messages' });
+    // Direct-send row displays the localized badge instead of a blank string.
+    const openDirectButton = within(table).getByRole('button', {
+      name: 'Show Direct email to al••@example.com',
+    });
+    expect(openDirectButton).toHaveTextContent('Direct email');
+
+    // Summary strip shows 24h total plus delivered and issue counts from loaded rows.
+    const summaryStrip = screen.getByRole('status', { name: 'Delivery summary' });
+    expect(summaryStrip).toHaveTextContent('42 in the last 24 hours');
+    expect(summaryStrip).toHaveTextContent('Delivered: 1');
+    expect(summaryStrip).toHaveTextContent('Issues: 1');
+
+    // Clicking Refresh refetches the send log.
+    const callsBeforeRefresh = developer.log.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(developer.log.mock.calls.length).toBeGreaterThan(callsBeforeRefresh));
+
+    // Opening the direct-send row renders badge in detail header, latency, and event details.
+    fireEvent.click(openDirectButton);
+    const panel = await screen.findByRole('region', { name: 'Direct email → al••@example.com' });
+    expect(within(panel).getByText('Direct email')).toBeInTheDocument();
+    expect(within(panel).getByText('ID #8001')).toBeInTheDocument();
+    expect(within(panel).getByText('Latency 880ms')).toBeInTheDocument();
+    expect(await within(panel).findByText('250 OK queued as msg-8001')).toBeInTheDocument();
+    expect(within(panel).getByText('250 2.0.0 Delivered')).toBeInTheDocument();
+
+    // 1-click Copy debug info copies structured diagnostics without secrets.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy debug info' }));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledTimes(1));
+    const copiedText = clipboard.writeText.mock.calls[0]?.[0] as string;
+    expect(copiedText).toContain('Message ID: 8001');
+    expect(copiedText).toContain('Status: delivered');
+    expect(copiedText).toContain('Template: direct (POST /v1/emails)');
+    expect(copiedText).toContain('From: Acme <no-reply@acme.example>');
+    expect(copiedText).toContain('To: al••@example.com');
+    expect(copiedText).toContain('Latency: 880ms');
+    expect(copiedText).toContain('250 OK queued as msg-8001');
+    expect(copiedText).not.toContain('••••••');
+    expect(copiedText).not.toContain('482913');
+    expect(within(panel).getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  });
+
+  it('computes and formats delivery latency from sent_at or first accepted event', () => {
+    expect(
+      computeDeliveryLatencyMs('2026-11-19T14:22:08.000Z', '2026-11-19T14:22:09.250Z')
+    ).toBe(1250);
+    expect(
+      computeDeliveryLatencyMs('2026-11-19T14:22:08.000Z', null, [
+        { type: 'accepted', detail: '', occurred_at: '2026-11-19T14:22:08.420Z' },
+      ])
+    ).toBe(420);
+    expect(computeDeliveryLatencyMs('2026-11-19T14:22:08.000Z', null, [])).toBeNull();
+    expect(
+      computeDeliveryLatencyMs('2026-11-19T14:22:09.000Z', '2026-11-19T14:22:08.000Z')
+    ).toBeNull();
+
+    expect(formatDeliveryLatency(420)).toBe('420ms');
+    expect(formatDeliveryLatency(1250)).toBe('1.25s');
+    expect(formatDeliveryLatency(65_000)).toBe('1m 5s');
   });
 
   it('templates tab shows the 24 h count of the selected template only', async () => {

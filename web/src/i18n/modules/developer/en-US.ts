@@ -95,7 +95,12 @@ const messages = {
     clearSearch: 'Clear',
     template: 'Template',
     allTemplates: 'All templates',
+    directEmail: 'Direct email',
+    refresh: 'Refresh',
+    summaryLabel: 'Delivery summary',
     total24h: '{count} in the last 24 hours',
+    summaryDelivered: 'Delivered: {count}',
+    summaryProblem: 'Issues: {count}',
     table: 'Transactional messages',
     columns: {
       time: 'Time',
@@ -114,6 +119,8 @@ const messages = {
   },
   detail: {
     title: '{template} → {to}',
+    messageId: 'ID #{id}',
+    latency: 'Latency {value}',
     from: 'From {sender}',
     timeline: 'Timeline',
     noEvents: 'No events recorded yet.',
@@ -124,6 +131,10 @@ const messages = {
     queuedLimit: 'Waiting for room in the transactional lane.',
     queuedRetry: 'Waiting to retry after a temporary failure.',
     variables: 'Variables',
+    copyDebug: 'Copy debug info',
+    debugCopiedLabel: 'Copied',
+    debugCopied: 'Debug info copied to clipboard.',
+    debugCopyFailed: 'Copy failed. Please try again.',
     close: 'Close',
   },
   status: {

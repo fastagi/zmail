@@ -92,7 +92,12 @@ const messages = {
     clearSearch: '清除',
     template: '模板',
     allTemplates: '全部模板',
+    directEmail: '直发邮件',
+    refresh: '刷新',
+    summaryLabel: '发送概览',
     total24h: '近 24 小时 {count} 封',
+    summaryDelivered: '已送达 {count}',
+    summaryProblem: '异常 {count}',
     table: '事务邮件',
     columns: {
       time: '时间',
@@ -111,6 +116,8 @@ const messages = {
   },
   detail: {
     title: '{template} → {to}',
+    messageId: '消息 #{id}',
+    latency: '耗时 {value}',
     from: '来自 {sender}',
     timeline: '时间线',
     noEvents: '还没有记录到事件。',
@@ -120,6 +127,10 @@ const messages = {
     queuedLimit: '正在等待事务通道的额度。',
     queuedRetry: '临时失败，正在等待重试。',
     variables: '变量',
+    copyDebug: '复制排错信息',
+    debugCopiedLabel: '已复制',
+    debugCopied: '排错信息已复制到剪贴板。',
+    debugCopyFailed: '复制失败，请重试。',
     close: '关闭',
   },
   status: {
