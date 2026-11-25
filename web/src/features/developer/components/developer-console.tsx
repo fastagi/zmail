@@ -1,6 +1,15 @@
 'use client';
 
-import { ArrowRight, PlugZap } from 'lucide-react';
+import {
+  ArrowRight,
+  FileCode2,
+  History,
+  PlugZap,
+  Rocket,
+  ShieldCheck,
+  Webhook,
+  type LucideIcon,
+} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 
@@ -25,6 +34,15 @@ import type { MailboxDomain } from '@/features/mailbox/types';
 import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
+import { cn } from '@/utils';
+
+const TAB_ICONS: Record<DeveloperTab, LucideIcon> = {
+  start: Rocket,
+  templates: FileCode2,
+  logs: History,
+  limits: ShieldCheck,
+  webhooks: Webhook,
+};
 
 function TabLoading() {
   return <Skeleton className="h-72 w-full" aria-hidden="true" />;
@@ -78,9 +96,9 @@ function DeveloperWorkspace({ organization }: { organization: MailOrganization }
 
   if (domains.isPending) {
     return (
-      <div className="space-y-4" aria-hidden="true">
-        <Skeleton className="h-9 w-full max-w-xl" />
-        <Skeleton className="h-72 w-full" />
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-8" aria-hidden="true">
+        <Skeleton className="h-10 w-full lg:h-64 lg:w-52 lg:shrink-0" />
+        <Skeleton className="h-72 min-w-0 flex-1" />
       </div>
     );
   }
@@ -127,22 +145,45 @@ function DeveloperTabs({
   const { tab, mode, setTab, setMode } = useDeveloperTab(tabs);
 
   return (
-    <Tabs value={tab} onValueChange={value => setTab(value as DeveloperTab)} className="gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="max-w-full overflow-x-auto">
-          <TabsList>
-            {tabs.map(item => (
-              <TabsTrigger key={item} value={item}>
+    <Tabs
+      value={tab}
+      onValueChange={value => setTab(value as DeveloperTab)}
+      className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-8"
+    >
+      <aside className="flex flex-col gap-3 lg:sticky lg:top-6 lg:w-52 lg:shrink-0 lg:gap-4 lg:border-r lg:border-border/60 lg:pr-5">
+        <TabsList
+          className={cn(
+            'flex h-auto w-full items-center justify-start gap-1 overflow-x-auto rounded-lg bg-muted/60 p-1',
+            'lg:flex-col lg:items-stretch lg:gap-1 lg:overflow-visible lg:rounded-none lg:bg-transparent lg:p-0'
+          )}
+        >
+          {tabs.map(item => {
+            const Icon = TAB_ICONS[item];
+            return (
+              <TabsTrigger
+                key={item}
+                value={item}
+                className={cn(
+                  'relative h-8 flex-none justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium',
+                  'text-muted-foreground hover:text-foreground',
+                  'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs',
+                  'lg:h-9 lg:w-full lg:justify-start lg:gap-2.5 lg:rounded-lg lg:px-3 lg:py-2 lg:font-normal',
+                  'lg:hover:bg-accent/50 lg:hover:text-foreground',
+                  'lg:data-[state=active]:bg-accent lg:data-[state=active]:font-medium lg:data-[state=active]:text-foreground lg:data-[state=active]:shadow-none lg:data-[state=active]:ring-0',
+                  'lg:before:absolute lg:before:inset-y-1.5 lg:before:left-0 lg:before:w-0.5 lg:before:rounded-full lg:before:bg-transparent lg:data-[state=active]:before:bg-primary'
+                )}
+              >
+                <Icon className="size-4 shrink-0" aria-hidden="true" />
                 {t(`tabs.${item}`)}
               </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-        <div className="flex items-center gap-2">
+            );
+          })}
+        </TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-2 lg:flex-col lg:items-stretch lg:gap-2 lg:border-t lg:border-border/60 lg:pt-4">
           <div
             role="group"
             aria-label={t('mode.label')}
-            className="inline-flex rounded-md border p-0.5"
+            className="inline-flex rounded-lg border bg-muted/40 p-0.5 lg:grid lg:grid-cols-2"
           >
             {DEVELOPER_MODES.map(item => (
               <Button
@@ -151,32 +192,35 @@ function DeveloperTabs({
                 size="sm"
                 variant={mode === item ? 'secondary' : 'ghost'}
                 aria-pressed={mode === item}
+                className="h-7 px-3 text-xs lg:w-full"
                 onClick={() => setMode(item)}
               >
                 {t(`mode.${item}`)}
               </Button>
             ))}
           </div>
-          <span className="hidden text-xs text-muted-foreground md:inline">
+          <span className="hidden text-xs leading-relaxed text-muted-foreground sm:inline lg:block">
             {t(mode === 'live' ? 'mode.liveHint' : 'mode.testHint')}
           </span>
         </div>
+      </aside>
+      <div className="min-w-0 flex-1">
+        {tabs.map(item => (
+          <TabsContent key={item} value={item} className="mt-0">
+            {item === 'start' ? (
+              <QuickStartTab organization={organization} mode={mode} domains={domains} />
+            ) : item === 'templates' ? (
+              <TransactionalTemplatesTab organization={organization} />
+            ) : item === 'logs' ? (
+              <SendLogTab organization={organization} />
+            ) : item === 'limits' ? (
+              <LimitsTab organization={organization} domains={domains} />
+            ) : (
+              <DeveloperWebhooksTab organizationId={organization.id} />
+            )}
+          </TabsContent>
+        ))}
       </div>
-      {tabs.map(item => (
-        <TabsContent key={item} value={item}>
-          {item === 'start' ? (
-            <QuickStartTab organization={organization} mode={mode} domains={domains} />
-          ) : item === 'templates' ? (
-            <TransactionalTemplatesTab organization={organization} />
-          ) : item === 'logs' ? (
-            <SendLogTab organization={organization} />
-          ) : item === 'limits' ? (
-            <LimitsTab organization={organization} domains={domains} />
-          ) : (
-            <DeveloperWebhooksTab organizationId={organization.id} />
-          )}
-        </TabsContent>
-      ))}
     </Tabs>
   );
 }
