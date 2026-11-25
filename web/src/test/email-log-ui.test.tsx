@@ -261,54 +261,40 @@ describe('emails console', () => {
     renderLog({ status: 'failed', page: 3 });
 
     expect(state.logCalls.at(-1)).toEqual({ filters: { status: 'failed' }, page: 3 });
-    expect(screen.getByLabelText('Status')).toHaveValue('failed');
+    expect(screen.getByLabelText('Status')).toHaveTextContent('Failed');
     expect(window.location.search).toBe('?org=1&status=failed&page=3');
 
-    fireEvent.change(screen.getByLabelText('Direction'), { target: { value: 'outbound' } });
+    chooseOption(screen.getByLabelText('Direction'), 'Sent');
     expect(state.logCalls.at(-1)).toEqual({
       filters: { direction: 'outbound', status: 'failed' },
       page: 1,
     });
     expect(window.location.search).toBe('?org=1&direction=outbound&status=failed');
 
-    fireEvent.change(screen.getByLabelText('Mailbox'), { target: { value: '2' } });
+    chooseOption(screen.getByLabelText('Mailbox'), 'sales@mail.example.com');
     expect(state.logCalls.at(-1)).toEqual({
       filters: { direction: 'outbound', status: 'failed', mailboxId: 2 },
       page: 1,
     });
     expect(window.location.search).toBe('?org=1&direction=outbound&status=failed&mailbox=2');
 
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('Direction'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('Mailbox'), { target: { value: '' } });
+    chooseOption(screen.getByLabelText('Status'), 'All statuses');
+    chooseOption(screen.getByLabelText('Direction'), 'All directions');
+    chooseOption(screen.getByLabelText('Mailbox'), 'All mailboxes');
     expect(state.logCalls.at(-1)).toEqual({ filters: {}, page: 1 });
     expect(window.location.search).toBe('?org=1');
   });
 
   it('offers every direction, status, and mailbox as a filter', () => {
     renderLog();
-    const options = (label: string) =>
-      [...(screen.getByLabelText(label) as HTMLSelectElement).options].map(option => [
-        option.value,
-        option.text,
-      ]);
+    const options = (label: string) => readOptions(screen.getByLabelText(label));
 
-    expect(options('Direction')).toEqual([
-      ['', 'All directions'],
-      ['inbound', 'Received'],
-      ['outbound', 'Sent'],
-    ]);
-    expect(options('Status')).toEqual([
-      ['', 'All statuses'],
-      ['received', 'Received'],
-      ['queued', 'Queued'],
-      ['sent', 'Sent'],
-      ['failed', 'Failed'],
-    ]);
+    expect(options('Direction')).toEqual(['All directions', 'Received', 'Sent']);
+    expect(options('Status')).toEqual(['All statuses', 'Received', 'Queued', 'Sent', 'Failed']);
     expect(options('Mailbox')).toEqual([
-      ['', 'All mailboxes'],
-      ['1', 'hello@mail.example.com'],
-      ['2', 'sales@mail.example.com'],
+      'All mailboxes',
+      'hello@mail.example.com',
+      'sales@mail.example.com',
     ]);
   });
 
@@ -381,19 +367,19 @@ describe('emails console', () => {
     window.history.replaceState(null, '', '/console/emails?org=2&status=failed');
     renderLog({ status: 'failed', page: 1 });
 
-    expect(screen.getByLabelText('Organization')).toHaveValue('2');
+    expect(screen.getByLabelText('Organization')).toHaveTextContent('Globex');
     expect(new Set(state.organizationIds)).toEqual(new Set([2]));
     expect(window.location.search).toBe('?org=2&status=failed');
 
-    fireEvent.change(screen.getByLabelText('Direction'), { target: { value: 'inbound' } });
+    chooseOption(screen.getByLabelText('Direction'), 'Received');
     expect(window.location.search).toBe('?org=2&direction=inbound&status=failed');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(window.location.search).toBe('?org=2&direction=inbound&status=failed&page=2');
     fireEvent.change(screen.getByLabelText('Search emails'), { target: { value: 'invoice' } });
     act(() => void vi.advanceTimersByTime(300));
     expect(window.location.search).toBe('?org=2&direction=inbound&status=failed&q=invoice');
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('Direction'), { target: { value: '' } });
+    chooseOption(screen.getByLabelText('Status'), 'All statuses');
+    chooseOption(screen.getByLabelText('Direction'), 'All directions');
     fireEvent.change(screen.getByLabelText('Search emails'), { target: { value: '' } });
     act(() => void vi.advanceTimersByTime(300));
     expect(window.location.search).toBe('?org=2');
@@ -412,11 +398,11 @@ describe('emails console', () => {
     expect(state.logCalls.at(-1)).toEqual({ filters: { status: 'failed', mailboxId: 2 }, page: 3 });
 
     state.organizationIds = [];
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: '2' } });
+    chooseOption(screen.getByLabelText('Organization'), 'Globex');
 
     expect(navigation.replace).toHaveBeenCalledWith('/console/emails?org=2', { scroll: false });
     expect(state.logCalls.at(-1)).toEqual({ filters: {}, page: 1 });
-    expect(screen.getByLabelText('Status')).toHaveValue('');
+    expect(screen.getByLabelText('Status')).toHaveTextContent('All statuses');
     expect(window.location.search).toBe('?org=2');
     expect(new Set(state.organizationIds)).toEqual(new Set([2]));
   });
@@ -438,7 +424,7 @@ describe('emails console', () => {
     window.history.replaceState(null, '', '/console/emails?org=9&status=failed&page=3');
     renderLog({ status: 'failed', page: 3 });
 
-    expect(screen.getByLabelText('Organization')).toHaveValue('4');
+    expect(screen.getByLabelText('Organization')).toHaveTextContent('Acme');
     expect(window.location.search).toBe('?org=4&status=failed&page=3');
     expect(state.logCalls.at(-1)).toEqual({ filters: { status: 'failed' }, page: 3 });
     expect(new Set(state.organizationIds)).toEqual(new Set([4]));
@@ -1165,16 +1151,16 @@ describe('emails console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send email' }));
     const dialog = await screen.findByRole('region', { name: 'New message' });
     expect(within(dialog).getByRole('heading', { name: 'New message' })).toBeInTheDocument();
-    const from = within(dialog).getByLabelText('From') as HTMLSelectElement;
-    expect(from.tagName).toBe('SELECT');
-    expect([...from.options].map(option => option.text)).toEqual([
+    const from = within(dialog).getByLabelText('From');
+    expect(from).toHaveAttribute('role', 'combobox');
+    expect(readOptions(from)).toEqual([
       'hello@mail.example.com',
       'sales@mail.example.com',
     ]);
-    expect(from).toHaveValue('1');
+    expect(from).toHaveTextContent('hello@mail.example.com');
     expect(state.sendCalls.at(-1)).toBe(1);
 
-    fireEvent.change(from, { target: { value: '2' } });
+    chooseOption(from, 'sales@mail.example.com');
     expect(state.sendCalls.at(-1)).toBe(2);
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Hello' } });
@@ -1202,7 +1188,7 @@ describe('emails console', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Send email' }));
     const dialog = await screen.findByRole('region', { name: 'New message' });
-    expect(within(dialog).getByLabelText('From')).toHaveValue('2');
+    expect(within(dialog).getByLabelText('From')).toHaveTextContent('sales@mail.example.com');
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Hello' } });
     fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Body' } });
@@ -1294,7 +1280,7 @@ describe('mail domain console', () => {
     ]);
     window.history.replaceState(null, '', '/console/admin/domains?org=2');
     const view = renderDomain();
-    expect(screen.getByLabelText('Organization')).toHaveValue('2');
+    expect(screen.getByLabelText('Organization')).toHaveTextContent('Globex');
     expect(new Set(state.organizationIds)).toEqual(new Set([2]));
     view.unmount();
 
@@ -1315,6 +1301,18 @@ describe('mail domain console', () => {
     expect(state.organizationIds).toEqual([]);
   });
 });
+
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
+function readOptions(trigger: HTMLElement): string[] {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  const texts = screen.getAllByRole('option').map(option => option.textContent ?? '');
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+  return texts;
+}
 
 /** Radix tabs activate on mouse down, as a real pointer does. */
 function selectTab(name: string) {

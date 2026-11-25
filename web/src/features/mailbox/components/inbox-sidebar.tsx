@@ -15,6 +15,13 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Kbd } from '@/components/ui/kbd';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { WorkspaceModeToggle } from '@/features/mailbox/components/workspace-mode-toggle';
@@ -334,22 +341,34 @@ export function InboxSidebar({
                 ? t('inbox.groups.mailboxes')
                 : t('inbox.groups.label')}
           </p>
-          <label
-            title={t('inbox.sort.label')}
-            className="relative grid size-7 shrink-0 place-items-center rounded-md text-text-muted hover:bg-nav-hover focus-within:ring-2"
-          >
-            <ArrowDownWideNarrow aria-hidden="true" className="size-4" />
-            <select
-              aria-label={t('inbox.sort.label')}
-              className="absolute inset-0 size-full cursor-pointer opacity-0"
-              value={sort}
-              onChange={event => onSort(event.target.value)}
-            >
-              <option value="default">{t('inbox.sort.default')}</option>
-              <option value="address">{t('inbox.sort.address')}</option>
-              <option value="unread">{t('inbox.sort.unread')}</option>
-            </select>
-          </label>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                isIcon
+                size="xs"
+                variant="ghost"
+                aria-label={t('inbox.sort.label')}
+                title={t('inbox.sort.label')}
+                className="text-text-muted hover:bg-nav-hover hover:text-text-main"
+              >
+                <ArrowDownWideNarrow className="size-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup value={sort} onValueChange={onSort}>
+                <DropdownMenuRadioItem value="default">
+                  {t('inbox.sort.default')}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="address">
+                  {t('inbox.sort.address')}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="unread">
+                  {t('inbox.sort.unread')}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {canManage ? (
             <Button
               type="button"

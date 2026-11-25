@@ -324,14 +324,14 @@ describe('mailbox access in the console', () => {
     );
     expect(state.createMailbox.mutateAsync).not.toHaveBeenCalled();
 
-    const owner = within(form).getByLabelText('Owner') as HTMLSelectElement;
-    expect([...owner.options].map(option => option.text)).toEqual([
+    const owner = within(form).getByLabelText('Owner');
+    expect(readOptions(owner)).toEqual([
       'Choose a member',
       'Admin User',
       'Riley Chen',
       'Morgan Lee',
     ]);
-    fireEvent.change(owner, { target: { value: '5' } });
+    chooseOption(owner, 'Riley Chen');
     fireEvent.click(within(form).getByRole('button', { name: 'Create mailbox' }));
     await waitFor(() =>
       expect(state.createMailbox.mutateAsync).toHaveBeenCalledWith({
@@ -348,20 +348,18 @@ describe('mailbox access in the console', () => {
     const form = within(openManage()).getByRole('form', { name: 'New mailbox' });
 
     fireEvent.change(within(form).getByLabelText('Address'), { target: { value: 'team' } });
-    fireEvent.change(within(form).getByLabelText('Member 1'), { target: { value: '5' } });
-    fireEvent.change(within(form).getByLabelText('Permission of member 1'), {
-      target: { value: 'manage' },
-    });
+    chooseOption(within(form).getByLabelText('Member 1'), 'Riley Chen');
+    chooseOption(within(form).getByLabelText('Permission of member 1'), 'Manage members');
     fireEvent.click(within(form).getByRole('button', { name: 'Add another member' }));
-    fireEvent.change(within(form).getByLabelText('Member 2'), { target: { value: '5' } });
+    chooseOption(within(form).getByLabelText('Member 2'), 'Riley Chen');
     fireEvent.click(within(form).getByRole('button', { name: 'Create mailbox' }));
     // The same person twice is refused here, as the API would.
     expect(await within(form).findByRole('alert')).toHaveTextContent(
       'Add at least one member, each only once.'
     );
 
-    fireEvent.change(within(form).getByLabelText('Member 2'), { target: { value: '9' } });
-    expect(within(form).getByLabelText('Permission of member 2')).toHaveValue('send');
+    chooseOption(within(form).getByLabelText('Member 2'), 'Morgan Lee');
+    expect(within(form).getByLabelText('Permission of member 2')).toHaveTextContent('Reply');
     fireEvent.click(within(form).getByRole('button', { name: 'Create mailbox' }));
     await waitFor(() =>
       expect(state.createMailbox.mutateAsync).toHaveBeenCalledWith({
@@ -387,12 +385,10 @@ describe('mailbox access in the console', () => {
 
     expect(within(panel).getByText('Riley Chen')).toBeInTheDocument();
     expect(within(panel).getByText('Morgan Lee')).toBeInTheDocument();
-    expect(within(panel).getByLabelText('Permission of Riley Chen')).toHaveValue('view');
+    expect(within(panel).getByLabelText('Permission of Riley Chen')).toHaveTextContent('View');
     expect(state.memberCalls.at(-1)).toEqual({ mailboxId: 1, enabled: true });
 
-    fireEvent.change(within(panel).getByLabelText('Permission of Riley Chen'), {
-      target: { value: 'send' },
-    });
+    chooseOption(within(panel).getByLabelText('Permission of Riley Chen'), 'Reply');
     await waitFor(() =>
       expect(state.setMember.mutateAsync).toHaveBeenCalledWith({ userId: 5, permission: 'send' })
     );
@@ -401,15 +397,13 @@ describe('mailbox access in the console', () => {
     await waitFor(() => expect(state.removeMember.mutateAsync).toHaveBeenCalledWith(9));
 
     // Only organization members who are not members yet can be added.
-    const candidate = within(panel).getByLabelText('New member') as HTMLSelectElement;
-    expect([...candidate.options].map(option => option.text)).toEqual([
+    const candidate = within(panel).getByLabelText('New member');
+    expect(readOptions(candidate)).toEqual([
       'Choose a member',
       'Admin User',
     ]);
-    fireEvent.change(candidate, { target: { value: '1' } });
-    fireEvent.change(within(panel).getByLabelText('Permission of the new member'), {
-      target: { value: 'view' },
-    });
+    chooseOption(candidate, 'Admin User');
+    chooseOption(within(panel).getByLabelText('Permission of the new member'), 'View');
     fireEvent.click(within(panel).getByRole('button', { name: 'Add member' }));
     await waitFor(() =>
       expect(state.setMember.mutateAsync).toHaveBeenLastCalledWith({
@@ -506,7 +500,7 @@ describe('mailbox access in the console', () => {
     expect(within(panel).getByText(/Mail from before .* is sealed/u)).toBeInTheDocument();
     const submit = within(panel).getByRole('button', { name: 'Hand over' });
     expect(submit).toBeDisabled();
-    fireEvent.change(within(panel).getByLabelText('Successor'), { target: { value: '9' } });
+    chooseOption(within(panel).getByLabelText('Successor'), 'Morgan Lee');
     fireEvent.click(submit);
     expect(state.handOver.mutateAsync).not.toHaveBeenCalled();
     fireEvent.click(within(panel).getByRole('button', { name: 'Confirm handover' }));
@@ -626,7 +620,7 @@ describe('mailbox access in the console', () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Access to hello@mail.example.com' }));
     const panel = screen.getByRole('dialog');
-    fireEvent.change(within(panel).getByLabelText('Successor'), { target: { value: '9' } });
+    chooseOption(within(panel).getByLabelText('Successor'), 'Morgan Lee');
     fireEvent.click(within(panel).getByRole('button', { name: 'Hand over' }));
     fireEvent.click(within(panel).getByRole('button', { name: 'Confirm handover' }));
 
@@ -646,9 +640,7 @@ describe('mailbox access in the console', () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Access to hello@mail.example.com' }));
     const panel = screen.getByRole('dialog');
-    fireEvent.change(within(panel).getByLabelText('Permission of Riley Chen'), {
-      target: { value: 'manage' },
-    });
+    chooseOption(within(panel).getByLabelText('Permission of Riley Chen'), 'Manage members');
 
     expect(await within(panel).findByRole('alert')).toHaveTextContent(
       'This mailbox changed in the meantime. Refresh to see its current access.'
@@ -660,6 +652,18 @@ describe('mailbox access in the console', () => {
     expect(state.events.refetch).toHaveBeenCalled();
   });
 });
+
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
+function readOptions(trigger: HTMLElement): string[] {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  const texts = screen.getAllByRole('option').map(option => option.textContent ?? '');
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+  return texts;
+}
 
 const now = '2026-11-19T10:00:00Z';
 

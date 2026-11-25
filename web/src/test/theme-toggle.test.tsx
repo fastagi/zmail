@@ -37,19 +37,20 @@ describe('ThemeToggle', () => {
     themeState.setTheme.mockClear();
   });
 
-  it('uses one native three-state selector without a custom menu runtime', () => {
+  it('uses a shadcn three-state selector with light, dark, and system options', () => {
     render(renderThemeToggle());
 
     const selector = screen.getByRole('combobox', { name: 'Toggle theme' });
-    expect(selector).toHaveValue('system');
+    expect(selector).toHaveTextContent('System');
+
+    fireEvent.keyDown(selector, { key: 'ArrowDown' });
     expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
       'Light',
       'Dark',
       'System',
     ]);
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
 
-    fireEvent.change(selector, { target: { value: 'dark' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Dark' }));
     expect(themeState.setTheme).toHaveBeenCalledWith('dark');
   });
 
@@ -57,11 +58,10 @@ describe('ThemeToggle', () => {
     themeState.selected = 'dark';
     const container = document.createElement('div');
     const serverMarkup = renderToString(renderThemeToggle());
-    expect(serverMarkup).toContain('<option value="system" selected="">System</option>');
+    expect(serverMarkup).toContain('aria-label="Toggle theme"');
+    expect(serverMarkup).toContain('lucide-monitor');
     container.innerHTML = serverMarkup;
     document.body.appendChild(container);
-
-    expect(container.querySelector('option[value="system"]')).toHaveAttribute('selected');
 
     const recoverableError = vi.fn();
     let root: Root | undefined;
@@ -70,7 +70,7 @@ describe('ThemeToggle', () => {
     });
 
     expect(recoverableError).not.toHaveBeenCalled();
-    expect(container.querySelector('select')).toHaveValue('dark');
+    expect(container.querySelector('[role="combobox"]')).toHaveTextContent('Dark');
 
     await act(async () => root?.unmount());
     container.remove();

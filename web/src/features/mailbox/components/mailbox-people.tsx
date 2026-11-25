@@ -1,6 +1,12 @@
 'use client';
 
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { MAILBOX_PERMISSIONS } from '@/features/mailbox/schemas';
 import type { MailboxPermission } from '@/features/mailbox/types';
 import { useOrganizationMembers } from '@/features/organization/hooks/use-organizations';
@@ -51,18 +57,21 @@ export function MailboxPermissionSelect({
 }) {
   const t = useT('mailbox');
   return (
-    <select
-      aria-label={label}
-      className={cn(nativeSelectClassName, 'w-auto', className)}
+    <Select
       value={value}
       disabled={disabled}
-      onChange={event => onChange(event.target.value as MailboxPermission)}
+      onValueChange={next => onChange(next as MailboxPermission)}
     >
-      {MAILBOX_PERMISSIONS.map(permission => (
-        <option key={permission} value={permission}>
-          {t(`access.permissions.${permission}`)}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger aria-label={label} className={cn('w-auto', className)}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {MAILBOX_PERMISSIONS.map(permission => (
+          <SelectItem key={permission} value={permission}>
+            {t(`access.permissions.${permission}`)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

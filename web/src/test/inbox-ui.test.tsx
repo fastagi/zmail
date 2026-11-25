@@ -892,7 +892,9 @@ describe('unified inbox', () => {
     renderRoute();
 
     const dialog = await screen.findByRole('dialog', { name: 'Manage mailboxes' });
-    expect(within(dialog).getByRole('combobox', { name: /domain/iu })).toHaveValue('acme.test');
+    expect(within(dialog).getByRole('combobox', { name: /domain/iu })).toHaveTextContent(
+      'acme.test'
+    );
     expect(within(dialog).getByRole('radio', { name: /^Personal/u })).toBeChecked();
     expect(new URLSearchParams(window.location.search).has('type')).toBe(false);
   });
@@ -906,7 +908,9 @@ describe('unified inbox', () => {
     renderRoute();
 
     const dialog = await screen.findByRole('dialog', { name: 'Manage mailboxes' });
-    expect(within(dialog).getByRole('combobox', { name: /domain/iu })).toHaveValue('acme.test');
+    expect(within(dialog).getByRole('combobox', { name: /domain/iu })).toHaveTextContent(
+      'acme.test'
+    );
     expect(within(dialog).getByRole('radio', { name: /^Shared/u })).toBeChecked();
   });
 
@@ -1201,12 +1205,12 @@ describe('unified inbox', () => {
     try {
       renderRoute();
       const menu = screen.getByRole('combobox', { name: 'Date' });
-      fireEvent.change(menu, { target: { value: 'week' } });
+      chooseOption(menu, 'Past week');
       expect(new URLSearchParams(window.location.search).get('date')).toBe('week');
       expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', since: '2026-11-16', tz: 'UTC' });
-      fireEvent.change(menu, { target: { value: 'older' } });
+      chooseOption(menu, 'Older than a year');
       expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', until: '2025-11-22', tz: 'UTC' });
-      fireEvent.change(menu, { target: { value: '' } });
+      chooseOption(menu, 'Any time');
       expect(new URLSearchParams(window.location.search).get('date')).toBeNull();
       expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', group: 'thread', tz: 'UTC' });
     } finally {
@@ -2146,9 +2150,9 @@ describe('inbox keyboard shortcuts', () => {
       const message = await screen.findByLabelText('Message');
       expect(message).toHaveValue('\n\n-- \nBest,\nAda');
       fireEvent.change(message, { target: { value: 'Hi\n\n-- \nBest,\nAda' } });
-      fireEvent.change(screen.getByLabelText('From'), { target: { value: '2' } });
+      chooseOption(screen.getByLabelText('From'), 'sales@mail.example.com');
       await waitFor(() => expect(message).toHaveValue('Hi'));
-      fireEvent.change(screen.getByLabelText('From'), { target: { value: '1' } });
+      chooseOption(screen.getByLabelText('From'), 'hello@mail.example.com');
       await waitFor(() => expect(message).toHaveValue('Hi\n\n-- \nBest,\nAda'));
     } finally {
       signatures.clear();
@@ -2539,9 +2543,10 @@ describe('inbox keyboard shortcuts', () => {
 
     press('c');
     const from = await screen.findByLabelText('From');
-    expect(from).toHaveValue('3');
-    expect(within(from).getByRole('option', { name: 'me@gmail.com' })).toBeInTheDocument();
-    expect(within(from).queryByRole('option', { name: 'read@gmail.com' })).toBeNull();
+    expect(from).toHaveTextContent('me@gmail.com');
+    const fromOptions = readOptions(from);
+    expect(fromOptions).toContain('me@gmail.com');
+    expect(fromOptions).not.toContain('read@gmail.com');
   });
 
   // Issue #117: a send refused because the session ended keeps the draft and offers sign-in.
@@ -2586,7 +2591,7 @@ describe('inbox keyboard shortcuts', () => {
     const { unmount } = renderRoute();
 
     press('c');
-    expect(await screen.findByLabelText('From')).toHaveValue('2');
+    expect(await screen.findByLabelText('From')).toHaveTextContent('sales@mail.example.com');
     unmount();
 
     // Unnarrowed, the remembered mailbox comes first, then the first that may send.
@@ -2594,13 +2599,13 @@ describe('inbox keyboard shortcuts', () => {
     window.localStorage.setItem('zmail.mailbox.1', '2');
     const second = renderRoute();
     press('c');
-    expect(await screen.findByLabelText('From')).toHaveValue('2');
+    expect(await screen.findByLabelText('From')).toHaveTextContent('sales@mail.example.com');
     second.unmount();
 
     window.localStorage.clear();
     renderRoute();
     press('c');
-    expect(await screen.findByLabelText('From')).toHaveValue('1');
+    expect(await screen.findByLabelText('From')).toHaveTextContent('hello@mail.example.com');
   });
 
   it('? opens the shortcut help, and keys wait while it is open', async () => {
@@ -2851,11 +2856,23 @@ function mailboxButton(name: RegExp) {
   return within(groupsNav()).getByRole('button', { name });
 }
 
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
+function readOptions(trigger: HTMLElement): string[] {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  const texts = screen.getAllByRole('option').map(option => option.textContent ?? '');
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+  return texts;
+}
+
 /** The role and Ungrouped rows of the sidebar, by accessible name, in order. */
 function groupNames() {
   return within(groupsNav())
     .getAllByRole('button')
-    .filter(button => button.hasAttribute('aria-expanded'))
+    .filter(button => button.hasAttribute('aria-expanded') && !button.hasAttribute('aria-haspopup'))
     .map(button => button.getAttribute('aria-label') ?? button.textContent);
 }
 

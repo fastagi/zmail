@@ -110,6 +110,18 @@ vi.mock('next/navigation', async () => {
       new URLSearchParams(useSyncExternalStore(subscribe, () => window.location.search)),
   };
 });
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
+function readOptions(trigger: HTMLElement): string[] {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  const texts = screen.getAllByRole('option').map(option => option.textContent ?? '');
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+  return texts;
+}
+
 const twoPeople = [
   { id: 101, user_id: 1, username: 'admin', nickname: 'Admin User', role: 'owner' },
   { id: 105, user_id: 5, username: 'riley', nickname: 'Riley Chen', role: 'member' },
@@ -342,21 +354,18 @@ describe('mailbox workspace', () => {
     window.history.replaceState(null, '', '/console/mailboxes?org=2');
     renderWorkspace();
 
-    const picker = screen.getByLabelText('Organization') as HTMLSelectElement;
-    expect([...picker.options].map(option => [option.value, option.text])).toEqual([
-      ['1', 'Acme'],
-      ['2', 'Globex'],
-    ]);
-    expect(picker).toHaveValue('2');
+    const picker = screen.getByLabelText('Organization');
+    expect(readOptions(picker)).toEqual(['Acme', 'Globex']);
+    expect(picker).toHaveTextContent('Globex');
     expect(screen.queryByTestId('mail-organization-name')).toBeNull();
     // A valid choice in the URL is used as it is.
     expect(navigation.replace).not.toHaveBeenCalled();
     expect(new Set(state.organizationIds)).toEqual(new Set([2]));
 
     state.organizationIds = [];
-    fireEvent.change(picker, { target: { value: '1' } });
+    chooseOption(picker, 'Acme');
     expect(navigation.replace).toHaveBeenCalledWith('/console/mailboxes?org=1', { scroll: false });
-    expect(screen.getByLabelText('Organization')).toHaveValue('1');
+    expect(screen.getByLabelText('Organization')).toHaveTextContent('Acme');
     expect(new Set(state.organizationIds)).toEqual(new Set([1]));
   });
 
@@ -371,7 +380,7 @@ describe('mailbox workspace', () => {
       state.organizationIds = [];
       const view = renderWorkspace();
 
-      expect(screen.getByLabelText('Organization'), search).toHaveValue('4');
+      expect(screen.getByLabelText('Organization'), search).toHaveTextContent('Acme');
       expect(new URLSearchParams(window.location.search).get('org'), search).toBe('4');
       expect(new Set(state.organizationIds), search).toEqual(new Set([4]));
       view.unmount();
@@ -389,7 +398,7 @@ describe('mailbox workspace', () => {
     window.history.replaceState(null, '', '/console/mailboxes?org=9&open=76&box=3&other=1');
     renderWorkspace();
 
-    expect(screen.getByLabelText('Organization')).toHaveValue('4');
+    expect(screen.getByLabelText('Organization')).toHaveTextContent('Acme');
     await waitFor(() => expect(window.location.search).toBe('?org=4&other=1'));
     expect(toast.error).toHaveBeenCalledWith(
       'The organization in this link is no longer available to you. Showing Acme instead.',
@@ -412,7 +421,7 @@ describe('mailbox workspace', () => {
     window.history.replaceState(null, '', '/console/mailboxes');
     const sidebarVisit = renderWorkspace();
 
-    expect(screen.getByLabelText('Organization')).toHaveValue('2');
+    expect(screen.getByLabelText('Organization')).toHaveTextContent('Globex');
     expect(navigation.replace).toHaveBeenCalledWith('/console/mailboxes?org=2', { scroll: false });
     expect(window.location.search).toBe('?org=2');
     expect(new Set(state.organizationIds)).toEqual(new Set([2]));
@@ -422,7 +431,7 @@ describe('mailbox workspace', () => {
     state.organizationIds = [];
     window.history.replaceState(null, '', '/console/mailboxes?org=1');
     renderWorkspace();
-    expect(screen.getByLabelText('Organization')).toHaveValue('1');
+    expect(screen.getByLabelText('Organization')).toHaveTextContent('Acme');
     expect(window.sessionStorage.getItem('zmail.activeOrganizationId')).toBe('1');
     expect(new Set(state.organizationIds)).toEqual(new Set([1]));
   });
@@ -541,7 +550,7 @@ describe('mailbox workspace', () => {
     fireEvent.change(screen.getByLabelText('Display name (optional)'), {
       target: { value: ' Support   Team ' },
     });
-    fireEvent.change(screen.getByLabelText('Member 1'), { target: { value: '5' } });
+    chooseOption(screen.getByLabelText('Member 1'), 'Riley Chen');
     fireEvent.click(screen.getByRole('button', { name: 'Create mailbox' }));
 
     await waitFor(() =>
@@ -566,7 +575,7 @@ describe('mailbox workspace', () => {
     renderWorkspace();
     openManage();
 
-    expect(screen.getByLabelText('Member 1')).toHaveValue('1');
+    expect(screen.getByLabelText('Member 1')).toHaveTextContent('Admin User');
     expect(screen.getByText(/unique across Zmail/u)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'hello' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create mailbox' }));
@@ -607,7 +616,7 @@ describe('mailbox workspace', () => {
       ],
     ] as const;
     fireEvent.change(address, { target: { value: 'hello' } });
-    fireEvent.change(screen.getByLabelText('Member 1'), { target: { value: '5' } });
+    chooseOption(screen.getByLabelText('Member 1'), 'Riley Chen');
     for (const [code, copy] of cases) {
       state.createMailbox.mutateAsync.mockRejectedValueOnce(new ApiError('backend text', code));
       fireEvent.click(submit);
@@ -1216,7 +1225,7 @@ describe('mailbox workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
     const dialog = screen.getByRole('region', { name: 'New message' });
 
-    fireEvent.change(within(dialog).getByLabelText('Template'), { target: { value: '4' } });
+    chooseOption(within(dialog).getByLabelText('Template'), 'Welcome');
     expect(within(dialog).queryByLabelText('Subject')).toBeNull();
     expect(within(dialog).queryByLabelText('Message')).toBeNull();
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
@@ -1249,7 +1258,7 @@ describe('mailbox workspace', () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
     const dialog = screen.getByRole('region', { name: 'New message' });
-    fireEvent.change(within(dialog).getByLabelText('Template'), { target: { value: '4' } });
+    chooseOption(within(dialog).getByLabelText('Template'), 'Welcome');
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
 

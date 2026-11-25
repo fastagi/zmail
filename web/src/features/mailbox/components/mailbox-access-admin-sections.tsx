@@ -15,11 +15,15 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import {
-  nativeSelectClassName,
-  useDateTimeFormat,
-} from '@/features/mailbox/components/mail-shared';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
 import type { Run } from '@/features/mailbox/components/mailbox-access-panel';
 import { memberName, type MailboxPerson } from '@/features/mailbox/components/mailbox-people';
 import {
@@ -29,6 +33,8 @@ import {
 import type { Mailbox } from '@/features/mailbox/types';
 import type { MailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
+
+const NO_SUCCESSOR = '__none__';
 
 export function HandoverSection({
   mailbox,
@@ -55,23 +61,26 @@ export function HandoverSection({
       <p className="text-sm text-muted-foreground">{t('access.handover.seal')}</p>
       <div className="space-y-2">
         <Label htmlFor={ids.successor}>{t('access.handover.successor')}</Label>
-        <select
-          id={ids.successor}
-          className={nativeSelectClassName}
-          value={successor}
+        <Select
+          value={successor || NO_SUCCESSOR}
           disabled={handOver.isPending}
-          onChange={event => {
-            setSuccessor(event.target.value);
+          onValueChange={value => {
+            setSuccessor(value === NO_SUCCESSOR ? '' : value);
             setConfirming(false);
           }}
         >
-          <option value="">{t('create.chooseMember')}</option>
-          {candidates.map(person => (
-            <option key={person.user_id} value={String(person.user_id)}>
-              {memberName(person)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={ids.successor} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_SUCCESSOR}>{t('create.chooseMember')}</SelectItem>
+            {candidates.map(person => (
+              <SelectItem key={person.user_id} value={String(person.user_id)}>
+                {memberName(person)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {confirming ? (
         <div className="space-y-2">

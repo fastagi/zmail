@@ -15,11 +15,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import {
   HandoverSection,
   SealedSection,
@@ -353,6 +359,8 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
 type RunResult = { ok: true } | { ok: false; key: MailboxErrorKey; stale: boolean };
 export type Run = (change: () => Promise<unknown>, success?: string) => Promise<RunResult>;
 
+const NO_CANDIDATE = '__none__';
+
 /** The members of a shared mailbox with their permissions; needs `manage_members`. */
 export function MembersSection({
   mailbox,
@@ -445,21 +453,27 @@ export function MembersSection({
           <p className="text-xs text-muted-foreground">{t('access.members.noCandidates')}</p>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              id={ids.candidate}
-              aria-label={t('access.members.candidate')}
-              className={`${nativeSelectClassName} min-w-0 flex-1`}
-              value={candidate}
+            <Select
+              value={candidate || NO_CANDIDATE}
               disabled={pending}
-              onChange={event => setCandidate(event.target.value)}
+              onValueChange={value => setCandidate(value === NO_CANDIDATE ? '' : value)}
             >
-              <option value="">{t('create.chooseMember')}</option>
-              {candidates.map(person => (
-                <option key={person.user_id} value={String(person.user_id)}>
-                  {memberName(person)}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                id={ids.candidate}
+                aria-label={t('access.members.candidate')}
+                className="min-w-0 flex-1"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CANDIDATE}>{t('create.chooseMember')}</SelectItem>
+                {candidates.map(person => (
+                  <SelectItem key={person.user_id} value={String(person.user_id)}>
+                    {memberName(person)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <MailboxPermissionSelect
               label={t('access.members.candidatePermission')}
               value={permission}

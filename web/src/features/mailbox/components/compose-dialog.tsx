@@ -23,6 +23,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import {
@@ -44,7 +51,6 @@ import {
 import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
 import { ComposeErrorAlert } from '@/features/mailbox/components/compose-error-alert';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
@@ -562,19 +568,22 @@ export function ComposeDialog({
         {fromOptions ? (
           <div className="space-y-2">
             <Label htmlFor="mail-compose-from">{t('compose.from')}</Label>
-            <select
-              id="mail-compose-from"
-              className={cn(nativeSelectClassName, 'w-full')}
+            <Select
               value={String(from.id)}
               disabled={send.isPending}
-              onChange={event => setFromId(Number(event.target.value))}
+              onValueChange={value => setFromId(Number(value))}
             >
-              {fromOptions.map(option => (
-                <option key={option.id} value={String(option.id)}>
-                  {option.address}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="mail-compose-from" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {fromOptions.map(option => (
+                  <SelectItem key={option.id} value={String(option.id)}>
+                    {option.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         ) : null}
         <div className="space-y-2">

@@ -8,9 +8,15 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ROUTES } from '@/constants/routes';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import {
   MailboxPermissionSelect,
   memberName,
@@ -33,7 +39,8 @@ import type {
 } from '@/features/mailbox/types';
 import { isPermissionDenied, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
+
+const NO_MEMBER = '__none__';
 
 /**
  * The address domain a new mailbox form opens with: the one the caller names, else the domain the
@@ -96,16 +103,16 @@ export function CreateMailboxForm({
   );
   const [chosenType, setType] = useState<MailboxType>(initialType ?? 'shared');
   const type = fixedType ?? chosenType;
-  const [owner, setOwner] = useState('');
-  const [nextKey, setNextKey] = useState(2);
-  const [members, setMembers] = useState<MemberDraft[]>([
-    { key: 1, userId: '', permission: 'send' },
-  ]);
-  const [error, setError] = useState<string | null>(null);
   // A team of one has nobody else to choose: its only member is filled in until changed.
   const soleMember =
     people.status === 'ready' && people.items.length === 1 ? String(people.items[0].user_id) : '';
-  const [filledSole, setFilledSole] = useState(false);
+  const [owner, setOwner] = useState(soleMember);
+  const [nextKey, setNextKey] = useState(2);
+  const [members, setMembers] = useState<MemberDraft[]>([
+    { key: 1, userId: soleMember, permission: 'send' },
+  ]);
+  const [error, setError] = useState<string | null>(null);
+  const [filledSole, setFilledSole] = useState(soleMember !== '');
   useEffect(() => {
     if (soleMember === '' || filledSole) return;
     setFilledSole(true);
@@ -194,11 +201,11 @@ export function CreateMailboxForm({
 
   const peopleOptions = (
     <>
-      <option value="">{t('create.chooseMember')}</option>
+      <SelectItem value={NO_MEMBER}>{t('create.chooseMember')}</SelectItem>
       {people.items.map(person => (
-        <option key={person.user_id} value={String(person.user_id)}>
+        <SelectItem key={person.user_id} value={String(person.user_id)}>
           {memberName(person)}
-        </option>
+        </SelectItem>
       ))}
     </>
   );
@@ -232,19 +239,22 @@ export function CreateMailboxForm({
               {domains.length > 1 ? (
                 <span className="flex shrink-0 items-center gap-1 text-sm text-muted-foreground">
                   @
-                  <select
-                    aria-label={t('create.domain')}
-                    className={cn(nativeSelectClassName, 'max-w-44')}
+                  <Select
                     value={chosen.domain}
                     disabled={create.isPending}
-                    onChange={event => setAddressDomain(event.target.value)}
+                    onValueChange={setAddressDomain}
                   >
-                    {domains.map(item => (
-                      <option key={item.domain} value={item.domain}>
-                        {item.domain}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label={t('create.domain')} className="max-w-44">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {domains.map(item => (
+                        <SelectItem key={item.domain} value={item.domain}>
+                          {item.domain}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </span>
               ) : (
                 <span className="shrink-0 text-sm text-muted-foreground">@{domain.domain}</span>
@@ -323,15 +333,16 @@ export function CreateMailboxForm({
           {type === 'personal' ? (
             <div className="space-y-2">
               <Label htmlFor={ids.owner}>{t('create.owner')}</Label>
-              <select
-                id={ids.owner}
-                className={nativeSelectClassName}
-                value={owner}
+              <Select
+                value={owner || NO_MEMBER}
                 disabled={create.isPending}
-                onChange={event => setOwner(event.target.value)}
+                onValueChange={value => setOwner(value === NO_MEMBER ? '' : value)}
               >
-                {peopleOptions}
-              </select>
+                <SelectTrigger id={ids.owner} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>{peopleOptions}</SelectContent>
+              </Select>
             </div>
           ) : (
             <div className="space-y-2">
@@ -340,15 +351,21 @@ export function CreateMailboxForm({
                   const number = index + 1;
                   return (
                     <li key={item.key} className="flex flex-wrap items-center gap-2">
-                      <select
-                        aria-label={t('create.member', { index: number })}
-                        className={cn(nativeSelectClassName, 'min-w-0 flex-1')}
-                        value={item.userId}
+                      <Select
+                        value={item.userId || NO_MEMBER}
                         disabled={create.isPending}
-                        onChange={event => updateMember(item.key, { userId: event.target.value })}
+                        onValueChange={value =>
+                          updateMember(item.key, { userId: value === NO_MEMBER ? '' : value })
+                        }
                       >
-                        {peopleOptions}
-                      </select>
+                        <SelectTrigger
+                          aria-label={t('create.member', { index: number })}
+                          className="min-w-0 flex-1"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>{peopleOptions}</SelectContent>
+                      </Select>
                       <MailboxPermissionSelect
                         label={t('create.memberPermission', { index: number })}
                         value={item.permission}

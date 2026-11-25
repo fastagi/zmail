@@ -17,6 +17,13 @@ import { ExternalLink, Inbox, PanelLeft, RefreshCw, Search, X } from 'lucide-rea
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
@@ -36,6 +43,7 @@ import { cn } from '@/utils';
 
 type ListTab = 'all' | 'unread' | 'attachments' | InboxAssignment;
 type DateRange = (typeof INBOX_DATE_RANGES)[number];
+const ANY_DATE_RANGE = '__all__';
 
 /** How far below the visible rows the next page starts loading. */
 const loadAheadMargin = '240px';
@@ -274,26 +282,31 @@ export function InboxListHeader({
           />
         </div>
         {onDateRangeChange ? (
-          <select
-            aria-label={t('inbox.date.label')}
-            value={dateRange ?? ''}
-            className={cn(
-              'h-8 shrink-0 rounded-md border border-border-main bg-bg-surface px-2 text-[13px] focus-ring',
-              dateRange ? 'font-medium text-text-main' : 'text-text-muted'
-            )}
-            onChange={event =>
-              onDateRangeChange(
-                event.target.value === '' ? null : (event.target.value as DateRange)
-              )
+          <Select
+            value={dateRange ?? ANY_DATE_RANGE}
+            onValueChange={value =>
+              onDateRangeChange(value === ANY_DATE_RANGE ? null : (value as DateRange))
             }
           >
-            <option value="">{t('inbox.date.any')}</option>
-            {INBOX_DATE_RANGES.map(range => (
-              <option key={range} value={range}>
-                {t(`inbox.date.${range}`)}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              size="sm"
+              aria-label={t('inbox.date.label')}
+              className={cn(
+                'shrink-0 border-border-main bg-bg-surface px-2 text-[13px]',
+                dateRange ? 'font-medium text-text-main' : 'text-text-muted'
+              )}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value={ANY_DATE_RANGE}>{t('inbox.date.any')}</SelectItem>
+              {INBOX_DATE_RANGES.map(range => (
+                <SelectItem key={range} value={range}>
+                  {t(`inbox.date.${range}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         ) : null}
       </form>
       <div

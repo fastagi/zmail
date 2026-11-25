@@ -4,12 +4,19 @@ import { useId } from 'react';
 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { MAIL_SUBJECT_MAX_LENGTH } from '@/features/mailbox/schemas';
 import type { MailTemplate } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
-import { cn } from '@/utils';
+
+const NO_TEMPLATE = '__none__';
 
 type ComposeTemplateOption = Pick<MailTemplate, 'id' | 'name' | 'variables'>;
 
@@ -48,22 +55,25 @@ export function ComposeContentFields({
       {!isReplyOrForward && templates && templates.length > 0 ? (
         <div className="space-y-2">
           <Label htmlFor="mail-compose-template">{t('compose.template')}</Label>
-          <select
-            id="mail-compose-template"
-            className={cn(nativeSelectClassName, 'w-full')}
-            value={templateId === null ? '' : String(templateId)}
+          <Select
+            value={templateId === null ? NO_TEMPLATE : String(templateId)}
             disabled={disabled}
-            onChange={event =>
-              onSelectTemplate(event.target.value === '' ? null : Number(event.target.value))
+            onValueChange={value =>
+              onSelectTemplate(value === NO_TEMPLATE ? null : Number(value))
             }
           >
-            <option value="">{t('compose.templateNone')}</option>
-            {templates.map(option => (
-              <option key={option.id} value={String(option.id)}>
-                {option.name}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id="mail-compose-template" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_TEMPLATE}>{t('compose.templateNone')}</SelectItem>
+              {templates.map(option => (
+                <SelectItem key={option.id} value={String(option.id)}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       ) : null}
       {template ? (

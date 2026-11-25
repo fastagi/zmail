@@ -7,6 +7,13 @@ import { ArrowDownLeft, ArrowUpRight, Inbox, Search, Send, SearchX } from 'lucid
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -38,7 +45,6 @@ import {
   MailStatusBadge,
   mailBadgeKey,
   mailStatusKey,
-  nativeSelectClassName,
   relativeTime,
   useDateTimeFormat,
   useRelativeTimeFormat,
@@ -81,6 +87,7 @@ const ComposeDialog = lazy(async () => ({
 
 const searchDelayMilliseconds = 300;
 const statuses: readonly MailStatus[] = ['received', 'queued', 'sent', 'failed'];
+const ALL_FILTER = '__all__';
 
 interface Composition {
   draft: ComposeDraft;
@@ -319,50 +326,62 @@ function EmailLogContent({
                 onChange={event => changeSearch(event.target.value)}
               />
             </div>
-            <select
-              className={nativeSelectClassName}
-              aria-label={t('emails.direction')}
-              value={view.direction ?? ''}
-              onChange={event =>
+            <Select
+              value={view.direction ?? ALL_FILTER}
+              onValueChange={value =>
                 filter({
-                  direction: (event.target.value || undefined) as MailDirection | undefined,
+                  direction:
+                    value === ALL_FILTER ? undefined : (value as MailDirection),
                 })
               }
             >
-              <option value="">{t('emails.directionAll')}</option>
-              <option value="inbound">{t('emails.statusReceived')}</option>
-              <option value="outbound">{t('emails.statusSent')}</option>
-            </select>
-            <select
-              className={nativeSelectClassName}
-              aria-label={t('emails.status')}
-              value={view.status ?? ''}
-              onChange={event =>
-                filter({ status: (event.target.value || undefined) as MailStatus | undefined })
+              <SelectTrigger aria-label={t('emails.direction')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER}>{t('emails.directionAll')}</SelectItem>
+                <SelectItem value="inbound">{t('emails.statusReceived')}</SelectItem>
+                <SelectItem value="outbound">{t('emails.statusSent')}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={view.status ?? ALL_FILTER}
+              onValueChange={value =>
+                filter({
+                  status: value === ALL_FILTER ? undefined : (value as MailStatus),
+                })
               }
             >
-              <option value="">{t('emails.statusAll')}</option>
-              {statuses.map(status => (
-                <option key={status} value={status}>
-                  {t(mailStatusKey[status])}
-                </option>
-              ))}
-            </select>
-            <select
-              className={cn(nativeSelectClassName, 'max-w-56')}
-              aria-label={t('emails.mailbox')}
-              value={view.mailboxId === undefined ? '' : String(view.mailboxId)}
-              onChange={event =>
-                filter({ mailboxId: event.target.value ? Number(event.target.value) : undefined })
+              <SelectTrigger aria-label={t('emails.status')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER}>{t('emails.statusAll')}</SelectItem>
+                {statuses.map(status => (
+                  <SelectItem key={status} value={status}>
+                    {t(mailStatusKey[status])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={view.mailboxId === undefined ? ALL_FILTER : String(view.mailboxId)}
+              onValueChange={value =>
+                filter({ mailboxId: value === ALL_FILTER ? undefined : Number(value) })
               }
             >
-              <option value="">{t('emails.mailboxAll')}</option>
-              {owned.map(mailbox => (
-                <option key={mailbox.id} value={String(mailbox.id)}>
-                  {mailbox.address}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label={t('emails.mailbox')} className="max-w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER}>{t('emails.mailboxAll')}</SelectItem>
+                {owned.map(mailbox => (
+                  <SelectItem key={mailbox.id} value={String(mailbox.id)}>
+                    {mailbox.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <EmailTable
             view={view}

@@ -5,13 +5,16 @@ import Link from 'next/link';
 import { Building2, ShieldAlert } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ROUTES } from '@/constants/routes';
-import {
-  EmptyState,
-  ErrorAlert,
-  nativeSelectClassName,
-} from '@/features/mailbox/components/mail-shared';
+import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import type {
   MailOrganization,
   MailOrganizationScope,
@@ -76,21 +79,28 @@ export function MailOrganizationName({
   const t = useT('mailbox');
   if (scope.organizations.length > 1) {
     return (
-      <select
-        className={cn(
-          nativeSelectClassName,
-          compact ? 'h-7 w-full px-2 text-[13px] font-semibold' : 'max-w-56'
-        )}
-        aria-label={t('organization.label')}
+      <Select
         value={String(scope.organization.id)}
-        onChange={event => scope.select(Number(event.target.value))}
+        onValueChange={value => scope.select(Number(value))}
       >
-        {scope.organizations.map(organization => (
-          <option key={organization.id} value={String(organization.id)}>
-            {organization.name}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger
+          aria-label={t('organization.label')}
+          className={cn(
+            compact
+              ? 'h-7 w-full px-2 text-[13px] font-semibold data-[size=default]:h-7'
+              : 'h-9 max-w-56'
+          )}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {scope.organizations.map(organization => (
+            <SelectItem key={organization.id} value={String(organization.id)}>
+              {organization.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     );
   }
   return (

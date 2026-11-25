@@ -127,6 +127,11 @@ function renderPage(adminEmail?: string) {
   );
 }
 
+function chooseOption(trigger: HTMLElement, optionName: string) {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
 function uploadFile(csv: string) {
   fireEvent.change(screen.getByLabelText('CSV file'), {
     target: { files: [new File([csv], 'mailboxes.csv', { type: 'text/csv' })] },
@@ -277,10 +282,8 @@ describe('shared mailbox admin', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Manage members' }));
     const drawer = await screen.findByRole('dialog', { name: 'Members of docs@zgi.ai' });
     await within(drawer).findByText('operator');
-    fireEvent.change(within(drawer).getByLabelText('New member'), { target: { value: '3' } });
-    fireEvent.change(within(drawer).getByLabelText('Permission of the new member'), {
-      target: { value: 'view' },
-    });
+    chooseOption(within(drawer).getByLabelText('New member'), 'member');
+    chooseOption(within(drawer).getByLabelText('Permission of the new member'), 'View');
     fireEvent.click(within(drawer).getByRole('button', { name: 'Add member' }));
     await waitFor(() => expect(service.setMember).toHaveBeenCalledWith(1, 7, 3, 'view'));
   });
@@ -305,7 +308,7 @@ describe('shared mailbox admin', () => {
     await within(dialog).findByLabelText('Address');
     expect(within(dialog).queryByRole('radiogroup')).toBeNull();
     fireEvent.change(within(dialog).getByLabelText('Address'), { target: { value: 'ops' } });
-    fireEvent.change(within(dialog).getByLabelText('Member 1'), { target: { value: '2' } });
+    chooseOption(within(dialog).getByLabelText('Member 1'), 'operator');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create mailbox' }));
     await waitFor(() =>
       expect(service.create).toHaveBeenCalledWith(1, expect.objectContaining({ type: 'shared' }))

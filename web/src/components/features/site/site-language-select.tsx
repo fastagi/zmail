@@ -1,26 +1,40 @@
 'use client';
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useLocale } from '@/hooks/use-locale';
 import { locales, localeNames } from '@/i18n/locales';
 
 export function SiteLanguageSelect({ label }: { label: string }) {
   const { locale, setLocale, isPending } = useLocale();
   return (
-    <select
-      aria-label={label}
-      className="rounded-md bg-bg-surface p-1 text-sm focus-ring"
+    <Select
       value={locale}
       disabled={isPending}
-      onChange={event => {
-        const selected = locales.find(value => value === event.target.value);
+      onValueChange={next => {
+        const selected = locales.find(value => value === next);
         if (selected) setLocale(selected);
       }}
     >
-      {locales.map(value => (
-        <option key={value} value={value}>
-          {localeNames[value]}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger
+        size="sm"
+        aria-label={label}
+        className="border-border/60 bg-bg-surface text-sm"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end">
+        {locales.map(value => (
+          <SelectItem key={value} value={value}>
+            {localeNames[value]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
