@@ -331,6 +331,8 @@ const messages = {
     sampleHint:
       'Sample values only fill the preview. They are stored as typed and visible to every member, so use made-up examples, never real secrets.',
     noDomain: 'Verify a sending domain before creating a transactional template.',
+    connectDomain: 'Go to domain settings',
+    noDomainAdminHint: 'An organization admin needs to verify a domain first.',
     fallbackMismatch:
       'A required variable has no fallback, and every use of an optional variable needs one.',
     save: 'Save',

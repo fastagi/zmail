@@ -1,6 +1,7 @@
 'use client';
 
-import { useId, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { AlertCircle, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -26,6 +27,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { ROUTES } from '@/constants/routes';
+import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { useSaveMailTemplate } from '@/features/mailbox/hooks/use-mail-templates';
 import { MAIL_TEMPLATE_NAME_MAX_LENGTH } from '@/features/mailbox/schemas';
@@ -142,6 +145,98 @@ function draftOf(template: MailTemplate | null): Draft {
 
 const offersEveryDomain = () => true;
 
+const DRAFT_STORAGE_PREFIX = 'zmail.transactionalTemplateDraft.';
+
+function draftStorageKey(organizationId: number): string {
+  return `${DRAFT_STORAGE_PREFIX}${organizationId}`;
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isEmptyDraft(draft: Draft): boolean {
+  return (
+    draft.name === '' &&
+    draft.key === '' &&
+    draft.localPart === '' &&
+    draft.domain === '' &&
+    draft.fromName === '' &&
+    draft.subject === '' &&
+    draft.html === '' &&
+    draft.text === '' &&
+    Object.values(draft.samples).every(value => value === '') &&
+    Object.keys(draft.definitions).length === 0
+  );
+}
+
+function readDraft(organizationId: number): Draft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(draftStorageKey(organizationId));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainRecord(parsed)) return null;
+
+    const samples: Record<string, string> = {};
+    if (isPlainRecord(parsed.samples)) {
+      for (const [k, v] of Object.entries(parsed.samples)) {
+        if (typeof v === 'string') samples[k] = v;
+      }
+    }
+
+    const definitions: Record<string, Definition> = {};
+    if (isPlainRecord(parsed.definitions)) {
+      for (const [k, v] of Object.entries(parsed.definitions)) {
+        if (
+          isPlainRecord(v) &&
+          typeof v.secret === 'boolean' &&
+          typeof v.required === 'boolean'
+        ) {
+          definitions[k] = { secret: v.secret, required: v.required };
+        }
+      }
+    }
+
+    return {
+      name: readString(parsed.name),
+      key: readString(parsed.key),
+      localPart: readString(parsed.localPart),
+      domain: readString(parsed.domain),
+      fromName: readString(parsed.fromName),
+      subject: readString(parsed.subject),
+      html: readString(parsed.html),
+      text: readString(parsed.text),
+      samples,
+      definitions,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(organizationId: number, draft: Draft): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(draftStorageKey(organizationId), JSON.stringify(draft));
+  } catch {
+    // Storage may be unavailable in restricted contexts; the dialog still works without persistence.
+  }
+}
+
+function clearDraft(organizationId: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(draftStorageKey(organizationId));
+  } catch {
+    // Storage may be unavailable in restricted contexts.
+  }
+}
+
 /**
  * Creates or edits a transactional template: name, key, sender, content, and the declared
  * variables. A required variable has no fallback and every use of an optional one has one, so
@@ -150,12 +245,14 @@ const offersEveryDomain = () => true;
 export function TransactionalTemplateDialog({
   organizationId,
   template,
+  canManage = false,
   onClose,
   onSaved,
   offersDomain = offersEveryDomain,
 }: {
   organizationId: number;
   template: MailTemplate | null;
+  canManage?: boolean;
   onClose: () => void;
   onSaved: (template: MailTemplate) => void;
   /** Narrows the sender domains, as a developer's scope does. */
@@ -165,7 +262,9 @@ export function TransactionalTemplateDialog({
   const tm = useT('mailbox');
   const domains = useMailboxDomains(organizationId);
   const save = useSaveMailTemplate(organizationId);
-  const [draft, setDraft] = useState<Draft>(() => draftOf(template));
+  const [draft, setDraft] = useState<Draft>(() =>
+    template ? draftOf(template) : (readDraft(organizationId) ?? draftOf(null))
+  );
   const [keyError, setKeyError] = useState<'invalid' | 'taken' | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const ids = {
@@ -180,8 +279,25 @@ export function TransactionalTemplateDialog({
     html: useId(),
   };
 
-  const options = senderDomains(domains.data, draft.domain, offersDomain);
-  const domain = draft.domain !== '' ? draft.domain : (options[0] ?? '');
+  const offered = senderDomains(domains.data, '', offersDomain);
+  const staleDraftDomain =
+    !template && domains.isSuccess && draft.domain !== '' && !offered.includes(draft.domain);
+
+  useEffect(() => {
+    if (staleDraftDomain) {
+      setDraft(current => (current.domain === '' ? current : { ...current, domain: '' }));
+    }
+  }, [staleDraftDomain]);
+
+  useEffect(() => {
+    if (template) return;
+    if (isEmptyDraft(draft)) clearDraft(organizationId);
+    else writeDraft(organizationId, draft);
+  }, [draft, organizationId, template]);
+
+  const options = template ? senderDomains(domains.data, draft.domain, offersDomain) : offered;
+  const selectedDomain = staleDraftDomain ? '' : draft.domain;
+  const domain = selectedDomain !== '' ? selectedDomain : (options[0] ?? '');
   const source = { subject: draft.subject, html: draft.html, text: draft.text };
   const rows = useMemo(
     () => templateFallbacks({ subject: draft.subject, html: draft.html, text: draft.text }),
@@ -276,6 +392,7 @@ export function TransactionalTemplateDialog({
         input: value,
         ...(template ? { templateId: template.id } : {}),
       });
+      if (!template) clearDraft(organizationId);
       toast.success(t(template ? 'templates.saved' : 'templates.created'));
       onSaved(stored);
       onClose();
@@ -292,6 +409,11 @@ export function TransactionalTemplateDialog({
     }
   };
 
+  const cancel = () => {
+    if (!template) clearDraft(organizationId);
+    onClose();
+  };
+
   const noDomain = domains.isSuccess && options.length === 0;
 
   return (
@@ -306,7 +428,22 @@ export function TransactionalTemplateDialog({
             {noDomain ? (
               <Alert className="border-warning/40 bg-warning-subtle text-warning">
                 <AlertCircle className="size-4" aria-hidden="true" />
-                <AlertDescription>{t('dialog.noDomain')}</AlertDescription>
+                <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <p>{t('dialog.noDomain')}</p>
+                    {canManage ? null : <p>{t('dialog.noDomainAdminHint')}</p>}
+                  </div>
+                  {canManage ? (
+                    <Button asChild size="sm" variant="outline" className="shrink-0 text-foreground">
+                      <Link
+                        href={mailOrganizationHref(ROUTES.CONSOLE.MAIL_DOMAIN, organizationId)}
+                        onClick={onClose}
+                      >
+                        {t('dialog.connectDomain')}
+                      </Link>
+                    </Button>
+                  ) : null}
+                </AlertDescription>
               </Alert>
             ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
@@ -498,7 +635,7 @@ export function TransactionalTemplateDialog({
             ) : null}
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={cancel}>
               {t('dialog.cancel')}
             </Button>
             <Button

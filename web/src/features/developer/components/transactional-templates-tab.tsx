@@ -71,8 +71,10 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
   const dialog =
     editing.kind === 'closed' ? null : (
       <TransactionalTemplateDialog
+        key={editing.kind === 'edit' ? `edit-${editing.template.id}` : `new-${organization.id}`}
         organizationId={organization.id}
         template={editing.kind === 'edit' ? editing.template : null}
+        canManage={organization.canManage}
         offersDomain={domain => offersSenderDomain(organization, domain)}
         onClose={() => setEditing({ kind: 'closed' })}
         onSaved={template => setChosenId(template.id)}

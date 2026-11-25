@@ -83,6 +83,7 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 
 describe('developer console', () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
     toast.success.mockReset();
     state.search = 'org=1';
     state.replace.mockReset();
@@ -305,6 +306,214 @@ describe('developer console', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
       messages.mailbox.errors.templateInvalid
     );
+  });
+
+  it('shows a link to domain settings when a manager has no verified domain', async () => {
+    state.domains.data = [domain({ domain: 'mail.example.com', kind: 'shared' })];
+    state.templates.data = [];
+    state.search = 'org=1&tab=templates';
+    renderConsole();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(messages.developer.dialog.noDomain)).toBeInTheDocument();
+    const link = within(dialog).getByRole('link', {
+      name: messages.developer.dialog.connectDomain,
+    });
+    expect(link).toHaveAttribute('href', '/console/admin/domains?org=1');
+    expect(within(dialog).getByLabelText('Sender domain')).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('shows an admin hint without a link when a non-manager developer has no domain', async () => {
+    state.organizations.data = organizations('member', {
+      features: { ...memberGrants, developer: true },
+      developer_scope: { all_domains: false, domains: [] },
+    });
+    state.domains.data = [domain({ domain: 'mail.example.com', kind: 'shared' })];
+    state.templates.data = [];
+    state.search = 'org=1&tab=templates';
+    renderConsole();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(messages.developer.dialog.noDomain)).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(messages.developer.dialog.noDomainAdminHint)
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole('link')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('restores a new-template draft after leaving via the domain link and isolates by org and edit mode', async () => {
+    state.domains.data = [domain({ domain: 'mail.example.com', kind: 'shared' })];
+    state.templates.data = [];
+    state.search = 'org=1&tab=templates';
+    const view = renderConsole();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    let dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Login code' } });
+    fireEvent.change(within(dialog).getByLabelText('Key'), { target: { value: 'login-code' } });
+    fireEvent.change(within(dialog).getByLabelText('Sender local part'), {
+      target: { value: 'auth' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Sender name'), {
+      target: { value: 'Acme Auth' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Subject'), {
+      target: { value: '{{app|Acme}} code {{code}}' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Plain text body'), {
+      target: { value: 'Your code is {{code}}' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('HTML body'), {
+      target: { value: '<p>Your code is {{code}}</p>' },
+    });
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Secret: code' }));
+    fireEvent.change(within(dialog).getByLabelText('Sample value for code'), {
+      target: { value: '654321' },
+    });
+
+    fireEvent.click(
+      within(dialog).getByRole('link', { name: messages.developer.dialog.connectDomain })
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const savedOrg1Draft = window.sessionStorage.getItem('zmail.transactionalTemplateDraft.1');
+    expect(savedOrg1Draft).not.toBeNull();
+
+    // After verifying a domain and returning, reopening New template restores everything.
+    state.domains.data = [
+      domain({ domain: 'mail.example.com', kind: 'shared' }),
+      domain({ domain: 'acme.example', kind: 'organization' }),
+    ];
+    view.rerender(wrap());
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    dialog = screen.getByRole('dialog');
+
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Login code');
+    expect(within(dialog).getByLabelText('Key')).toHaveValue('login-code');
+    expect(within(dialog).getByLabelText('Sender local part')).toHaveValue('auth');
+    expect(within(dialog).getByLabelText('Sender domain')).toHaveTextContent('acme.example');
+    expect(within(dialog).getByLabelText('Sender name')).toHaveValue('Acme Auth');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('{{app|Acme}} code {{code}}');
+    expect(within(dialog).getByLabelText('Plain text body')).toHaveValue('Your code is {{code}}');
+    expect(within(dialog).getByLabelText('HTML body')).toHaveValue('<p>Your code is {{code}}</p>');
+    expect(within(dialog).getByRole('checkbox', { name: 'Secret: code' })).toBeChecked();
+    expect(within(dialog).getByLabelText('Sample value for code')).toHaveValue('654321');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    // Editing an existing template never writes or overwrites the new-template draft.
+    state.templates.data = [summary()];
+    state.template.data = template();
+    view.rerender(wrap());
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Edited name' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(window.sessionStorage.getItem('zmail.transactionalTemplateDraft.1')).toBe(
+      savedOrg1Draft
+    );
+
+    // A different organization does not inherit org 1's draft.
+    state.organizations.data = {
+      ...organizations('owner'),
+      items: [{ ...organizations('owner').items[0], id: 2, name: 'Beta', slug: 'beta' }],
+    };
+    state.search = 'org=2&tab=templates';
+    view.rerender(wrap());
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    expect(within(screen.getByRole('dialog')).getByLabelText('Name')).toHaveValue('');
+  });
+
+  it('drops a stale stored domain when restoring a new-template draft', async () => {
+    window.sessionStorage.setItem(
+      'zmail.transactionalTemplateDraft.1',
+      JSON.stringify({
+        name: 'Login code',
+        key: 'login-code',
+        localPart: 'auth',
+        domain: 'removed.example',
+        fromName: 'Acme Auth',
+        subject: 'Your code',
+        html: '',
+        text: '123456',
+        samples: {},
+        definitions: {},
+      })
+    );
+    state.domains.data = [domain({ domain: 'mail.example.com', kind: 'shared' })];
+    state.templates.data = [];
+    state.search = 'org=1&tab=templates';
+    renderConsole();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    const dialog = screen.getByRole('dialog');
+
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Login code');
+    expect(within(dialog).getByLabelText('Sender domain')).toBeDisabled();
+    expect(within(dialog).getByLabelText('Sender domain')).not.toHaveTextContent('removed.example');
+    expect(within(dialog).getByText(messages.developer.dialog.noDomain)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('clears the new-template draft after saving', async () => {
+    state.templates.data = [];
+    state.search = 'org=1&tab=templates';
+    state.save.mutateAsync.mockResolvedValue(template({ id: 9, name: 'Login code', key: 'login-code' }));
+    renderConsole();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    let dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Login code' } });
+    fireEvent.change(within(dialog).getByLabelText('Key'), { target: { value: 'login-code' } });
+    fireEvent.change(within(dialog).getByLabelText('Sender local part'), {
+      target: { value: 'auth' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Subject'), {
+      target: { value: 'Your code' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Plain text body'), {
+      target: { value: '123456' },
+    });
+    expect(window.sessionStorage.getItem('zmail.transactionalTemplateDraft.1')).not.toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(state.save.mutateAsync).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(window.sessionStorage.getItem('zmail.transactionalTemplateDraft.1')).toBeNull();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('');
+    expect(within(dialog).getByLabelText('Key')).toHaveValue('');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('');
+    expect(within(dialog).getByLabelText('Plain text body')).toHaveValue('');
+  });
+
+  it('clears the new-template draft when the user explicitly cancels', async () => {
+    state.templates.data = [];
+    state.search = 'org=1&tab=templates';
+    renderConsole();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    let dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Login code' } });
+    fireEvent.change(within(dialog).getByLabelText('Key'), { target: { value: 'login-code' } });
+    fireEvent.change(within(dialog).getByLabelText('Subject'), {
+      target: { value: 'Your code' },
+    });
+    expect(window.sessionStorage.getItem('zmail.transactionalTemplateDraft.1')).not.toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(window.sessionStorage.getItem('zmail.transactionalTemplateDraft.1')).toBeNull();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
+    dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('');
+    expect(within(dialog).getByLabelText('Key')).toHaveValue('');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('');
   });
 });
 

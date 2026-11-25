@@ -320,6 +320,8 @@ const messages = {
     sampleHint:
       '示例值只用于预览。它们按原样保存、所有成员可见，请填写虚构的示例，不要填真实的秘密值。',
     noDomain: '创建事务模板前，请先验证一个发信域名。',
+    connectDomain: '前往域名设置',
+    noDomainAdminHint: '需要组织管理员先验证发信域名。',
     fallbackMismatch: '必填变量不能有默认值；可选变量的每一处使用都需要默认值。',
     save: '保存',
     cancel: '取消',
