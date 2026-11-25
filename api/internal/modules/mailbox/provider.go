@@ -169,6 +169,7 @@ func NewStarterManifest(handler *Handler, extra ...assembly.Module) assembly.Sta
 			"2026_12_26_100000_add_member_welcome_mail",
 			"2026_12_27_120000_add_mail_domain_default",
 			"2026_12_27_140000_add_member_welcome_resends",
+			"2026_12_30_090000_widen_external_mail_backfill_days",
 		),
 	)
 	return assembly.NewStaticStarterManifest(config.StarterMailbox, opts...)
