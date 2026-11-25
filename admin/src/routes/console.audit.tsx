@@ -3,17 +3,21 @@ import { z } from 'zod';
 import { isFeatureEnabled } from '@/config/env';
 import { AuditPage } from '@/features/audit/components/audit-page';
 
-const day = z
+const dayOrIso = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(
+    (value) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) ||
+      (/^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value))),
+  )
   .optional()
   .catch(undefined);
 
 const searchSchema = z.object({
   action: z.string().trim().max(120).optional().catch(undefined),
   user_id: z.coerce.number().int().positive().optional().catch(undefined),
-  from: day,
-  to: day,
+  from: dayOrIso,
+  to: dayOrIso,
   cursor: z.string().max(128).optional().catch(undefined),
 });
 

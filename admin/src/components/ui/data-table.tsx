@@ -45,6 +45,8 @@ interface DataTableProps<Row> {
   skeletonRows?: number;
   /** Expandable detail rows; an expanded row is marked selected. */
   details?: DataTableDetails<Row>;
+  /** Optional per-row class name for visual status accents. */
+  rowClassName?: (row: Row) => string | undefined;
 }
 
 /** The loading, error, empty, or populated state of one list, built on the shadcn Table. */
@@ -59,6 +61,7 @@ export function DataTable<Row>({
   alignTop = false,
   skeletonRows = 4,
   details,
+  rowClassName,
 }: DataTableProps<Row>) {
   if (status === 'pending') {
     return (
@@ -100,7 +103,7 @@ export function DataTable<Row>({
           return (
             <Fragment key={rowKey(row)}>
               <TableRow
-                className={cn(alignTop && 'align-top')}
+                className={cn(alignTop && 'align-top', rowClassName?.(row))}
                 data-state={detail === null ? undefined : 'selected'}
               >
                 {columns.map((column) => (

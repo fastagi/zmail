@@ -53,4 +53,19 @@ describe('auditService.list', () => {
     expect(first.searchParams.has('page')).toBe(false);
     expect(second.searchParams.get('cursor')).toBe('abc');
   });
+
+  it('preserves ISO-8601 timestamps from quick time range presets', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(emptyPage), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await auditService.list({ from: '2026-09-30T03:40:00.000Z' });
+
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost');
+    expect(url.searchParams.get('from')).toBe('2026-09-30T03:40:00.000Z');
+  });
 });

@@ -26,7 +26,7 @@ function json(body: unknown, status = 200) {
 describe('AuditPage', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('shows the actor, action, and request of each entry', async () => {
+  it('shows human-readable action titles, method pill, path, and request ID', async () => {
     renderWith(
       json({
         code: 0,
@@ -50,8 +50,98 @@ describe('AuditPage', () => {
     );
 
     expect(await screen.findByText('User #1')).toBeInTheDocument();
-    expect(screen.getByText('POST /v1/operator/users/:id/disable')).toBeInTheDocument();
+    expect(screen.getByText('Disable user account')).toBeInTheDocument();
+    expect(screen.getByText('disable · users')).toBeInTheDocument();
+    expect(screen.getByText('POST')).toBeInTheDocument();
+    expect(screen.getByText('/v1/operator/users/:id/disable')).toBeInTheDocument();
     expect(screen.getByText('req-1')).toBeInTheDocument();
+  });
+
+  it('shows health summary and filters rows with 1-click status pills', async () => {
+    renderWith(
+      json({
+        code: 0,
+        message: 'success',
+        data: [
+          {
+            id: 1,
+            user_id: 1,
+            actor_type: 'user',
+            action: 'login',
+            resource: 'auth',
+            method: 'POST',
+            path: '/v1/auth/login',
+            status_code: 200,
+            request_id: 'req-ok',
+            created_at: '2026-09-30T04:40:00Z',
+          },
+          {
+            id: 2,
+            user_id: 2,
+            actor_type: 'user',
+            action: 'invite',
+            resource: 'organization_invitations',
+            method: 'POST',
+            path: '/v1/orgs/1/invitations',
+            status_code: 403,
+            request_id: 'req-403',
+            created_at: '2026-09-30T04:41:00Z',
+          },
+          {
+            id: 3,
+            user_id: 3,
+            actor_type: 'user',
+            action: 'send',
+            resource: 'emails',
+            method: 'POST',
+            path: '/v1/transactional/emails',
+            status_code: 500,
+            request_id: 'req-500',
+            created_at: '2026-09-30T04:42:00Z',
+          },
+        ],
+        meta: { per_page: 50, has_more: false, next_cursor: null },
+      }),
+    );
+
+    expect(await screen.findByText('Total 3')).toBeInTheDocument();
+    expect(screen.getByText('OK 1')).toBeInTheDocument();
+    expect(screen.getByText('4xx 1')).toBeInTheDocument();
+    expect(screen.getByText('5xx 1')).toBeInTheDocument();
+    expect(screen.getByText('403 Forbidden')).toBeInTheDocument();
+    expect(screen.getByText('500 Server Error')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Errors \(4xx\/5xx\)/ }));
+    expect(screen.queryByText('req-ok')).not.toBeInTheDocument();
+    expect(screen.getByText('req-403')).toBeInTheDocument();
+    expect(screen.getByText('req-500')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /5xx only/ }));
+    expect(screen.queryByText('req-403')).not.toBeInTheDocument();
+    expect(screen.getByText('req-500')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.getByText('req-ok')).toBeInTheDocument();
+  });
+
+  it('applies 1-click time range presets with ISO timestamps', async () => {
+    const { onSearchChange } = renderWith(
+      json({
+        code: 0,
+        message: 'success',
+        data: [],
+        meta: { per_page: 50, has_more: false, next_cursor: null },
+      }),
+    );
+
+    await screen.findByText('No audit entries match these filters.');
+    fireEvent.click(screen.getByRole('button', { name: 'Last 1h' }));
+
+    expect(onSearchChange).toHaveBeenCalledTimes(1);
+    const nextSearch = onSearchChange.mock.calls[0]?.[0] as AuditSearch;
+    expect(nextSearch.from).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(nextSearch.to).toBeUndefined();
+    expect(nextSearch.cursor).toBeUndefined();
   });
 
   it('explains an invalid date range', async () => {
@@ -90,7 +180,7 @@ describe('AuditPage', () => {
     expect(deep.onSearchChange).toHaveBeenLastCalledWith({ cursor: undefined });
   });
 
-  it('expands an entry to show its target and copies the request ID', async () => {
+  it('expands an entry to show its target, copies the request ID, and copies debug summary', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     renderWith(
@@ -126,6 +216,14 @@ describe('AuditPage', () => {
     expect(screen.getByText('user · 1042')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('req-42'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy debug summary' }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenLastCalledWith(
+        expect.stringContaining('Request: POST /v1/operator/users/1042/disable'),
+      ),
+    );
+    expect(writeText.mock.calls[1]?.[0]).toContain('Request ID: req-42');
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide details for user.disabled' }));
     expect(screen.queryByText('user · 1042')).not.toBeInTheDocument();
