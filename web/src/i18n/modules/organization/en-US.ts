@@ -137,10 +137,26 @@ const messages = {
   acceptInvitation: 'Accept invitation',
   acceptInvitationDescription:
     'Join an organization with the one-time token from your invitation email.',
+  acceptInvitationReadyDescription:
+    'Confirm to join the organization and go straight to its mailboxes.',
+  confirmJoinOrganization: 'Join organization',
+  invitationReadyHint: 'Your invitation is ready. Click below to join the organization.',
+  enterTokenManually: 'Enter invitation token manually',
   invitationToken: 'One-time token',
   invitationTokenPlaceholder: 'Paste invitation token',
   invitationTokenInvalid: 'Enter a valid one-time invitation token',
   acceptInvitationSuccess: 'You joined the organization',
+  inviteLanding: {
+    checking: 'Checking your invitation…',
+    title: "You're invited to join an organization",
+    hint: "Don't have a Zmail account yet? Create an account with the invited email address, and you'll be guided automatically into the organization and its mailboxes.",
+    registerCta: 'Create account & join',
+    loginCta: 'Sign in to join',
+    invalidTitle: 'Invitation link is invalid or expired',
+    invalidDescription:
+      'This invitation link is missing its token or may have expired. Open the full link from your invitation email, or ask an organization administrator for a new one.',
+    goToLogin: 'Go to sign in',
+  },
   features: {
     broadcasts: 'Broadcasts',
     contacts: 'Contacts',

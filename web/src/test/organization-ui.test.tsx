@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AcceptOrganizationInvitationDialog } from '@/features/organization/components/accept-organization-invitation-dialog';
 import { OrganizationDirectory } from '@/features/organization/components/organization-directory';
 import { OrganizationMembers } from '@/features/organization/components/organization-members';
 import { OrganizationOverview } from '@/features/organization/components/organization-overview';
@@ -299,6 +300,56 @@ describe('organization browser workflow', () => {
       { token: 'oinv_secret.value' },
       expect.objectContaining({ onSuccess: expect.any(Function) })
     );
+  });
+
+  it('hides the raw token input when opened from an invitation link and lets users confirm directly', () => {
+    renderWithMessages(<AcceptOrganizationInvitationDialog initialToken="oinv_link_secret" />);
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByLabelText('One-time token')).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText('Your invitation is ready. Click below to join the organization.')
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Join organization' }));
+    expect(state.accept.mutate).toHaveBeenCalledWith(
+      { token: 'oinv_link_secret' },
+      expect.objectContaining({ onSuccess: expect.any(Function) })
+    );
+  });
+
+  it('offers a fallback to manual token entry when accepting a link invitation fails', () => {
+    state.accept.error = new ApiError(
+      'email mismatch',
+      ApiErrorCode.ORGANIZATION_INVITATION_EMAIL_MISMATCH,
+      403
+    );
+    renderWithMessages(<AcceptOrganizationInvitationDialog initialToken="oinv_link_secret" />);
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'This invitation belongs to another account email.'
+    );
+    expect(within(dialog).queryByLabelText('One-time token')).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enter invitation token manually' }));
+    const token = within(dialog).getByLabelText('One-time token');
+    expect(token).toHaveAttribute('type', 'password');
+    expect(token).toHaveValue('oinv_link_secret');
+  });
+
+  it('renders the clean link-accept confirmation state in zh-Hans', () => {
+    renderWithMessages(
+      <AcceptOrganizationInvitationDialog initialToken="oinv_link_secret" />,
+      'zh-Hans'
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByLabelText('一次性 token')).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText('邀请凭证已就绪，点击下方按钮立即加入组织。')
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: '确认加入组织' })).toBeInTheDocument();
   });
 
   it('renders the PII-minimized member directory and owner controls', () => {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, MailCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -32,8 +32,8 @@ import { useT } from '@/i18n';
 
 /**
  * Joins an organization with the one-time token from an invitation mail. `initialToken`, left in
- * this tab by an invitation link, opens the dialog with the token filled in. Once joined, the
- * invitee starts in the organization's mail.
+ * this tab by an invitation link, opens the dialog in a clean confirmation state without exposing
+ * the raw secret token input. Once joined, the invitee starts in the organization's mail.
  */
 export function AcceptOrganizationInvitationDialog({
   initialToken = null,
@@ -46,11 +46,13 @@ export function AcceptOrganizationInvitationDialog({
   const mutation = useAcceptOrganizationInvitation();
   const [open, setOpen] = useState(initialToken !== null);
   const [token, setToken] = useState(initialToken ?? '');
+  const [manualEntry, setManualEntry] = useState(initialToken === null);
   const [clientError, setClientError] = useState<string>();
 
   const reset = () => {
     clearPendingInvitation();
     setToken('');
+    setManualEntry(true);
     setClientError(undefined);
     mutation.reset();
   };
@@ -79,6 +81,8 @@ export function AcceptOrganizationInvitationDialog({
       ? t('invitationTokenInvalid')
       : undefined);
 
+  const hasError = Boolean(mutation.error || clientError);
+
   return (
     <Dialog
       open={open}
@@ -95,7 +99,11 @@ export function AcceptOrganizationInvitationDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t('acceptInvitation')}</DialogTitle>
-          <DialogDescription>{t('acceptInvitationDescription')}</DialogDescription>
+          <DialogDescription>
+            {manualEntry
+              ? t('acceptInvitationDescription')
+              : t('acceptInvitationReadyDescription')}
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} aria-busy={mutation.isPending}>
           <DialogBody className="space-y-4 py-1">
@@ -106,30 +114,61 @@ export function AcceptOrganizationInvitationDialog({
                 </AlertDescription>
               </Alert>
             ) : null}
-            <div className="space-y-2">
-              <Label htmlFor="organization-invitation-token">
-                {t('invitationToken')}
-              </Label>
-              <Input
-                id="organization-invitation-token"
-                name="token"
-                type="password"
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                required
-                maxLength={256}
-                value={token}
-                errorText={tokenError}
-                disabled={mutation.isPending}
-                placeholder={t('invitationTokenPlaceholder')}
-                onChange={(event) => {
-                  setToken(event.target.value);
-                  setClientError(undefined);
-                  mutation.reset();
-                }}
-              />
-            </div>
+            {!manualEntry && clientError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{clientError}</AlertDescription>
+              </Alert>
+            ) : null}
+            {manualEntry ? (
+              <div className="space-y-2">
+                <Label htmlFor="organization-invitation-token">
+                  {t('invitationToken')}
+                </Label>
+                <Input
+                  id="organization-invitation-token"
+                  name="token"
+                  type="password"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                  maxLength={256}
+                  value={token}
+                  errorText={tokenError}
+                  disabled={mutation.isPending}
+                  placeholder={t('invitationTokenPlaceholder')}
+                  onChange={(event) => {
+                    setToken(event.target.value);
+                    setClientError(undefined);
+                    mutation.reset();
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-muted/40 p-4">
+                  <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <MailCheck className="size-4" aria-hidden="true" />
+                  </div>
+                  <p className="text-sm leading-relaxed text-foreground">
+                    {t('invitationReadyHint')}
+                  </p>
+                </div>
+                {hasError ? (
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto px-0 text-xs"
+                      onClick={() => setManualEntry(true)}
+                    >
+                      {t('enterTokenManually')}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </DialogBody>
           <DialogFooter className="pt-5">
             <DialogClose asChild>
@@ -138,7 +177,7 @@ export function AcceptOrganizationInvitationDialog({
               </Button>
             </DialogClose>
             <Button type="submit" loading={mutation.isPending}>
-              {t('acceptInvitation')}
+              {manualEntry ? t('acceptInvitation') : t('confirmJoinOrganization')}
             </Button>
           </DialogFooter>
         </form>

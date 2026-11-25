@@ -126,9 +126,11 @@ describe('onboarding a new user into a team', () => {
     nav.params = new URLSearchParams('accept=1');
     renderWithMessages(<OrganizationDirectory />);
 
-    const token = screen.getByLabelText('One-time token');
-    expect(token).toHaveValue('oinv_secret.value');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Accept invitation' }).at(-1)!);
+    expect(screen.queryByLabelText('One-time token')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Your invitation is ready. Click below to join the organization.')
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Join organization' }));
 
     expect(state.accept.mutate).toHaveBeenCalledWith(
       { token: 'oinv_secret.value' },
