@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSnippets } from '@/features/developer/utils/snippets';
+import { buildDirectSnippets, buildSnippets } from '@/features/developer/utils/snippets';
 
 const input = {
   apiOrigin: 'https://api.acme.example/',
@@ -11,13 +11,30 @@ const input = {
 };
 
 describe('developer snippets', () => {
-  it('snippets carry the headers and never an SDK import', () => {
+  it('direct snippets call /v1/emails with Authorization Bearer and omit Organization-Id when bound', () => {
+    const snippets = buildDirectSnippets({
+      apiOrigin: 'https://zmail.im/',
+      organizationId: 42,
+      omitOrganizationHeader: true,
+      apiKey: 'zmail_live_abcd1234',
+      from: 'noreply@kfk.im',
+    });
+    for (const code of [snippets.curl, snippets.node, snippets.python]) {
+      expect(code).toContain('https://zmail.im/v1/emails');
+      expect(code).toContain('Bearer zmail_live_abcd1234');
+      expect(code).toContain('noreply@kfk.im');
+      expect(code).not.toContain('Organization-Id');
+      expect(code).not.toContain('Idempotency-Key');
+    }
+  });
+
+  it('template snippets carry the headers and never an SDK import', () => {
     const snippets = buildSnippets(input);
     for (const code of [snippets.curl, snippets.node, snippets.python]) {
-      expect(code).toContain('https://api.acme.example/v1/transactional-messages');
+      expect(code).toContain('https://api.acme.example/v1/emails');
       expect(code).not.toContain('example//v1');
-      expect(code).toContain('X-API-Key');
-      expect(code).toContain('fastbuild_test_abcd1234');
+      expect(code).toContain('Authorization');
+      expect(code).toContain('Bearer fastbuild_test_abcd1234');
       expect(code).toContain('Organization-Id');
       expect(code).toContain('42');
       expect(code).toContain('Idempotency-Key');
@@ -41,8 +58,8 @@ describe('developer snippets', () => {
 
   it('calls the given origin without a trailing slash and never a placeholder host (#144)', () => {
     const snippets = buildSnippets({ ...input, apiOrigin: 'https://zmail.im/' });
-    expect(snippets.curl).toContain("'https://zmail.im/v1/transactional-messages'");
-    expect(snippets.python).toContain('https://zmail.im/v1/transactional-messages');
+    expect(snippets.curl).toContain("'https://zmail.im/v1/emails'");
+    expect(snippets.python).toContain('https://zmail.im/v1/emails');
     for (const sample of Object.values(snippets)) expect(sample).not.toContain('api.example.com');
   });
 });

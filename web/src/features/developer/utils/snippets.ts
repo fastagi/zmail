@@ -5,12 +5,26 @@ export interface SnippetInput {
   /** The public API origin the samples call; the caller resolves it, there is no placeholder. */
   apiOrigin: string;
   organizationId: number;
+  /** When true (e.g. an organization-bound key), omit the Organization-Id header. */
+  omitOrganizationHeader?: boolean;
   /** The plaintext key, or a placeholder when it is no longer shown. */
   apiKey: string;
-  /** The template key. */
+  /** The template key (used in template mode). */
   template: string;
-  /** Example values by variable name. */
+  /** Example values by variable name (used in template mode). */
   variables: Readonly<Record<string, string>>;
+}
+
+export interface DirectSnippetInput {
+  /** The public API origin the samples call; the caller resolves it, there is no placeholder. */
+  apiOrigin: string;
+  organizationId: number;
+  /** When true (e.g. an organization-bound key), omit the Organization-Id header. */
+  omitOrganizationHeader?: boolean;
+  /** The plaintext key, or a placeholder when it is no longer shown. */
+  apiKey: string;
+  /** Sender address on a verified domain (e.g. `noreply@acme.example`). */
+  from: string;
 }
 
 export interface Snippets {
@@ -20,7 +34,7 @@ export interface Snippets {
 }
 
 function endpoint(apiOrigin: string): string {
-  return `${apiOrigin.trim().replace(/\/+$/u, '')}/v1/transactional-messages`;
+  return `${apiOrigin.trim().replace(/\/+$/u, '')}/v1/emails`;
 }
 
 /** A single-quoted POSIX shell word. */
@@ -40,48 +54,40 @@ function indentLines(text: string, indent: string): string {
     .join('\n');
 }
 
-/**
- * Code that sends one transactional message with plain HTTP: curl, Node.js 18+ with the global
- * `fetch`, and Python with `urllib.request`. None needs an SDK. The idempotency key is one value per
- * logical message, so a retry of the same message reuses it.
- */
-export function buildSnippets({
-  apiOrigin,
-  organizationId,
-  apiKey,
-  template,
-  variables,
-}: SnippetInput): Snippets {
-  const url = endpoint(apiOrigin);
-  const idempotencyKey = `${template}-user-42`;
-  const body = { template, to: exampleRecipient, variables: { ...variables } };
+function renderHttpSnippets({
+  url,
+  headers,
+  body,
+}: {
+  url: string;
+  headers: readonly (readonly [string, string])[];
+  body: Record<string, unknown>;
+}): Snippets {
   const json = JSON.stringify(body, null, 2);
 
+  const curlHeaders = headers.map(([name, value]) => `  -H ${shellQuote(`${name}: ${value}`)} \\`);
   const curl = [
     `curl -X POST ${shellQuote(url)} \\`,
-    `  -H ${shellQuote(`X-API-Key: ${apiKey}`)} \\`,
-    `  -H ${shellQuote(`Organization-Id: ${organizationId}`)} \\`,
-    `  -H ${shellQuote(`Idempotency-Key: ${idempotencyKey}`)} \\`,
-    `  -H 'Content-Type: application/json' \\`,
+    ...curlHeaders,
     `  -d ${shellQuote(json)}`,
   ].join('\n');
 
+  const nodeHeaders = headers.map(([name, value]) => `    ${literal(name)}: ${literal(value)},`);
   const node = [
     `// Node.js 18+: the global fetch, no SDK.`,
     `const response = await fetch(${literal(url)}, {`,
     `  method: 'POST',`,
     `  headers: {`,
-    `    'X-API-Key': ${literal(apiKey)},`,
-    `    'Organization-Id': ${literal(String(organizationId))},`,
-    `    // One key per logical message: a retry of the same message reuses it.`,
-    `    'Idempotency-Key': ${literal(idempotencyKey)},`,
-    `    'Content-Type': 'application/json',`,
+    ...nodeHeaders,
     `  },`,
     `  body: JSON.stringify(${indentLines(json, '  ')}),`,
     `});`,
     `console.log(response.status, await response.json());`,
   ].join('\n');
 
+  const pythonHeaders = headers.map(
+    ([name, value]) => `        ${literal(name)}: ${literal(value)},`
+  );
   const python = [
     `import json`,
     `import urllib.request`,
@@ -92,11 +98,7 @@ export function buildSnippets({
     `    data=json.dumps(body).encode("utf-8"),`,
     `    method="POST",`,
     `    headers={`,
-    `        "X-API-Key": ${literal(apiKey)},`,
-    `        "Organization-Id": ${literal(String(organizationId))},`,
-    `        # One key per logical message: a retry of the same message reuses it.`,
-    `        "Idempotency-Key": ${literal(idempotencyKey)},`,
-    `        "Content-Type": "application/json",`,
+    ...pythonHeaders,
     `    },`,
     `)`,
     `with urllib.request.urlopen(request) as response:`,
@@ -104,4 +106,59 @@ export function buildSnippets({
   ].join('\n');
 
   return { curl, node, python };
+}
+
+/**
+ * Resend-style direct email snippets: POST /v1/emails with `Authorization: Bearer`, direct
+ * `from`/`to`/`subject`/`html`, and no template or mailbox required.
+ */
+export function buildDirectSnippets({
+  apiOrigin,
+  organizationId,
+  omitOrganizationHeader = false,
+  apiKey,
+  from,
+}: DirectSnippetInput): Snippets {
+  const headers: [string, string][] = [['Authorization', `Bearer ${apiKey}`]];
+  if (!omitOrganizationHeader) {
+    headers.push(['Organization-Id', String(organizationId)]);
+  }
+  headers.push(['Content-Type', 'application/json']);
+
+  return renderHttpSnippets({
+    url: endpoint(apiOrigin),
+    headers,
+    body: {
+      from,
+      to: exampleRecipient,
+      subject: 'Welcome',
+      html: '<p>Hello from Zmail!</p>',
+    },
+  });
+}
+
+/**
+ * Template-based transactional email snippets: POST /v1/emails with `Authorization: Bearer`,
+ * template key, variables, and an idempotency key so retries never send twice.
+ */
+export function buildSnippets({
+  apiOrigin,
+  organizationId,
+  omitOrganizationHeader = false,
+  apiKey,
+  template,
+  variables,
+}: SnippetInput): Snippets {
+  const idempotencyKey = `${template}-user-42`;
+  const headers: [string, string][] = [['Authorization', `Bearer ${apiKey}`]];
+  if (!omitOrganizationHeader) {
+    headers.push(['Organization-Id', String(organizationId)]);
+  }
+  headers.push(['Idempotency-Key', idempotencyKey], ['Content-Type', 'application/json']);
+
+  return renderHttpSnippets({
+    url: endpoint(apiOrigin),
+    headers,
+    body: { template, to: exampleRecipient, variables: { ...variables } },
+  });
 }

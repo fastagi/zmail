@@ -21,7 +21,11 @@ import type {
 import { useDeveloperErrorMessage } from '@/features/developer/utils/developer-error';
 import { offersSenderDomain } from '@/features/developer/utils/developer-scope';
 import { logStatus } from '@/features/developer/utils/log-status';
-import { buildSnippets, type Snippets } from '@/features/developer/utils/snippets';
+import {
+  buildDirectSnippets,
+  buildSnippets,
+  type Snippets,
+} from '@/features/developer/utils/snippets';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import type { MailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailTemplate, useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
@@ -128,6 +132,7 @@ export function QuickStartTab({
     setCreated(null);
   }
   const [chosenTemplateId, setChosenTemplateId] = useState<number | null>(null);
+  const [snippetKind, setSnippetKind] = useState<'direct' | 'template'>('direct');
   const [sent, setSent] = useState<TransactionalMessage | null>(null);
   const [now] = useState(() => Date.now());
 
@@ -158,18 +163,30 @@ export function QuickStartTab({
   }, [template, detail.data]);
 
   const apiOrigin = useDeveloperApiOrigin();
+  const sampleKey =
+    createdHere?.plaintext && createdHere.revealed
+      ? createdHere.plaintext
+      : t('start.keyPlaceholder');
+  const omitOrganizationHeader = ownKeys[0]?.organization_id === organization.id;
+  const directFrom = `noreply@${domain ?? 'example.com'}`;
   const snippets =
     apiOrigin.status === 'ready'
-      ? buildSnippets({
-          apiOrigin: apiOrigin.origin,
-          organizationId: organization.id,
-          apiKey:
-            createdHere?.plaintext && createdHere.revealed
-              ? createdHere.plaintext
-              : t('start.keyPlaceholder'),
-          template: template?.key ?? EXAMPLE_TEMPLATE_KEY,
-          variables,
-        })
+      ? snippetKind === 'direct'
+        ? buildDirectSnippets({
+            apiOrigin: apiOrigin.origin,
+            organizationId: organization.id,
+            omitOrganizationHeader,
+            apiKey: sampleKey,
+            from: directFrom,
+          })
+        : buildSnippets({
+            apiOrigin: apiOrigin.origin,
+            organizationId: organization.id,
+            omitOrganizationHeader,
+            apiKey: sampleKey,
+            template: template?.key ?? EXAMPLE_TEMPLATE_KEY,
+            variables,
+          })
       : null;
 
   const steps = [
@@ -244,7 +261,31 @@ export function QuickStartTab({
         />
       </div>
       <div className="min-w-0 space-y-4">
-        {items.length > 1 ? (
+        <div
+          role="group"
+          aria-label={t('start.snippetMode')}
+          className="inline-flex rounded-md bg-muted p-0.5"
+        >
+          <Button
+            type="button"
+            size="sm"
+            variant={snippetKind === 'direct' ? 'secondary' : 'ghost'}
+            aria-pressed={snippetKind === 'direct'}
+            onClick={() => setSnippetKind('direct')}
+          >
+            {t('start.directMode')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={snippetKind === 'template' ? 'secondary' : 'ghost'}
+            aria-pressed={snippetKind === 'template'}
+            onClick={() => setSnippetKind('template')}
+          >
+            {t('start.templateMode')}
+          </Button>
+        </div>
+        {snippetKind === 'template' && items.length > 1 ? (
           <div className="flex items-center gap-2">
             <Label htmlFor="quick-start-template" className="text-xs text-muted-foreground">
               {t('start.template')}
@@ -263,7 +304,7 @@ export function QuickStartTab({
             </select>
           </div>
         ) : null}
-        {templates.isSuccess && items.length === 0 ? (
+        {snippetKind === 'template' && templates.isSuccess && items.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('start.noTemplate')}</p>
         ) : null}
         <CodeSamples snippets={snippets} unavailable={apiOrigin.status === 'unavailable'} />

@@ -21,6 +21,10 @@ type KeyAuthConfig struct {
 	// Default: "header:X-API-Key"
 	KeyLookup string
 
+	// KeyExtractor optionally extracts the key directly from the request,
+	// overriding KeyLookup when set.
+	KeyExtractor func(c *gin.Context) string
+
 	// Validator is a function to validate the API key
 	// Returns true if key is valid
 	Validator func(key string) bool
@@ -78,35 +82,45 @@ func KeyAuthWithConfig(cfg KeyAuthConfig) gin.HandlerFunc {
 		panic("KeyAuth middleware requires a validator function")
 	}
 
-	// Parse key lookup
-	parts := strings.SplitN(cfg.KeyLookup, ":", 2)
-	if len(parts) != 2 {
-		panic("KeyAuth KeyLookup must be in format 'source:name'")
+	var (
+		source string
+		name   string
+	)
+	if cfg.KeyExtractor == nil {
+		// Parse key lookup
+		parts := strings.SplitN(cfg.KeyLookup, ":", 2)
+		if len(parts) != 2 {
+			panic("KeyAuth KeyLookup must be in format 'source:name'")
+		}
+		source = strings.ToLower(parts[0])
+		name = parts[1]
 	}
-	source := strings.ToLower(parts[0])
-	name := parts[1]
 
 	return func(c *gin.Context) {
 		var key string
 
-		// Extract key based on source
-		switch source {
-		case "header":
-			key = c.GetHeader(name)
-			// Handle auth scheme if present
-			if cfg.AuthScheme != "" && strings.HasPrefix(key, cfg.AuthScheme+" ") {
-				key = strings.TrimPrefix(key, cfg.AuthScheme+" ")
+		if cfg.KeyExtractor != nil {
+			key = cfg.KeyExtractor(c)
+		} else {
+			// Extract key based on source
+			switch source {
+			case "header":
+				key = c.GetHeader(name)
+				// Handle auth scheme if present
+				if cfg.AuthScheme != "" && strings.HasPrefix(key, cfg.AuthScheme+" ") {
+					key = strings.TrimPrefix(key, cfg.AuthScheme+" ")
+				}
+			case "query":
+				key = c.Query(name)
+			case "cookie":
+				// Cookie may be absent; treat that as empty key (handled below).
+				key, _ = c.Cookie(name) //nolint:errcheck // missing cookie → empty key by design
+			case "form":
+				key = c.PostForm(name)
+			default:
+				response.Abort(c, http.StatusInternalServerError, "Invalid key auth configuration")
+				return
 			}
-		case "query":
-			key = c.Query(name)
-		case "cookie":
-			// Cookie may be absent; treat that as empty key (handled below).
-			key, _ = c.Cookie(name) //nolint:errcheck // missing cookie → empty key by design
-		case "form":
-			key = c.PostForm(name)
-		default:
-			response.Abort(c, http.StatusInternalServerError, "Invalid key auth configuration")
-			return
 		}
 
 		if key == "" {

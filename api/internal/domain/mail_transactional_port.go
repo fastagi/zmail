@@ -32,6 +32,16 @@ type MailTransactionalSendInput struct {
 	Variables      map[string]string
 }
 
+// MailDirectSendInput holds the parameters of one direct (template-free) transactional send.
+type MailDirectSendInput struct {
+	From           string
+	To             string
+	Subject        string
+	HTML           string
+	Text           string
+	IdempotencyKey string
+}
+
 // MailTransactionalTestInput holds the parameters of one console test send.
 type MailTransactionalTestInput struct {
 	Template  string
@@ -58,6 +68,7 @@ type MailSendLaneUsage struct {
 type MailTransactionalPort interface {
 	TransactionalEnabledPort() bool
 	SendTransactionalPort(ctx context.Context, actor MailTransactionalActor, input MailTransactionalSendInput) (*TransactionalMessage, bool, error)
+	SendDirectTransactionalPort(ctx context.Context, actor MailTransactionalActor, input MailDirectSendInput) (*TransactionalMessage, bool, error)
 	GetTransactionalPort(ctx context.Context, organizationID uint, mode APIKeyMode, id uint) (*TransactionalMessage, error)
 	ListTransactionalLogPort(ctx context.Context, organizationID uint, filter TransactionalLogFilter) (MailTransactionalLogPage, error)
 	GetTransactionalLogEntryPort(ctx context.Context, organizationID, id uint) (*TransactionalMessage, error)

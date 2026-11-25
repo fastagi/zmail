@@ -1,6 +1,8 @@
 package apikey
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -38,6 +40,7 @@ func (h *Handler) Name() string {
 func (h *Handler) RegisterMiddleware(r *router.Router) {
 	keyAuth := middleware.KeyAuthWithConfig(middleware.KeyAuthConfig{
 		KeyLookup:    "header:X-API-Key",
+		KeyExtractor: extractAPIKey,
 		ContextKey:   "apiKey",
 		ErrorMessage: "Invalid or missing API key",
 		ValidatorWithContext: func(c *gin.Context, key string) (*middleware.KeyAuthResult, error) {
@@ -67,6 +70,18 @@ func (h *Handler) RegisterMiddleware(r *router.Router) {
 
 	r.MiddlewareGroup("api_key", keyAuth)
 	r.AliasMiddleware("key", keyAuth)
+}
+
+// extractAPIKey reads the API key from X-API-Key first, falling back to Authorization: Bearer.
+func extractAPIKey(c *gin.Context) string {
+	if key := strings.TrimSpace(c.GetHeader("X-API-Key")); key != "" {
+		return key
+	}
+	auth := strings.TrimSpace(c.GetHeader("Authorization"))
+	if len(auth) > len("Bearer ") && strings.EqualFold(auth[:len("Bearer")], "Bearer") && (auth[len("Bearer")] == ' ' || auth[len("Bearer")] == '\t') {
+		return strings.TrimSpace(auth[len("Bearer"):])
+	}
+	return ""
 }
 
 // Create creates a new API key for the authenticated user.

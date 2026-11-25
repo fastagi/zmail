@@ -17,13 +17,16 @@ import (
 )
 
 type fakeTransactionalPort struct {
-	enabled bool
-	err     error
+	enabled         bool
+	err             error
+	lastSendInput   domain.MailTransactionalSendInput
+	lastDirectInput domain.MailDirectSendInput
 }
 
 func (f *fakeTransactionalPort) TransactionalEnabledPort() bool { return f.enabled }
 
 func (f *fakeTransactionalPort) SendTransactionalPort(_ context.Context, actor domain.MailTransactionalActor, input domain.MailTransactionalSendInput) (*domain.TransactionalMessage, bool, error) {
+	f.lastSendInput = input
 	if f.err != nil {
 		return nil, false, f.err
 	}
@@ -34,6 +37,23 @@ func (f *fakeTransactionalPort) SendTransactionalPort(_ context.Context, actor d
 		FromAddress:   "no-reply@example.com",
 		ToAddress:     input.To,
 		SubjectMasked: "Code ***",
+		Status:        domain.TransactionalStatusQueued,
+		CreatedAt:     time.Now().UTC(),
+	}, true, nil
+}
+
+func (f *fakeTransactionalPort) SendDirectTransactionalPort(_ context.Context, actor domain.MailTransactionalActor, input domain.MailDirectSendInput) (*domain.TransactionalMessage, bool, error) {
+	f.lastDirectInput = input
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	return &domain.TransactionalMessage{
+		ID:            79,
+		Mode:          actor.Mode,
+		FromAddress:   "noreply@kfk.im",
+		FromName:      "Keepkite",
+		ToAddress:     input.To,
+		SubjectMasked: input.Subject,
 		Status:        domain.TransactionalStatusQueued,
 		CreatedAt:     time.Now().UTC(),
 	}, true, nil
@@ -188,5 +208,91 @@ func TestTransactionalHandlerFunctionalFlow(t *testing.T) {
 	engine.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 when disabled, got %d", rec.Code)
+	}
+}
+
+func TestEmailsHandlerDirectAndTemplateModes(t *testing.T) {
+	port := &fakeTransactionalPort{enabled: true}
+	engine := newTransactionalTestRouter(t, port)
+
+	// 1. Direct send with string "to" and no Idempotency-Key -> 202 + Location /v1/emails/79
+	body, _ := json.Marshal(map[string]any{
+		"from":    "Keepkite <noreply@kfk.im>",
+		"to":      "alice@example.com",
+		"subject": "Welcome",
+		"html":    "<p>Hello!</p>",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/emails", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted || rec.Header().Get("Location") != "/v1/emails/79" {
+		t.Fatalf("POST /v1/emails direct (string to): status=%d location=%q body=%s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if port.lastDirectInput.To != "alice@example.com" || port.lastDirectInput.From != "Keepkite <noreply@kfk.im>" {
+		t.Fatalf("unexpected direct input: %+v", port.lastDirectInput)
+	}
+
+	// 2. Direct send with array "to" and explicit Idempotency-Key -> 202
+	body, _ = json.Marshal(map[string]any{
+		"from":    "noreply@kfk.im",
+		"to":      []string{"bob@example.com"},
+		"subject": "Hello",
+		"text":    "Hi Bob",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/v1/emails", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "custom-key-1")
+	rec = httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("POST /v1/emails direct (array to): status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if port.lastDirectInput.To != "bob@example.com" || port.lastDirectInput.IdempotencyKey != "custom-key-1" {
+		t.Fatalf("unexpected direct input: %+v", port.lastDirectInput)
+	}
+
+	// 3. Template mode without Idempotency-Key -> auto-generates key & delegates to SendTransactionalPort
+	body, _ = json.Marshal(map[string]any{
+		"template":  "signup-code",
+		"to":        []string{"carol@example.com"},
+		"variables": map[string]string{"code": "123456"},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/v1/emails", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted || rec.Header().Get("Location") != "/v1/emails/77" {
+		t.Fatalf("POST /v1/emails template: status=%d location=%q body=%s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	if port.lastSendInput.Template != "signup-code" || port.lastSendInput.To != "carol@example.com" || port.lastSendInput.IdempotencyKey == "" {
+		t.Fatalf("unexpected template input: %+v", port.lastSendInput)
+	}
+
+	// 4. GET /v1/emails/79 -> 200
+	rec = httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/emails/79", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/emails/79: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// 5. Missing "to" -> 422
+	body, _ = json.Marshal(map[string]any{"from": "noreply@kfk.im", "subject": "Hi", "text": "Hello"})
+	req = httptest.NewRequest(http.MethodPost, "/v1/emails", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /v1/emails missing to: expected 422, got %d", rec.Code)
+	}
+
+	// 6. Multiple recipients -> 422
+	body, _ = json.Marshal(map[string]any{"from": "noreply@kfk.im", "to": []string{"a@example.com", "b@example.com"}, "subject": "Hi", "text": "Hello"})
+	req = httptest.NewRequest(http.MethodPost, "/v1/emails", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /v1/emails multiple to: expected 422, got %d", rec.Code)
 	}
 }

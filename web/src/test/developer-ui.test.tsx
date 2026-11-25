@@ -106,16 +106,21 @@ describe('developer quick start and send log', () => {
     const { container } = renderConsole();
 
     const samples = await screen.findByLabelText('Code samples');
-    expect(samples).toHaveTextContent(`${window.location.origin}/v1/transactional-messages`);
+    expect(samples).toHaveTextContent(`${window.location.origin}/v1/emails`);
+    expect(samples).toHaveTextContent('Authorization: Bearer');
+    expect(samples).toHaveTextContent('noreply@acme.example');
     expect(container.textContent).not.toContain('api.example.com');
     expect(container.textContent).not.toContain('NEXT_PUBLIC_');
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
     await waitFor(() =>
       expect(clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining(`${window.location.origin}/v1/transactional-messages`)
+        expect.stringContaining(`${window.location.origin}/v1/emails`)
       )
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    expect(samples).toHaveTextContent('signup-code');
   });
 
   it('creating a key shows it once then only the prefix', async () => {

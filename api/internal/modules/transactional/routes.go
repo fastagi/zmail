@@ -33,5 +33,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		key.GET("/transactional-messages/:message_id", h.GetTransactional).
 			Name("transactional_messages.show").WhereNumber("message_id").
 			Middleware(apikey.RequireScopesAllowingTest(ScopeMailTransactional))
+
+		key.POST("/emails", h.SendEmail).
+			Name("emails.store").
+			Middleware(middleware.BodyLimit(maxDirectEmailBodyBytes), apikey.RequireScopesAllowingTest(ScopeMailTransactional))
+		key.GET("/emails/:message_id", h.GetTransactional).
+			Name("emails.show").WhereNumber("message_id").
+			Middleware(apikey.RequireScopesAllowingTest(ScopeMailTransactional))
 	})
 }

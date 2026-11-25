@@ -77,6 +77,22 @@ func Fingerprint(key []byte, templateKey, to string, variables map[string]string
 	return mac.Sum(nil)
 }
 
+// DirectFingerprint identifies the content of a direct (template-free) transactional send.
+func DirectFingerprint(key []byte, fromAddress, fromName, to, subject, html, text string) []byte {
+	encoded, _ := json.Marshal(struct { //nolint:errcheck // strings always encode
+		Kind        string `json:"kind"`
+		FromAddress string `json:"from_address"`
+		FromName    string `json:"from_name"`
+		To          string `json:"to"`
+		Subject     string `json:"subject"`
+		HTML        string `json:"html"`
+		Text        string `json:"text"`
+	}{"direct", fromAddress, fromName, to, subject, html, text})
+	mac := hmac.New(sha256.New, key)
+	mac.Write(encoded)
+	return mac.Sum(nil)
+}
+
 // SimulatorOutcome parses a recipient on the simulator domain.
 func SimulatorOutcome(to, simulatorDomain string) (outcome string, simulated bool, ok bool) {
 	to = strings.ToLower(strings.TrimSpace(to))

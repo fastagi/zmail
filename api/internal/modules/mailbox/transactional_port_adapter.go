@@ -28,6 +28,23 @@ func (s *service) SendTransactionalPort(ctx context.Context, actor domain.MailTr
 	})
 }
 
+func (s *service) SendDirectTransactionalPort(ctx context.Context, actor domain.MailTransactionalActor, input domain.MailDirectSendInput) (*domain.TransactionalMessage, bool, error) {
+	return s.SendDirectTransactional(ctx, TransactionalActor{
+		OrganizationID: actor.OrganizationID,
+		UserID:         actor.UserID,
+		APIKeyID:       actor.APIKeyID,
+		Mode:           actor.Mode,
+		Viewer:         actor.Viewer,
+	}, TransactionalDirectSendInput{
+		From:           input.From,
+		To:             input.To,
+		Subject:        input.Subject,
+		HTML:           input.HTML,
+		Text:           input.Text,
+		IdempotencyKey: input.IdempotencyKey,
+	})
+}
+
 func (s *service) GetTransactionalPort(ctx context.Context, organizationID uint, mode domain.APIKeyMode, id uint) (*domain.TransactionalMessage, error) {
 	return s.GetTransactional(ctx, organizationID, mode, id)
 }

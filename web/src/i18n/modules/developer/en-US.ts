@@ -54,6 +54,9 @@ const messages = {
     holderNote:
       'The key belongs to you. If you leave the organization it stops working at once, and codes your production backend sends stop going out.',
     samples: 'Code samples',
+    snippetMode: 'Send style',
+    directMode: 'Direct HTML',
+    templateMode: 'Template',
     language: 'Language',
     keyPlaceholder: 'YOUR_API_KEY',
     copySamples: 'Copy code',

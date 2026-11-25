@@ -210,6 +210,9 @@ type TransactionalService interface {
 	// SendTransactional sends one transactional message for an API key; created is false for an
 	// idempotent replay.
 	SendTransactional(ctx context.Context, actor TransactionalActor, input TransactionalSendInput) (message *domain.TransactionalMessage, created bool, err error)
+	// SendDirectTransactional sends one direct (template-free) transactional message for an API key;
+	// created is false for an idempotent replay.
+	SendDirectTransactional(ctx context.Context, actor TransactionalActor, input TransactionalDirectSendInput) (message *domain.TransactionalMessage, created bool, err error)
 	// GetTransactional reads a transactional message of the organization and mode.
 	GetTransactional(ctx context.Context, organizationID uint, mode domain.APIKeyMode, id uint) (*domain.TransactionalMessage, error)
 	// SendTransactionalTest sends a transactional template to the caller's own account address.
