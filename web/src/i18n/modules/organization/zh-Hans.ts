@@ -146,6 +146,24 @@ const messages = {
   },
   invitationDeveloper: '开发者',
   invitationDeveloperHint: '加入后可用组织默认发件域名接入系统（API 密钥、事务邮件、Webhook）。',
+  invitationMailbox: {
+    label: '指定企业邮箱',
+    modeNone: '暂不指定',
+    modeExisting: '分配已有邮箱',
+    selectLabel: '企业邮箱',
+    selectPlaceholder: '选择要分配的邮箱',
+    loading: '正在加载邮箱列表…',
+    empty: '暂无可分配的共享企业邮箱。',
+    required: '请选择要分配的企业邮箱',
+    permissionLabel: '邮箱权限',
+    permissions: {
+      send: '收发邮件',
+      manage: '管理邮箱',
+      view: '仅查看',
+    },
+    autoGrantHint: '同事接受邀请后将自动获得 {address} 的{permission}权限。',
+    assignFailed: '邀请已创建，但分配 {address} 失败。你可以稍后在邮箱成员设置中手动分配。',
+  },
   developerGrant: {
     title: '{member} 的开发者授权',
     description:

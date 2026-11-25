@@ -15,6 +15,7 @@ import type {
   mailboxAccessSchema,
   mailboxMemberInputSchema,
   mailboxMemberSchema,
+  mailboxPendingMemberSchema,
   mailboxPermissionSchema,
   mailboxSealedDeletionSchema,
   mailboxTypeSchema,
@@ -111,6 +112,7 @@ export type MailboxType = Infer<typeof mailboxTypeSchema>;
 export type MailboxPermission = Infer<typeof mailboxPermissionSchema>;
 export type MailboxAccess = Infer<typeof mailboxAccessSchema>;
 export type MailboxMember = Infer<typeof mailboxMemberSchema>;
+export type MailboxPendingMember = Infer<typeof mailboxPendingMemberSchema>;
 export type MailboxMemberInput = Infer<typeof mailboxMemberInputSchema>;
 export type MailboxAccessEventType = Infer<typeof mailboxAccessEventTypeSchema>;
 export type MailboxAccessEvent = Infer<typeof mailboxAccessEventSchema>;

@@ -101,6 +101,52 @@ export async function setMailboxMemberRoute(
   );
 }
 
+/** Queues a shared-mailbox member grant for an invited email; owners and admins only. */
+export async function setPendingMailboxMemberRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const body = await jsonObject(request, maxAccessBodyBytes);
+  if (!body.ok) return body.response;
+  const { email, permission } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (!boundedString(email, MAIL_ADDRESS_MAX_LENGTH)) {
+    errors.email = ['The email field is required'];
+  }
+  if (!boundedString(permission, 32)) {
+    errors.permission = ['The permission field is required'];
+  }
+  if (Object.keys(errors).length > 0) return validationFailed(errors);
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${mailboxId.value}/pending-members`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { email, permission },
+      fieldMap: { email: 'email', permission: 'permission' },
+    });
+  }
+  const now = new Date().toISOString();
+  return success(
+    {
+      id: 1,
+      mailbox_id: mailboxId.value,
+      email: (email as string).trim().toLowerCase(),
+      permission,
+      granted_by: target.context.user_id,
+      created_at: now,
+      updated_at: now,
+    },
+    201
+  );
+}
+
 export async function removeMailboxMemberRoute(
   request: Request,
   rawMailboxId: string,

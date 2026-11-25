@@ -266,6 +266,6 @@ func (s *service) MemberJoined(ctx context.Context, event domain.OrganizationMem
 				return err
 			}
 		}
-		return s.claimOnJoin(tx, event.OrganizationID, event.UserID)
+		return s.claimOnJoin(tx, event.OrganizationID, event.UserID, event.MembershipID)
 	})
 }

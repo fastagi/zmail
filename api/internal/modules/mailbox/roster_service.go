@@ -399,9 +399,10 @@ func (s *service) claimReserved(ctx context.Context, organizationID, userID uint
 }
 
 // claimOnJoin gives a joining member the mailboxes a roster import reserved for their account
-// email. It runs inside the join handler's transaction.
-func (s *service) claimOnJoin(ctx context.Context, organizationID, userID uint) error {
-	if s.roster == nil || s.accounts == nil {
+// email and any shared-mailbox grants queued for that email. It runs inside the join handler's
+// transaction.
+func (s *service) claimOnJoin(ctx context.Context, organizationID, userID, membershipID uint) error {
+	if (s.roster == nil && s.pendingMemberStore() == nil) || s.accounts == nil {
 		return nil
 	}
 	account, err := s.accounts.FindByID(ctx, userID)
@@ -411,16 +412,19 @@ func (s *service) claimOnJoin(ctx context.Context, organizationID, userID uint) 
 	if account == nil || account.Email == "" {
 		return nil
 	}
-	claimed, err := s.roster.ClaimReservedMailboxes(ctx, organizationID, userID, strings.ToLower(strings.TrimSpace(account.Email)))
-	if err != nil {
-		return err
-	}
-	for _, mailbox := range claimed {
-		if err := s.recordAccess(ctx, mailbox, domain.MailboxAccessOwnerAssigned, 0, userID, map[string]any{}); err != nil {
+	email := strings.ToLower(strings.TrimSpace(account.Email))
+	if s.roster != nil {
+		claimed, err := s.roster.ClaimReservedMailboxes(ctx, organizationID, userID, email)
+		if err != nil {
 			return err
 		}
+		for _, mailbox := range claimed {
+			if err := s.recordAccess(ctx, mailbox, domain.MailboxAccessOwnerAssigned, 0, userID, map[string]any{}); err != nil {
+				return err
+			}
+		}
 	}
-	return nil
+	return s.claimPendingMembers(ctx, organizationID, userID, membershipID, email)
 }
 
 // rosterMembers looks up every valid row email among current members in one call.

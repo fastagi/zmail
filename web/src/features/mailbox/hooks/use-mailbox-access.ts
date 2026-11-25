@@ -84,6 +84,21 @@ export function useSetMailboxMember(organizationId: number, mailboxId: number) {
   );
 }
 
+export function useSetPendingMailboxMember(organizationId: number) {
+  return useMutation({
+    mutationFn: ({
+      mailboxId,
+      email,
+      permission,
+    }: {
+      mailboxId: number;
+      email: string;
+      permission: MailboxPermission;
+    }) => mailboxService.setPendingMember(organizationId, mailboxId, email, permission),
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
 export function useRemoveMailboxMember(organizationId: number, mailboxId: number) {
   return useAccessMutation(organizationId, mailboxId, (userId: number) =>
     mailboxService.removeMember(organizationId, mailboxId, userId)

@@ -59,6 +59,21 @@ const state = vi.hoisted(() => ({
 }));
 
 const toastError = vi.hoisted(() => vi.fn());
+const mailboxState = vi.hoisted(() => ({
+  mailboxes: {
+    data: [] as unknown[],
+    isPending: false,
+  },
+  setPendingMember: vi.fn(),
+}));
+vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
+  useMailboxes: () => mailboxState.mailboxes,
+}));
+vi.mock('@/features/mailbox/services/mailbox-service', () => ({
+  mailboxService: {
+    setPendingMember: (...args: unknown[]) => mailboxState.setPendingMember(...args),
+  },
+}));
 vi.mock('sonner', async (importOriginal) => {
   const original = await importOriginal<typeof import('sonner')>();
   return {
@@ -125,6 +140,17 @@ describe('organization browser workflow', () => {
     state.update.isPending = false;
     state.update.mutate.mockReset();
     state.update.reset.mockReset();
+    mailboxState.mailboxes.data = [];
+    mailboxState.mailboxes.isPending = false;
+    mailboxState.setPendingMember.mockReset().mockResolvedValue({
+      id: 1,
+      mailbox_id: 11,
+      email: 'colleague@example.com',
+      permission: 'send',
+      granted_by: 17,
+      created_at: '2026-07-15T10:00:00Z',
+      updated_at: '2026-07-15T10:00:00Z',
+    });
     for (const mutation of [
       state.accept,
       state.invite,
@@ -593,6 +619,74 @@ describe('organization browser workflow', () => {
       { email: 'dev@example.com', role: 'member', developer: true },
       expect.any(Object)
     );
+    expect(mailboxState.setPendingMember).not.toHaveBeenCalled();
+  });
+
+  it('assigns an existing enterprise mailbox when inviting a colleague', async () => {
+    state.context.data = organizationContext('owner');
+    state.invitations.data = { items: [], meta: { total: 0 } };
+    mailboxState.mailboxes.data = [
+      {
+        id: 11,
+        address: 'yuxuan@zgi.ai',
+        display_name: 'Yuxuan',
+        type: 'shared',
+        access: {
+          view: true,
+          send: true,
+          manage_members: true,
+          administer: true,
+          see_history: true,
+          organize: true,
+        },
+      },
+    ];
+    state.invite.mutate.mockImplementation(
+      (_input: unknown, options: { onSuccess: (value: unknown) => void }) =>
+        options.onSuccess({
+          invitation: pendingInvitation(81, 'colleague@example.com'),
+          email_send_status: 'accepted_by_provider',
+          invitation_url: 'https://app.example.com/invite#oinv_xyz',
+        })
+    );
+
+    renderWithMessages(<OrganizationOverview organizationId={42} />);
+    activateTab('Invitations');
+    fireEvent.click(screen.getByRole('button', { name: 'Invite member' }));
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'colleague@example.com' },
+    });
+
+    // Switch mailbox assignment mode to "Assign existing mailbox"
+    fireEvent.click(screen.getByRole('combobox', { name: 'Assign enterprise mailbox' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Assign existing mailbox' }));
+
+    // Choose yuxuan@zgi.ai
+    fireEvent.click(screen.getByRole('combobox', { name: 'Enterprise mailbox' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Yuxuan (yuxuan@zgi.ai)' }));
+
+    expect(
+      screen.getByText(
+        'After accepting the invitation, they will automatically receive Send & receive access to yuxuan@zgi.ai.'
+      )
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    await waitFor(() =>
+      expect(mailboxState.setPendingMember).toHaveBeenCalledWith(
+        42,
+        11,
+        'colleague@example.com',
+        'send'
+      )
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText(
+        'After accepting the invitation, they will automatically receive Send & receive access to yuxuan@zgi.ai.'
+      )
+    ).toBeInTheDocument();
   });
 
   describe('one-time invitation link (#195)', () => {

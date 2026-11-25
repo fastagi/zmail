@@ -27,6 +27,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
+import { mailboxService } from '@/features/mailbox/services/mailbox-service';
+import type { Mailbox, MailboxPermission } from '@/features/mailbox/types';
 import { InvitationLinkPanel } from '@/features/organization/components/invitation-link-panel';
 import { useCreateOrganizationInvitation } from '@/features/organization/hooks/use-organizations';
 import { createOrganizationInvitationSchema } from '@/features/organization/schemas';
@@ -40,6 +43,8 @@ import {
 } from '@/features/organization/utils/organization-error';
 import { useT } from '@/i18n';
 
+type MailboxAssignmentMode = 'none' | 'existing';
+
 export function CreateOrganizationInvitationDialog({
   organizationId,
 }: {
@@ -52,14 +57,24 @@ export function CreateOrganizationInvitationDialog({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrganizationInvitationRole>('member');
   const [developer, setDeveloper] = useState(false);
+  const [mailboxMode, setMailboxMode] = useState<MailboxAssignmentMode>('none');
+  const [selectedMailbox, setSelectedMailbox] = useState<SelectedMailbox>();
+  const [mailboxPermission, setMailboxPermission] = useState<MailboxPermission>('send');
+  const [assigningMailbox, setAssigningMailbox] = useState(false);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   // The one-time link lives only here, never in the query cache, and is dropped on close.
   const [issued, setIssued] = useState<IssuedInvitationLink>();
+
+  const busy = mutation.isPending || assigningMailbox;
 
   const reset = () => {
     setEmail('');
     setRole('member');
     setDeveloper(false);
+    setMailboxMode('none');
+    setSelectedMailbox(undefined);
+    setMailboxPermission('send');
+    setAssigningMailbox(false);
     setClientErrors({});
     setIssued(undefined);
     mutation.reset();
@@ -73,25 +88,60 @@ export function CreateOrganizationInvitationDialog({
       // Admins have every feature; only a member invitation carries developer access.
       ...(role === 'member' && developer ? { developer: true } : {}),
     });
+    const nextErrors: Record<string, string> = {};
     if (!parsed.success) {
       const invalidFields = new Set(
         parsed.error.issues.map((issue) => issue.path[0])
       );
-      setClientErrors({
-        ...(invalidFields.has('email') ? { email: t('emailInvalid') } : {}),
-      });
+      if (invalidFields.has('email')) nextErrors.email = t('emailInvalid');
+    }
+    if (mailboxMode === 'existing' && !selectedMailbox) {
+      nextErrors.mailbox = t('invitationMailbox.required');
+    }
+    if (Object.keys(nextErrors).length > 0 || !parsed.success) {
+      setClientErrors(nextErrors);
       return;
     }
 
+    const targetMailbox = mailboxMode === 'existing' ? selectedMailbox : undefined;
+    const targetPermission = mailboxPermission;
+
     setClientErrors({});
     mutation.mutate(parsed.data, {
-      onSuccess: ({ invitation, email_send_status: status, invitation_url: url }) => {
+      onSuccess: async ({ invitation, email_send_status: status, invitation_url: url }) => {
+        let assignedMailbox: AssignedMailboxSummary | undefined;
+        if (targetMailbox) {
+          setAssigningMailbox(true);
+          try {
+            await mailboxService.setPendingMember(
+              organizationId,
+              targetMailbox.id,
+              invitation.email,
+              targetPermission
+            );
+            assignedMailbox = {
+              address: targetMailbox.address,
+              permission: targetPermission,
+            };
+          } catch {
+            toast.warning(
+              t('invitationMailbox.assignFailed', { address: targetMailbox.address })
+            );
+          } finally {
+            setAssigningMailbox(false);
+          }
+        }
         if (url) {
-          setIssued({ email: invitation.email, url, status });
+          setIssued({ email: invitation.email, url, status, assignedMailbox });
           return;
         }
         toast.success(t('invitationCreated'), {
-          description: t(`emailSendStatus.${status}`),
+          description: assignedMailbox
+            ? t('invitationMailbox.autoGrantHint', {
+                address: assignedMailbox.address,
+                permission: t(`invitationMailbox.permissions.${assignedMailbox.permission}`),
+              })
+            : t(`emailSendStatus.${status}`),
         });
         setOpen(false);
         reset();
@@ -129,6 +179,16 @@ export function CreateOrganizationInvitationDialog({
               <p className="text-sm text-muted-foreground">
                 {t(`emailSendStatus.${issued.status}`)}
               </p>
+              {issued.assignedMailbox ? (
+                <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-foreground">
+                  {t('invitationMailbox.autoGrantHint', {
+                    address: issued.assignedMailbox.address,
+                    permission: t(
+                      `invitationMailbox.permissions.${issued.assignedMailbox.permission}`
+                    ),
+                  })}
+                </p>
+              ) : null}
               <InvitationLinkPanel email={issued.email} url={issued.url} />
             </DialogBody>
             <DialogFooter className="pt-5">
@@ -143,7 +203,7 @@ export function CreateOrganizationInvitationDialog({
               <DialogTitle>{t('invite')}</DialogTitle>
               <DialogDescription>{t('inviteDescription')}</DialogDescription>
             </DialogHeader>
-            <form onSubmit={handleSubmit} aria-busy={mutation.isPending}>
+            <form onSubmit={handleSubmit} aria-busy={busy}>
               <DialogBody className="space-y-4 py-1">
                 {mutation.error ? (
                   <Alert variant="destructive">
@@ -165,11 +225,11 @@ export function CreateOrganizationInvitationDialog({
                     maxLength={100}
                     value={email}
                     errorText={emailError}
-                    disabled={mutation.isPending}
+                    disabled={busy}
                     placeholder={t('emailPlaceholder')}
                     onChange={(event) => {
                       setEmail(event.target.value);
-                      setClientErrors({});
+                      setClientErrors((prev) => ({ ...prev, email: '' }));
                       mutation.reset();
                     }}
                   />
@@ -180,7 +240,7 @@ export function CreateOrganizationInvitationDialog({
                   </Label>
                   <Select
                     value={role}
-                    disabled={mutation.isPending}
+                    disabled={busy}
                     onValueChange={(value) => {
                       setRole(value as OrganizationInvitationRole);
                       mutation.reset();
@@ -195,12 +255,59 @@ export function CreateOrganizationInvitationDialog({
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="organization-invitation-mailbox-mode">
+                      {t('invitationMailbox.label')}
+                    </Label>
+                    <Select
+                      value={mailboxMode}
+                      disabled={busy}
+                      onValueChange={(value) => {
+                        const next = value as MailboxAssignmentMode;
+                        setMailboxMode(next);
+                        if (next === 'none') setSelectedMailbox(undefined);
+                        setClientErrors((prev) => {
+                          const { mailbox: _removed, ...rest } = prev;
+                          return rest;
+                        });
+                      }}
+                    >
+                      <SelectTrigger id="organization-invitation-mailbox-mode" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">{t('invitationMailbox.modeNone')}</SelectItem>
+                        <SelectItem value="existing">
+                          {t('invitationMailbox.modeExisting')}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {mailboxMode === 'existing' ? (
+                    <InviteExistingMailboxFields
+                      organizationId={organizationId}
+                      disabled={busy}
+                      selectedMailbox={selectedMailbox}
+                      permission={mailboxPermission}
+                      error={clientErrors.mailbox}
+                      onSelectMailbox={(mailbox) => {
+                        setSelectedMailbox(mailbox);
+                        setClientErrors((prev) => {
+                          const { mailbox: _removed, ...rest } = prev;
+                          return rest;
+                        });
+                      }}
+                      onChangePermission={setMailboxPermission}
+                    />
+                  ) : null}
+                </div>
                 {role === 'member' ? (
                   <div className="flex items-start gap-2">
                     <Checkbox
                       id="organization-invitation-developer"
                       checked={developer}
-                      disabled={mutation.isPending}
+                      disabled={busy}
                       onCheckedChange={checked => setDeveloper(checked === true)}
                     />
                     <div className="grid gap-1">
@@ -216,11 +323,11 @@ export function CreateOrganizationInvitationDialog({
               </DialogBody>
               <DialogFooter className="pt-5">
                 <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={mutation.isPending}>
+                  <Button type="button" variant="outline" disabled={busy}>
                     {common('cancel')}
                   </Button>
                 </DialogClose>
-                <Button type="submit" loading={mutation.isPending}>
+                <Button type="submit" loading={busy}>
                   {t('sendInvitation')}
                 </Button>
               </DialogFooter>
@@ -232,8 +339,113 @@ export function CreateOrganizationInvitationDialog({
   );
 }
 
+function InviteExistingMailboxFields({
+  organizationId,
+  disabled,
+  selectedMailbox,
+  permission,
+  error,
+  onSelectMailbox,
+  onChangePermission,
+}: {
+  organizationId: number;
+  disabled: boolean;
+  selectedMailbox: SelectedMailbox | undefined;
+  permission: MailboxPermission;
+  error: string | undefined;
+  onSelectMailbox: (mailbox: SelectedMailbox) => void;
+  onChangePermission: (permission: MailboxPermission) => void;
+}) {
+  const t = useT('organization');
+  const mailboxesQuery = useMailboxes(organizationId);
+  const assignable = (mailboxesQuery.data ?? []).filter(
+    (mailbox): mailbox is Mailbox => mailbox.type === 'shared' && mailbox.access.manage_members
+  );
+
+  if (mailboxesQuery.isPending) {
+    return (
+      <p className="text-xs text-muted-foreground">{t('invitationMailbox.loading')}</p>
+    );
+  }
+  if (assignable.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">{t('invitationMailbox.empty')}</p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label htmlFor="organization-invitation-mailbox-select">
+          {t('invitationMailbox.selectLabel')}
+        </Label>
+        <Select
+          value={selectedMailbox ? String(selectedMailbox.id) : ''}
+          disabled={disabled}
+          onValueChange={(value) => {
+            const found = assignable.find((item) => String(item.id) === value);
+            if (found) onSelectMailbox({ id: found.id, address: found.address });
+          }}
+        >
+          <SelectTrigger id="organization-invitation-mailbox-select" className="w-full">
+            <SelectValue placeholder={t('invitationMailbox.selectPlaceholder')} />
+          </SelectTrigger>
+          <SelectContent>
+            {assignable.map((mailbox) => (
+              <SelectItem key={mailbox.id} value={String(mailbox.id)}>
+                {mailbox.display_name
+                  ? `${mailbox.display_name} (${mailbox.address})`
+                  : mailbox.address}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="organization-invitation-mailbox-permission">
+          {t('invitationMailbox.permissionLabel')}
+        </Label>
+        <Select
+          value={permission}
+          disabled={disabled}
+          onValueChange={(value) => onChangePermission(value as MailboxPermission)}
+        >
+          <SelectTrigger id="organization-invitation-mailbox-permission" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="send">{t('invitationMailbox.permissions.send')}</SelectItem>
+            <SelectItem value="manage">{t('invitationMailbox.permissions.manage')}</SelectItem>
+            <SelectItem value="view">{t('invitationMailbox.permissions.view')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {selectedMailbox ? (
+        <p className="text-xs text-muted-foreground">
+          {t('invitationMailbox.autoGrantHint', {
+            address: selectedMailbox.address,
+            permission: t(`invitationMailbox.permissions.${permission}`),
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+interface SelectedMailbox {
+  id: number;
+  address: string;
+}
+
+interface AssignedMailboxSummary {
+  address: string;
+  permission: MailboxPermission;
+}
+
 interface IssuedInvitationLink {
   email: string;
   url: string;
   status: InvitationEmailSendStatus;
+  assignedMailbox?: AssignedMailboxSummary;
 }

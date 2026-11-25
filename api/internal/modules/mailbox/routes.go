@@ -128,6 +128,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 
 		auth.GET("/mailboxes/:mailbox_id/members", h.ListMailboxMembers).
 			Name("mailboxes.members.index").WhereNumber("mailbox_id")
+		auth.POST("/mailboxes/:mailbox_id/pending-members", h.SetPendingMailboxMember).
+			Name("mailboxes.pending_members.store").WhereNumber("mailbox_id")
 		auth.PUT("/mailboxes/:mailbox_id/members/:user_id", h.SetMailboxMember).
 			Name("mailboxes.members.update").WhereNumber("mailbox_id").WhereNumber("user_id")
 		auth.DELETE("/mailboxes/:mailbox_id/members/:user_id", h.RemoveMailboxMember).

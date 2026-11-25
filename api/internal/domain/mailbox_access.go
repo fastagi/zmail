@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // MaxMailboxMembers bounds the members of one shared mailbox.
 const MaxMailboxMembers = 100
@@ -202,4 +205,26 @@ type MailboxAccessEvent struct {
 	// Detail holds machine-readable values such as membership_id and permission.
 	Detail    map[string]any
 	CreatedAt time.Time
+}
+
+// MailboxPendingMember is a shared-mailbox member grant queued for an invited email until that
+// person joins the organization.
+type MailboxPendingMember struct {
+	ID             uint
+	OrganizationID uint
+	MailboxID      uint
+	Email          string
+	Permission     MailboxPermission
+	GrantedBy      uint
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// MailboxPendingMemberRepository stores pending shared-mailbox member grants for invited emails.
+type MailboxPendingMemberRepository interface {
+	// UpsertPendingMailboxMember creates or updates the pending grant for (mailbox_id, email).
+	UpsertPendingMailboxMember(ctx context.Context, pending *MailboxPendingMember) error
+	// ClaimPendingMailboxMembers atomically removes and returns all pending grants matching the
+	// organization and lowercased email.
+	ClaimPendingMailboxMembers(ctx context.Context, organizationID uint, email string) ([]*MailboxPendingMember, error)
 }

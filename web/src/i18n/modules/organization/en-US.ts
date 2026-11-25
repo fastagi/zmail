@@ -152,6 +152,26 @@ const messages = {
   invitationDeveloper: 'Developer',
   invitationDeveloperHint:
     'After joining, they can connect systems with the organization’s default sending domain (API keys, transactional mail, webhooks).',
+  invitationMailbox: {
+    label: 'Assign enterprise mailbox',
+    modeNone: 'Do not assign',
+    modeExisting: 'Assign existing mailbox',
+    selectLabel: 'Enterprise mailbox',
+    selectPlaceholder: 'Select a mailbox',
+    loading: 'Loading mailboxes…',
+    empty: 'No shared enterprise mailboxes available to assign.',
+    required: 'Choose a mailbox to assign',
+    permissionLabel: 'Mailbox permission',
+    permissions: {
+      send: 'Send & receive',
+      manage: 'Manage mailbox',
+      view: 'View only',
+    },
+    autoGrantHint:
+      'After accepting the invitation, they will automatically receive {permission} access to {address}.',
+    assignFailed:
+      'The invitation was created, but assigning {address} failed. You can assign it from Mailbox settings later.',
+  },
   developerGrant: {
     title: 'Developer access for {member}',
     description:

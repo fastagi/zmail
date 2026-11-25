@@ -96,6 +96,7 @@ export {
 export {
   listMailboxMembersRoute,
   setMailboxMemberRoute,
+  setPendingMailboxMemberRoute,
   removeMailboxMemberRoute,
   listMailboxAccessEventsRoute,
   handOverMailboxRoute,

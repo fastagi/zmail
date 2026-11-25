@@ -7,6 +7,7 @@ import {
   mailboxListSchema,
   mailboxMemberListSchema,
   mailboxMemberSchema,
+  mailboxPendingMemberSchema,
   mailboxSchema,
   mailboxSealedDeletionSchema,
   mailRoleListSchema,
@@ -18,6 +19,7 @@ import type {
   MailboxAccessEventPage,
   MailboxListScope,
   MailboxMember,
+  MailboxPendingMember,
   MailboxPermission,
   MailboxSealedDeletion,
   MailRole,
@@ -103,6 +105,26 @@ export const mailboxManagementService = {
       )
     );
     if (!parsed.success || parsed.data.user_id !== userId) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Queues a shared-mailbox member grant for an invited email until they join. */
+  async setPendingMember(
+    organizationId: number,
+    mailboxId: number,
+    email: string,
+    permission: MailboxPermission
+  ): Promise<MailboxPendingMember> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    const parsed = mailboxPendingMemberSchema.safeParse(
+      await request.post<unknown, { email: string; permission: MailboxPermission }>(
+        `/mailboxes/${mailboxId}/pending-members`,
+        { email, permission },
+        { headers }
+      )
+    );
+    if (!parsed.success || parsed.data.mailbox_id !== mailboxId) throw invalidResponse();
     return parsed.data;
   },
 

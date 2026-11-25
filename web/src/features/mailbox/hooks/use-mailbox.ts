@@ -102,12 +102,16 @@ export function invalidateMail(
 /** `live` keeps the list (and its unread counts) fresh while a mailbox is open. */
 export function useMailboxes(
   organizationId: number,
-  { live = false, scope }: { live?: boolean; scope?: MailboxListScope } = {}
+  {
+    live = false,
+    scope,
+    enabled = true,
+  }: { live?: boolean; scope?: MailboxListScope; enabled?: boolean } = {}
 ) {
   return useQuery({
     queryKey: mailboxKeys.list(organizationId, scope),
     queryFn: () => mailboxService.list(organizationId, scope),
-    enabled: validId(organizationId),
+    enabled: enabled && validId(organizationId),
     staleTime: 15_000,
     ...(live ? liveRefresh : {}),
     meta: LOCAL_ERROR_HANDLING_META,

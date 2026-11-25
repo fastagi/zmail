@@ -38,6 +38,7 @@ type CoreService interface {
 	SendFromAddress(ctx context.Context, viewer domain.OrganizationContext, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
 	ListMailboxMembers(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) ([]*domain.MailboxMember, error)
 	SetMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID, userID uint, permission domain.MailboxPermission) (*domain.MailboxMember, error)
+	SetPendingMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, email string, permission domain.MailboxPermission) (*domain.MailboxPendingMember, error)
 	RemoveMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID, userID uint) error
 	ListMailboxAccessEvents(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, page, size int) ([]*domain.MailboxAccessEvent, int64, error)
 	// HandOverMailbox makes a personal mailbox shared with a successor and seals its history.

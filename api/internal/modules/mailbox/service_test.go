@@ -122,8 +122,10 @@ type fakeRepository struct {
 	sendPolicies          map[uint]domain.OrganizationSendPolicy
 	mailboxes             map[uint]*domain.Mailbox
 	// members is keyed by mailbox id and membership id.
-	members      map[[2]uint]*domain.MailboxMember
-	accessEvents []*domain.MailboxAccessEvent
+	members             map[[2]uint]*domain.MailboxMember
+	pendingMembers      []*domain.MailboxPendingMember
+	nextPendingMemberID uint
+	accessEvents        []*domain.MailboxAccessEvent
 	// reads is keyed by membership id and message id.
 	reads    map[[2]uint]time.Time
 	messages map[uint]*domain.MailMessage

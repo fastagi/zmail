@@ -168,6 +168,16 @@ export const mailboxMemberSchema = strictObject({
 });
 export const mailboxMemberListSchema = array(mailboxMemberSchema);
 
+export const mailboxPendingMemberSchema = strictObject({
+  id: safeIdSchema,
+  mailbox_id: safeIdSchema,
+  email: string(),
+  permission: mailboxPermissionSchema,
+  granted_by: safeIdSchema,
+  created_at: timestampSchema,
+  updated_at: timestampSchema,
+});
+
 export const mailboxAccessEventTypeSchema = union([
   literal('created'),
   literal('member_set'),
