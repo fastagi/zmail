@@ -12,8 +12,16 @@ import (
 // mailboxes, and only the mailboxes the user's access allows. The inbound route is authenticated by the
 // mail edge's HMAC signature instead of a session.
 func (h *Handler) RegisterRoutes(r *router.Router) {
+	// Self-serve public mailbox discovery runs before an organization is selected.
+	r.Group("", func(session *router.Router) {
+		session.WithMiddleware("auth")
+		session.GET("/public-mailbox/options", h.GetPublicMailboxOptions).Name("public_mailbox.options.show")
+		session.GET("/public-mailbox/availability", h.CheckPublicMailboxAvailability).Name("public_mailbox.availability.show")
+	})
+
 	r.Group("", func(auth *router.Router) {
 		auth.WithMiddleware("auth", "organization_context")
+		auth.POST("/public-mailbox/claim", h.ClaimPublicMailbox).Name("public_mailbox.claim.store")
 		// A member uses broadcasts, contacts, and templates only with the matching grant from an
 		// owner or admin. Composing a broadcast reads templates and list names, so that grant
 		// reads them too; a template read also serves the developer pages an API key grant opens.

@@ -231,9 +231,8 @@ func (s *service) authorizeDirectSender(ctx context.Context, actor Transactional
 		return err
 	}
 	restriction := domain.APIKeyRestrictionFromContext(ctx)
-	sharedDomain := strings.ToLower(strings.TrimSpace(s.settings.Domain))
 	if (restriction.OrganizationID > 0 || restriction.SendingDomains != nil) &&
-		sharedDomain != "" && addressDomain(fromAddress) == sharedDomain {
+		s.isSharedDomain(addressDomain(fromAddress)) {
 		return domain.ErrAPIKeyDomainNotAllowed
 	}
 	return s.requireTemplateSender(ctx, actor.OrganizationID, fromAddress)

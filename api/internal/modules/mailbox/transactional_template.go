@@ -86,7 +86,7 @@ func validateTransactionalTemplate(template *domain.MailTemplate, parsed *parsed
 // ErrMailDomainNotVerified.
 func (s *service) requireTemplateSender(ctx context.Context, organizationID uint, address string) error {
 	name := addressDomain(address)
-	if s.settings.Provider == config.MailboxProviderLog && name == s.settings.Domain {
+	if s.settings.Provider == config.MailboxProviderLog && s.isSharedDomain(name) {
 		return nil
 	}
 	if s.domains == nil {

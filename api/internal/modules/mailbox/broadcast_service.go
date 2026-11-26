@@ -187,8 +187,12 @@ func (s *service) buildBroadcast(ctx context.Context, viewer domain.Organization
 	if input.MailboxID == 0 || input.TemplateID == 0 || input.ListID == 0 {
 		return nil, fmt.Errorf("%w: mailbox_id, template_id, and list_id are required", ErrMailBroadcastInvalid)
 	}
-	if _, err := s.authorizeMailbox(ctx, viewer, input.MailboxID, canSend); err != nil {
+	mailbox, err := s.authorizeMailbox(ctx, viewer, input.MailboxID, canSend)
+	if err != nil {
 		return nil, err
+	}
+	if s.enforcePublicDomainGuardrails(mailbox) {
+		return nil, fmt.Errorf("%w: broadcasts require a verified custom domain", ErrMailDomainNotVerified)
 	}
 	template, err := s.templates.FindTemplate(ctx, organizationID, input.TemplateID)
 	if err != nil {
@@ -232,6 +236,9 @@ func (s *service) SendBroadcast(ctx context.Context, viewer domain.OrganizationC
 	broadcast, err := s.authorizeBroadcast(ctx, viewer, id, canSend)
 	if err != nil {
 		return nil, err
+	}
+	if sender, lookupErr := s.repo.FindMailbox(ctx, organizationID, broadcast.MailboxID); lookupErr == nil && s.enforcePublicDomainGuardrails(sender) {
+		return nil, fmt.Errorf("%w: broadcasts require a verified custom domain", ErrMailDomainNotVerified)
 	}
 	if broadcast.Status != domain.MailBroadcastDraft {
 		return nil, ErrMailBroadcastNotEditable
@@ -354,6 +361,9 @@ func (s *service) ResumeBroadcast(ctx context.Context, viewer domain.Organizatio
 	broadcast, err := s.authorizeBroadcast(ctx, viewer, id, canSend)
 	if err != nil {
 		return nil, err
+	}
+	if sender, lookupErr := s.repo.FindMailbox(ctx, organizationID, broadcast.MailboxID); lookupErr == nil && s.enforcePublicDomainGuardrails(sender) {
+		return nil, fmt.Errorf("%w: broadcasts require a verified custom domain", ErrMailDomainNotVerified)
 	}
 	if broadcast.Status != domain.MailBroadcastPaused {
 		return nil, ErrMailBroadcastNotEditable

@@ -344,7 +344,7 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 // exists either way.
 func (s *service) welcomeMailboxOwner(ctx context.Context, viewer domain.OrganizationContext, plan *mailboxPlan, mailbox *domain.Mailbox) {
 	if plan.owner == nil || plan.owner.UserID == viewer.UserID || plan.connected == nil || s.accounts == nil ||
-		mailbox.Type != domain.MailboxTypePersonal || addressDomain(mailbox.Address) == s.settings.Domain {
+		mailbox.Type != domain.MailboxTypePersonal || s.isSharedDomain(addressDomain(mailbox.Address)) {
 		return
 	}
 	account, err := s.accounts.FindByID(ctx, plan.owner.UserID)
@@ -385,7 +385,7 @@ func (s *service) planMailbox(
 	if err != nil {
 		return nil, err
 	}
-	if err = checkReservedLocalPart(localPart, addressDomain, s.settings.Domain); err != nil {
+	if err = checkReservedLocalPart(localPart, addressDomain, s.sharedDomains()...); err != nil {
 		return nil, err
 	}
 	mailbox := &domain.Mailbox{

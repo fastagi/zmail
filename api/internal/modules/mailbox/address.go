@@ -3,6 +3,7 @@ package mailbox
 import (
 	"net/mail"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -19,6 +20,31 @@ var reservedLocalParts = map[string]struct{}{
 	"support": {}, "webmaster": {},
 }
 
+// publicReservedLocalParts are additional brand, official, system, and high-risk handles blocked
+// for self-serve public mailbox claims (unioned with reservedLocalParts).
+var publicReservedLocalParts = map[string]struct{}{
+	"zmail": {}, "official": {}, "staff": {}, "team": {}, "system": {}, "billing": {},
+	"finance": {}, "help": {}, "info": {}, "contact": {}, "ceo": {}, "cto": {},
+	"founder": {}, "owner": {}, "ops": {}, "devops": {}, "mail": {}, "smtp": {},
+	"imap": {}, "pop": {}, "api": {}, "auth": {}, "login": {}, "register": {},
+	"verify": {}, "service": {}, "notice": {}, "notify": {}, "alert": {}, "hr": {},
+	"legal": {}, "privacy": {}, "terms": {}, "compliance": {}, "dmarc": {}, "spf": {},
+	"dkim": {}, "feedback": {}, "sales": {}, "press": {}, "hello": {}, "hi": {},
+	"me": {}, "ai": {}, "app": {}, "dev": {}, "test": {}, "demo": {},
+	"www": {}, "ftp": {}, "ms": {}, "z": {}, "status": {}, "cloud": {},
+	"docs": {}, "blog": {}, "news": {}, "vip": {}, "pro": {}, "enterprise": {},
+}
+
+// isPublicReservedLocalPart reports whether localPart is reserved for operator or brand protection
+// on self-serve public mailbox claims.
+func isPublicReservedLocalPart(localPart string) bool {
+	if _, reserved := reservedLocalParts[localPart]; reserved {
+		return true
+	}
+	_, reserved := publicReservedLocalParts[localPart]
+	return reserved
+}
+
 // normalizeLocalPart validates the requested local part and returns its canonical form. Whether a
 // role address is free depends on the domain; see checkReservedLocalPart.
 func normalizeLocalPart(raw string) (string, error) {
@@ -29,10 +55,10 @@ func normalizeLocalPart(raw string) (string, error) {
 	return localPart, nil
 }
 
-// checkReservedLocalPart answers ErrMailboxAddressReserved for a role address on the shared
+// checkReservedLocalPart answers ErrMailboxAddressReserved for a role address on any shared
 // domain. Role addresses on an organization's own domain are allowed.
-func checkReservedLocalPart(localPart, addressDomain, sharedDomain string) error {
-	if addressDomain != sharedDomain {
+func checkReservedLocalPart(localPart, addressDomain string, sharedDomains ...string) error {
+	if !slices.Contains(sharedDomains, addressDomain) {
 		return nil
 	}
 	if _, reserved := reservedLocalParts[localPart]; reserved {

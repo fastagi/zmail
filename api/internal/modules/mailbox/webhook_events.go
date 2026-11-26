@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"time"
 
@@ -225,6 +226,8 @@ type webhookNotifier struct {
 	// sharedDomain is the platform's own sending domain, which is never a verified domain of an
 	// organization.
 	sharedDomain string
+	// publicDomains holds additional shared public domains configured alongside sharedDomain.
+	publicDomains []string
 }
 
 // NewWebhookNotifier builds the notifier from typed configuration.
@@ -236,8 +239,21 @@ func NewWebhookNotifier(cfg *config.Config, publisher domain.WebhookPublisher) *
 	}
 	if cfg != nil {
 		notifier.sharedDomain = domain.NormalizeDomainName(cfg.Mailbox.Domain)
+		resolved := cfg.Mailbox.Resolved(cfg.IsProduction())
+		for _, raw := range resolved.PublicDomains {
+			if name := domain.NormalizeDomainName(raw); name != "" && !slices.Contains(notifier.publicDomains, name) {
+				notifier.publicDomains = append(notifier.publicDomains, name)
+			}
+		}
 	}
 	return notifier
+}
+
+func (n *webhookNotifier) isSharedDomain(name string) bool {
+	if name == "" {
+		return false
+	}
+	return name == n.sharedDomain || slices.Contains(n.publicDomains, name)
 }
 
 func (n *webhookNotifier) Notify(ctx context.Context, notification MailNotification) error {
@@ -325,7 +341,7 @@ func (n *webhookNotifier) transactionalOrigin(fromAddress string) *domain.Webhoo
 	return &domain.WebhookEventOrigin{
 		Programmatic:         true,
 		SenderDomain:         name,
-		SenderDomainVerified: name != "" && name != n.sharedDomain,
+		SenderDomainVerified: name != "" && !n.isSharedDomain(name),
 	}
 }
 

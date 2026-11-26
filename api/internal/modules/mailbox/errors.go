@@ -13,7 +13,9 @@ var (
 	ErrMailboxAddressTaken    = errors.New("mailbox address is already taken")
 	ErrMailboxAddressInvalid  = errors.New("mailbox address is invalid")
 	ErrMailboxAddressReserved = errors.New("mailbox address is reserved")
-	ErrMailboxLimitReached    = errors.New("mailbox limit reached")
+	ErrMailboxLimitReached       = errors.New("mailbox limit reached")
+	ErrPublicMailboxLimitReached = errors.New("public mailbox limit reached")
+	ErrPublicMailboxRateLimited  = errors.New("too many public mailbox requests")
 	// ErrMailboxImportDuplicateRow is an import row whose address an earlier row of the file names.
 	ErrMailboxImportDuplicateRow = errors.New("mailbox import row repeats an earlier address")
 	// ErrMailboxImportMemberNotFound is an import row naming an email of no organization member.

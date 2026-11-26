@@ -23,6 +23,8 @@ var mailboxErrorCodes = []struct {
 	{ErrMailboxAddressInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAddressInvalid},
 	{ErrMailboxAddressReserved, http.StatusUnprocessableEntity, domain.CodeMailboxAddressReserved},
 	{ErrMailboxLimitReached, http.StatusConflict, domain.CodeMailboxLimitReached},
+	{ErrPublicMailboxLimitReached, http.StatusConflict, domain.CodePublicMailboxLimitReached},
+	{ErrPublicMailboxRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
 	{ErrMailboxAccessInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAccessInvalid},
 	{ErrMailboxAccessConflict, http.StatusConflict, domain.CodeMailboxAccessConflict},
 	{ErrMailMessageNotFound, http.StatusNotFound, domain.CodeMailMessageNotFound},

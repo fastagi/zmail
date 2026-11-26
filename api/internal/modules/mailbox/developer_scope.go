@@ -35,7 +35,7 @@ func (s *service) requireDeveloperSender(ctx context.Context, viewer domain.Orga
 
 // isVerifiedOrganizationDomain reports whether name is a verified custom domain of the organization.
 func (s *service) isVerifiedOrganizationDomain(ctx context.Context, organizationID uint, name string) (bool, error) {
-	if s.domains == nil || name == "" || name == s.settings.Domain {
+	if s.domains == nil || name == "" || s.isSharedDomain(name) {
 		return false, nil
 	}
 	mailDomain, err := s.domains.FindDomainByName(ctx, name)

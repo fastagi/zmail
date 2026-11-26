@@ -365,7 +365,7 @@ func (s *service) createRosterMailbox(
 	if err != nil {
 		return nil, err
 	}
-	if plan.connected == nil || strings.HasSuffix(plan.mailbox.Address, "@"+s.settings.Domain) {
+	if plan.connected == nil || s.isSharedDomain(addressDomain(plan.mailbox.Address)) {
 		return nil, ErrMemberImportDomainRequired
 	}
 	if dryRun {

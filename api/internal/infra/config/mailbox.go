@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/fastagi/zmail/api/pkg/env"
 )
 
 // Mailbox transport providers.
@@ -61,12 +64,43 @@ const (
 	DefaultMailClientSMTPHost       = "smtp.zmail.im"
 	DefaultMailClientSMTPPort       = 465
 	DefaultMailClientSubmissionPort = 587
+	// DefaultMailboxPublicLimitPerUser bounds self-serve public mailboxes one user may claim globally.
+	DefaultMailboxPublicLimitPerUser = 1
+	// DefaultMailboxPublicMinLocalLen is the shortest local part accepted for public self-claims.
+	DefaultMailboxPublicMinLocalLen = 4
+	// DefaultMailboxPublicDailySendLimitNew caps daily outbound sends for shared-domain mailboxes
+	// younger than 7 days.
+	DefaultMailboxPublicDailySendLimitNew = 10
+	// DefaultMailboxPublicDailySendLimit caps daily outbound sends for shared-domain mailboxes
+	// aged 7 days or older.
+	DefaultMailboxPublicDailySendLimit = 30
+	// DefaultMailboxPublicMaxRecipientsNew caps recipients per outbound message for shared-domain
+	// mailboxes younger than 7 days.
+	DefaultMailboxPublicMaxRecipientsNew = 3
+	// DefaultMailboxPublicMaxRecipients caps recipients per outbound message for shared-domain
+	// mailboxes aged 7 days or older.
+	DefaultMailboxPublicMaxRecipients = 5
 )
 
 // MailboxConfig holds optional mailbox starter policy and its mail transport.
 type MailboxConfig struct {
 	// Domain is the address domain every mailbox belongs to.
 	Domain string
+	// PublicDomains lists the shared public domains eligible for self-serve personal mailbox claims.
+	// When empty, Resolved defaults it to [Domain] if Domain is set.
+	PublicDomains []string
+	// PublicLimitPerUser bounds how many public-domain mailboxes one user may claim globally.
+	PublicLimitPerUser int
+	// PublicMinLocalLen is the shortest local part accepted for public self-claims.
+	PublicMinLocalLen int
+	// PublicDailySendLimitNew and PublicDailySendLimit cap rolling 24h outbound sends on shared
+	// domains for mailboxes younger than 7 days and aged 7+ days respectively.
+	PublicDailySendLimitNew int
+	PublicDailySendLimit    int
+	// PublicMaxRecipientsNew and PublicMaxRecipients cap total recipients per outbound message on
+	// shared domains for mailboxes younger than 7 days and aged 7+ days respectively.
+	PublicMaxRecipientsNew int
+	PublicMaxRecipients    int
 	// Provider selects the outbound transport: "log" or "cloudflare".
 	Provider            string
 	CloudflareAccountID string
@@ -124,6 +158,50 @@ type MailboxConfig struct {
 	ClientSubmissionPort int
 }
 
+// loadMailboxConfig reads the mailbox starter settings from the environment.
+func loadMailboxConfig() MailboxConfig {
+	return MailboxConfig{
+		Domain:                  env.Get("MAILBOX_DOMAIN", ""),
+		PublicDomains:           env.GetSlice("MAILBOX_PUBLIC_DOMAINS", []string{}),
+		PublicLimitPerUser:      env.GetInt("MAILBOX_PUBLIC_LIMIT_PER_USER", DefaultMailboxPublicLimitPerUser),
+		PublicMinLocalLen:       env.GetInt("MAILBOX_PUBLIC_MIN_LOCAL_LEN", DefaultMailboxPublicMinLocalLen),
+		PublicDailySendLimitNew: env.GetInt("MAILBOX_PUBLIC_DAILY_SEND_NEW", DefaultMailboxPublicDailySendLimitNew),
+		PublicDailySendLimit:    env.GetInt("MAILBOX_PUBLIC_DAILY_SEND", DefaultMailboxPublicDailySendLimit),
+		PublicMaxRecipientsNew:  env.GetInt("MAILBOX_PUBLIC_MAX_RECIPIENTS_NEW", DefaultMailboxPublicMaxRecipientsNew),
+		PublicMaxRecipients:     env.GetInt("MAILBOX_PUBLIC_MAX_RECIPIENTS", DefaultMailboxPublicMaxRecipients),
+		Provider:                env.Get("MAILBOX_PROVIDER", ""),
+		CloudflareAccountID:     env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
+		CloudflareAPIToken:      env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
+		RequestTimeout:          env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
+		InboundSecret:           env.Get("MAILBOX_INBOUND_SECRET", ""),
+		DailySendLimit:          env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
+
+		DailyBroadcastLimit:           env.GetInt("MAILBOX_DAILY_BROADCAST_LIMIT", 0),
+		DailyTransactionalLimit:       env.GetInt("MAILBOX_DAILY_TRANSACTIONAL_LIMIT", 0),
+		NewOrganizationDailySendLimit: env.GetInt("MAILBOX_NEW_ORGANIZATION_DAILY_SEND_LIMIT", 0),
+		NewOrganizationPeriod:         env.GetDuration("MAILBOX_NEW_ORGANIZATION_PERIOD", DefaultMailboxNewOrganizationPeriod),
+		PublicURL:                     env.Get("MAILBOX_PUBLIC_URL", ""),
+		CustomDomainsEnabled:          env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
+		CloudflareEmailWorker:         env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
+
+		MaxZonesPerOrganization: env.GetInt("MAILBOX_MAX_ZONES_PER_ORGANIZATION", DefaultMailboxMaxZonesPerOrganization),
+		MaxPerOrganization:      env.GetInt("MAILBOX_MAX_PER_ORGANIZATION", DefaultMailboxMaxPerOrganization),
+
+		TransactionalEnabled:            env.GetBool("MAILBOX_TRANSACTIONAL_ENABLED", false),
+		SecretEncryptionKey:             env.Get("MAILBOX_SECRET_ENCRYPTION_KEY", ""),
+		SimulatorDomain:                 env.Get("MAILBOX_SIMULATOR_DOMAIN", DefaultMailboxSimulatorDomain),
+		TransactionalRecipientPerMinute: env.GetInt("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE", DefaultMailboxTransactionalRecipientPerMinute),
+		TransactionalKeyPerSecond:       env.GetInt("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND", DefaultMailboxTransactionalKeyPerSecond),
+
+		AppPasswordPepper:    env.Get("MAIL_APP_PASSWORD_PEPPER", ""),
+		ClientIMAPHost:       env.Get("MAIL_GATEWAY_PUBLIC_IMAP_HOST", DefaultMailClientIMAPHost),
+		ClientIMAPPort:       env.GetInt("MAIL_GATEWAY_PUBLIC_IMAP_PORT", DefaultMailClientIMAPPort),
+		ClientSMTPHost:       env.Get("MAIL_GATEWAY_PUBLIC_SMTP_HOST", DefaultMailClientSMTPHost),
+		ClientSMTPPort:       env.GetInt("MAIL_GATEWAY_PUBLIC_SMTP_PORT", DefaultMailClientSMTPPort),
+		ClientSubmissionPort: env.GetInt("MAIL_GATEWAY_PUBLIC_SUBMISSION_PORT", DefaultMailClientSubmissionPort),
+	}
+}
+
 // Resolved fills the development defaults: outside production an unset domain is
 // "mail.localhost" and an unset provider is "log". Production keeps both explicit.
 func (m MailboxConfig) Resolved(production bool) MailboxConfig {
@@ -177,6 +255,35 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 			m.Provider = MailboxProviderLog
 		}
 	}
+	publicDomains := make([]string, 0, max(len(m.PublicDomains), 1))
+	for _, raw := range m.PublicDomains {
+		name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+		if name != "" && !slices.Contains(publicDomains, name) {
+			publicDomains = append(publicDomains, name)
+		}
+	}
+	if len(publicDomains) == 0 && m.Domain != "" {
+		publicDomains = []string{m.Domain}
+	}
+	m.PublicDomains = publicDomains
+	if m.PublicLimitPerUser == 0 {
+		m.PublicLimitPerUser = DefaultMailboxPublicLimitPerUser
+	}
+	if m.PublicMinLocalLen == 0 {
+		m.PublicMinLocalLen = DefaultMailboxPublicMinLocalLen
+	}
+	if m.PublicDailySendLimitNew == 0 {
+		m.PublicDailySendLimitNew = DefaultMailboxPublicDailySendLimitNew
+	}
+	if m.PublicDailySendLimit == 0 {
+		m.PublicDailySendLimit = DefaultMailboxPublicDailySendLimit
+	}
+	if m.PublicMaxRecipientsNew == 0 {
+		m.PublicMaxRecipientsNew = DefaultMailboxPublicMaxRecipientsNew
+	}
+	if m.PublicMaxRecipients == 0 {
+		m.PublicMaxRecipients = DefaultMailboxPublicMaxRecipients
+	}
 	return m
 }
 
@@ -199,6 +306,9 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	}
 	if len(resolved.Domain) > 253 || !mailboxDomainPattern.MatchString(resolved.Domain) {
 		return fmt.Errorf("MAILBOX_DOMAIN must be a valid lowercase domain name")
+	}
+	if err := validateMailboxPublic(resolved); err != nil {
+		return err
 	}
 	switch resolved.Provider {
 	case MailboxProviderCloudflare:
@@ -292,6 +402,34 @@ func validateMailboxTransactional(resolved MailboxConfig) error {
 	}
 	if resolved.TransactionalKeyPerSecond < 1 || resolved.TransactionalKeyPerSecond > 10000 {
 		return fmt.Errorf("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND must be between 1 and 10000")
+	}
+	return nil
+}
+
+// validateMailboxPublic checks the self-serve public mailbox domains and limits of a resolved config.
+func validateMailboxPublic(resolved MailboxConfig) error {
+	for _, name := range resolved.PublicDomains {
+		if !ValidMailboxDomain(name) {
+			return fmt.Errorf("MAILBOX_PUBLIC_DOMAINS must contain valid lowercase domain names")
+		}
+	}
+	if resolved.PublicLimitPerUser < 1 || resolved.PublicLimitPerUser > 100 {
+		return fmt.Errorf("MAILBOX_PUBLIC_LIMIT_PER_USER must be between 1 and 100")
+	}
+	if resolved.PublicMinLocalLen < 1 || resolved.PublicMinLocalLen > 64 {
+		return fmt.Errorf("MAILBOX_PUBLIC_MIN_LOCAL_LEN must be between 1 and 64")
+	}
+	if resolved.PublicDailySendLimitNew < 1 || resolved.PublicDailySendLimitNew > 100000 {
+		return fmt.Errorf("MAILBOX_PUBLIC_DAILY_SEND_NEW must be between 1 and 100000")
+	}
+	if resolved.PublicDailySendLimit < 1 || resolved.PublicDailySendLimit > 100000 {
+		return fmt.Errorf("MAILBOX_PUBLIC_DAILY_SEND must be between 1 and 100000")
+	}
+	if resolved.PublicMaxRecipientsNew < 1 || resolved.PublicMaxRecipientsNew > 50 {
+		return fmt.Errorf("MAILBOX_PUBLIC_MAX_RECIPIENTS_NEW must be between 1 and 50")
+	}
+	if resolved.PublicMaxRecipients < 1 || resolved.PublicMaxRecipients > 50 {
+		return fmt.Errorf("MAILBOX_PUBLIC_MAX_RECIPIENTS must be between 1 and 50")
 	}
 	return nil
 }

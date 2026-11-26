@@ -68,7 +68,7 @@ type MemberWelcomeMail struct {
 // other than the viewer, the same mailboxes a roster import or a manager's create welcomes.
 func (s *service) memberWelcomeEligible(viewer domain.OrganizationContext, mailbox *domain.Mailbox) bool {
 	if mailbox == nil || mailbox.Type != domain.MailboxTypePersonal || mailbox.Connected() || mailbox.OwnerLeftAt != nil ||
-		addressDomain(mailbox.Address) == s.settings.Domain {
+		s.isSharedDomain(addressDomain(mailbox.Address)) {
 		return false
 	}
 	if mailbox.OwnerUserID == nil {

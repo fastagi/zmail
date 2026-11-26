@@ -289,3 +289,10 @@ type ExternalMailAllService interface {
 	ExternalMailDirectoryService
 	ExternalMailTenantService
 }
+
+// PublicMailboxService owns self-serve free public mailboxes on the platform's shared domains.
+type PublicMailboxService interface {
+	PublicMailboxOptions(ctx context.Context, userID uint) (*PublicMailboxOptions, error)
+	CheckPublicMailboxAvailability(ctx context.Context, userID uint, localPart, domainName string) (*PublicMailboxAvailability, error)
+	ClaimPublicMailbox(ctx context.Context, viewer domain.OrganizationContext, input ClaimPublicMailboxInput) (*domain.Mailbox, error)
+}

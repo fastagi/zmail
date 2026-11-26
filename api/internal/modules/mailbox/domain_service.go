@@ -43,9 +43,16 @@ func (s *service) CustomDomainsEnabled() bool {
 	return s.settings.CustomDomainsEnabled
 }
 
-// MailboxDomains lists the shared domain and the organization's verified domains.
+// MailboxDomains lists the shared domain(s) and the organization's verified domains.
 func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]MailboxDomain, error) {
-	domains := []MailboxDomain{{Name: s.settings.Domain, Shared: true}}
+	shared := s.sharedDomains()
+	domains := make([]MailboxDomain, 0, max(len(shared), 1))
+	for _, name := range shared {
+		domains = append(domains, MailboxDomain{Name: name, Shared: true})
+	}
+	if len(domains) == 0 {
+		domains = append(domains, MailboxDomain{Name: s.settings.Domain, Shared: true})
+	}
 	if !s.settings.CustomDomainsEnabled || s.domains == nil {
 		return domains, nil
 	}
@@ -55,7 +62,7 @@ func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]Ma
 	}
 	defaultID := s.defaultDomainID(connected)
 	for _, mailDomain := range connected {
-		if mailDomain.Status == domain.MailDomainStatusVerified && mailDomain.Name != s.settings.Domain {
+		if mailDomain.Status == domain.MailDomainStatusVerified && !s.isSharedDomain(mailDomain.Name) {
 			domains = append(domains, MailboxDomain{Name: mailDomain.Name, Default: mailDomain.ID == defaultID})
 		}
 	}
@@ -69,7 +76,7 @@ func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]Ma
 func (s *service) defaultDomainID(domains []*domain.MailDomain) uint {
 	var oldest *domain.MailDomain
 	for _, mailDomain := range domains {
-		if mailDomain.Status != domain.MailDomainStatusVerified || mailDomain.Name == s.settings.Domain {
+		if mailDomain.Status != domain.MailDomainStatusVerified || s.isSharedDomain(mailDomain.Name) {
 			continue
 		}
 		if mailDomain.MarkedDefault {
@@ -290,7 +297,7 @@ func (s *service) normalizeDomainName(name string) (string, error) {
 	if !config.ValidMailboxDomain(name) || strings.HasSuffix(name, ".localhost") || strings.Count(name, ".") < 1 {
 		return "", ErrMailDomainInvalid
 	}
-	if name == s.settings.Domain {
+	if s.isSharedDomain(name) {
 		return "", ErrMailDomainTaken
 	}
 	return name, nil
@@ -705,20 +712,23 @@ func spfIncludes(have, want string) bool {
 // verified routing configuration without granting callers domain-management access.
 func (s *service) mailboxDomainFor(ctx context.Context, organizationID uint, name string) (string, *domain.MailDomain, error) {
 	name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
-	if name == "" || name == s.settings.Domain {
+	if name == "" {
+		name = s.settings.Domain
+	}
+	if s.isSharedDomain(name) {
 		if s.settings.CustomDomainsEnabled && s.domains != nil && s.domainProvider != nil {
-			connected, err := s.domains.FindDomainByName(ctx, s.settings.Domain)
+			connected, err := s.domains.FindDomainByName(ctx, name)
 			if err == nil {
 				if connected.Status != domain.MailDomainStatusVerified {
 					return "", nil, ErrMailDomainNotVerified
 				}
-				return s.settings.Domain, connected, nil
+				return name, connected, nil
 			}
 			if !errors.Is(err, ErrMailDomainNotFound) {
 				return "", nil, err
 			}
 		}
-		return s.settings.Domain, nil, nil
+		return name, nil, nil
 	}
 	if err := s.requireDomains(); err != nil {
 		return "", nil, ErrMailDomainNotFound

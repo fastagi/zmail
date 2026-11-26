@@ -42,6 +42,7 @@ type Handler struct {
 	external      ExternalMailAllService
 	triage        TriageService
 	agents        AgentGrantService
+	publicMailbox PublicMailboxService
 }
 
 var (
@@ -63,6 +64,7 @@ func NewHandler(service Service) *Handler {
 		external:      service,
 		triage:        service,
 		agents:        service,
+		publicMailbox: service,
 	}
 }
 
