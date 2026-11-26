@@ -7,12 +7,60 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
+
+// MailRoleRequest is the whole of a mail role a create or replace sets. Unknown fields are
+// ignored; the service trims and checks every field.
+type MailRoleRequest struct {
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+	// OwnerUserID is the member responsible for the role, for display only; null for none.
+	OwnerUserID *uint `json:"owner_user_id"`
+}
+
+func (r MailRoleRequest) input() MailRoleInput {
+	return MailRoleInput{
+		Name: r.Name, Color: domain.MailLabelColor(r.Color), Description: r.Description, OwnerUserID: r.OwnerUserID,
+	}
+}
+
+// MailRoleResponse is one mail role with the mailboxes in it the caller can see, ascending.
+type MailRoleResponse struct {
+	ID          uint      `json:"id"`
+	Name        string    `json:"name"`
+	Color       string    `json:"color"`
+	Description string    `json:"description"`
+	OwnerUserID *uint     `json:"owner_user_id"`
+	MailboxIDs  []uint    `json:"mailbox_ids"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func toMailRoleResponse(role *domain.MailRole) MailRoleResponse {
+	mailboxIDs := role.MailboxIDs
+	if mailboxIDs == nil {
+		mailboxIDs = []uint{}
+	}
+	return MailRoleResponse{
+		ID: role.ID, Name: role.Name, Color: string(role.Color), Description: role.Description,
+		OwnerUserID: role.OwnerUserID, MailboxIDs: mailboxIDs, CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}
+}
+
+func toMailRoleResponses(roles []*domain.MailRole) []MailRoleResponse {
+	responses := make([]MailRoleResponse, 0, len(roles))
+	for _, role := range roles {
+		responses = append(responses, toMailRoleResponse(role))
+	}
+	return responses
+}
 
 const (
 	// maxMailRoleBodyBytes caps a mail role or role assignment body.

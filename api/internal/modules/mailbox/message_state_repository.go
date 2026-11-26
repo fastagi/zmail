@@ -109,6 +109,9 @@ func (r *repository) ApplyMessageChange(
 				return err
 			}
 		}
+		if err := setSnooze(tx, ids, change, at); err != nil {
+			return err
+		}
 		return setLabels(tx, ids, change)
 	})
 }
@@ -147,6 +150,7 @@ func setPlacement(tx *gorm.DB, ids []uint, placement domain.MailPlacement, folde
 	case domain.MailPlacementTrash:
 		updates["trashed_at"] = gorm.Expr("CASE WHEN placement = ? AND trashed_at IS NOT NULL THEN trashed_at ELSE ? END",
 			string(domain.MailPlacementTrash), at)
+		updates["snoozed_until"] = nil
 	}
 	if err := tx.Model(&MailMessagePO{}).Where("id IN ?", ids).Updates(updates).Error; err != nil {
 		return err
@@ -158,9 +162,27 @@ func setPlacement(tx *gorm.DB, ids []uint, placement domain.MailPlacement, folde
 		"status":           string(domain.MailStatusFailed),
 		"failure_code":     failureSendCanceled,
 		"queued_reason":    nil,
+		"scheduled_at":     nil,
 		"send_lease_until": nil,
 		"updated_at":       at,
 	}).Error
+}
+
+func setSnooze(tx *gorm.DB, ids []uint, change domain.MailMessageChange, at time.Time) error {
+	switch {
+	case change.SnoozedUntil != nil:
+		return tx.Model(&MailMessagePO{}).Where("id IN ?", ids).Updates(map[string]any{
+			"snoozed_until": change.SnoozedUntil.UTC(),
+			"updated_at":    at,
+		}).Error
+	case change.ClearSnooze != nil && *change.ClearSnooze:
+		return tx.Model(&MailMessagePO{}).Where("id IN ?", ids).Updates(map[string]any{
+			"snoozed_until": nil,
+			"updated_at":    at,
+		}).Error
+	default:
+		return nil
+	}
 }
 
 func setLabels(tx *gorm.DB, ids []uint, change domain.MailMessageChange) error {

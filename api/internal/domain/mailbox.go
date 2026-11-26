@@ -379,9 +379,12 @@ type MailMessage struct {
 	// ExternalID is the provider's id of a synced copy, unique per mailbox; empty for Zmail mail.
 	ExternalID  string
 	FailureCode string
-	// QueuedReason is MailQueuedForSendLimit while a queued outbound message waits for room in
-	// the organization's send limit, and empty otherwise.
+	// QueuedReason is MailQueuedForSendLimit or MailQueuedForSchedule while waiting, empty otherwise.
 	QueuedReason string
+	// ScheduledAt is when a scheduled outbound message becomes due to send; nil otherwise.
+	ScheduledAt *time.Time
+	// SnoozedUntil hides an inbox message until this instant, when it wakes back up unread.
+	SnoozedUntil *time.Time
 	// SendAttemptedAt is when the provider call of an outbound message started; the send limit
 	// counts attempts by it. Nil while the message waits and for inbound mail.
 	SendAttemptedAt *time.Time
@@ -832,6 +835,10 @@ type MailMessageFilter struct {
 	Starred        *bool
 	Unread         *bool
 	HasAttachments *bool
+	// Snoozed keeps actively snoozed (true) or non-snoozed (false) messages; nil applies default inbox rules.
+	Snoozed *bool
+	// Now overrides the current clock for snooze filtering when non-zero.
+	Now time.Time
 	// Query is the trimmed search text, matched as a literal substring ignoring case; empty means
 	// no search.
 	Query string
@@ -923,6 +930,9 @@ type MailMessageChange struct {
 	AddLabelIDs    []uint
 	RemoveLabelIDs []uint
 	SetLabelIDs    *[]uint
+	// SnoozedUntil snoozes the messages until this instant; ClearSnooze clears an active snooze.
+	SnoozedUntil *time.Time
+	ClearSnooze  *bool
 }
 
 // MailOrganizeRepository persists the folders and labels of a mailbox and the shared and
@@ -1116,15 +1126,4 @@ type MailboxRepository interface {
 	// StatsForOrganization counts messages of the given mailboxes per UTC day from since, for days
 	// that have any. No mailbox ids count nothing.
 	StatsForOrganization(ctx context.Context, organizationID uint, mailboxIDs []uint, since time.Time) ([]MailDayStats, error)
-}
-
-// OrganizationSendPolicy is what an organization's own record says about its sending.
-type OrganizationSendPolicy struct {
-	// CreatedAt is when the organization was created; zero when it is unknown.
-	CreatedAt time.Time
-	// Suspended is true while a platform operator has suspended the organization; it sends nothing.
-	Suspended bool
-	// DailySendLimit, when set by a platform operator, replaces the instance limit of every lane and
-	// the new-organization cap.
-	DailySendLimit *int
 }

@@ -29,6 +29,12 @@ func (s *service) ListMessages(
 	if err := validateMessageFilter(filter); err != nil {
 		return nil, 0, err
 	}
+	if filter.Placement == domain.MailPlacementDefault || filter.Snoozed != nil {
+		s.wakeSnoozedOpportunistically(ctx)
+	}
+	if filter.Now.IsZero() {
+		filter.Now = s.now().UTC()
+	}
 	var (
 		messages []*domain.MailMessage
 		total    int64
@@ -133,7 +139,7 @@ func validateMessageFilter(filter domain.MailMessageFilter) error {
 		return invalid("group needs placement default, archive, or folder")
 	case filter.Placement == domain.MailPlacementDefault && filter.Direction == "":
 		return invalid("group on default needs direction")
-	case filter.LabelID != 0 || filter.Starred != nil || filter.Unread != nil || filter.HasAttachments != nil || filter.Query != "":
+	case filter.LabelID != 0 || filter.Starred != nil || filter.Unread != nil || filter.HasAttachments != nil || filter.Snoozed != nil || filter.Query != "":
 		return invalid("group lists placement views only")
 	}
 	return nil

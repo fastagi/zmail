@@ -72,6 +72,18 @@ func messageView(db *gorm.DB, mailboxID, membershipID uint, filter domain.MailMe
 			query = query.Where("mail_messages.attachment_count = 0")
 		}
 	}
+	now := filter.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	switch {
+	case filter.Snoozed != nil && *filter.Snoozed:
+		query = query.Where("mail_messages.snoozed_until IS NOT NULL AND mail_messages.snoozed_until > ?", now)
+	case filter.Snoozed != nil && !*filter.Snoozed:
+		query = query.Where("(mail_messages.snoozed_until IS NULL OR mail_messages.snoozed_until <= ?)", now)
+	case filter.Placement == domain.MailPlacementDefault && filter.Direction != domain.MailDirectionOutbound:
+		query = query.Where("(mail_messages.snoozed_until IS NULL OR mail_messages.snoozed_until <= ?)", now)
+	}
 	if filter.Query != "" {
 		query = query.Where(searchCondition, map[string]any{"p": searchPattern(filter.Query)})
 	}
@@ -191,7 +203,7 @@ func (r *repository) ListThreads(
 		return nil, 0, fmt.Errorf("%w: threads are listed per placement view", domain.ErrInvalidInput)
 	}
 	// Only the placement view groups: placement, folder, and direction.
-	view := domain.MailMessageFilter{Placement: filter.Placement, FolderID: filter.FolderID, Direction: filter.Direction}
+	view := domain.MailMessageFilter{Placement: filter.Placement, FolderID: filter.FolderID, Direction: filter.Direction, Now: filter.Now}
 	offset, limit := pageOf(filter)
 	db := r.conn(ctx)
 
@@ -381,6 +393,8 @@ func (r *repository) MessageCounts(ctx context.Context, mailboxID, membershipID 
 		Unread    int
 	}
 	err := messageView(db, mailboxID, membershipID, domain.MailMessageFilter{Unread: new(true)}).
+		Where("mail_messages.placement <> ? OR mail_messages.snoozed_until IS NULL OR mail_messages.snoozed_until <= ?",
+			string(domain.MailPlacementDefault), time.Now().UTC()).
 		Select("mail_messages.placement, mail_messages.folder_id, COUNT(*) AS unread").
 		Group("mail_messages.placement, mail_messages.folder_id").
 		Scan(&unread).Error

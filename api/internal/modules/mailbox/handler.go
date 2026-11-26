@@ -300,7 +300,7 @@ func messageFilterFromQuery(c *gin.Context) domain.MailMessageFilter {
 	}
 	malformed := func(name string) { filter.Malformed = append(filter.Malformed, name) }
 	// A filter given twice is ambiguous, so it is refused rather than read from its first value.
-	for _, name := range []string{"direction", "placement", "folder_id", "label_id", "starred", "unread", "has_attachments", "q", "group"} {
+	for _, name := range []string{"direction", "placement", "folder_id", "label_id", "starred", "unread", "has_attachments", "snoozed", "folder", "q", "group"} {
 		if len(c.QueryArray(name)) > 1 {
 			malformed(name)
 		}
@@ -335,6 +335,24 @@ func messageFilterFromQuery(c *gin.Context) domain.MailMessageFilter {
 	filter.Starred = readBool("starred")
 	filter.Unread = readBool("unread")
 	filter.HasAttachments = readBool("has_attachments")
+	filter.Snoozed = readBool("snoozed")
+	if raw, present := c.GetQuery("folder"); present {
+		switch raw {
+		case "snoozed":
+			if filter.Snoozed == nil {
+				filter.Snoozed = new(true)
+			}
+		case "inbox":
+			if filter.Placement == "" {
+				filter.Placement = domain.MailPlacementDefault
+			}
+			if filter.Direction == "" {
+				filter.Direction = domain.MailDirectionInbound
+			}
+		default:
+			malformed("folder")
+		}
+	}
 	if raw, present := c.GetQuery("q"); present {
 		filter.Query = strings.TrimSpace(raw)
 		if filter.Query == "" || utf8.RuneCountInString(raw) > domain.MaxMailSearchLength {

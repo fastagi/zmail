@@ -29,16 +29,20 @@ type MessageUpdate struct {
 	AddLabelIDs    []uint
 	RemoveLabelIDs []uint
 	SetLabelIDs    *[]uint
+	SnoozedUntil   *time.Time
+	ClearSnooze    *bool
 }
 
 func (u MessageUpdate) empty() bool {
 	return u.Read == nil && u.Starred == nil && u.Placement == nil && u.FolderID == nil &&
-		u.AddLabelIDs == nil && u.RemoveLabelIDs == nil && u.SetLabelIDs == nil
+		u.AddLabelIDs == nil && u.RemoveLabelIDs == nil && u.SetLabelIDs == nil &&
+		u.SnoozedUntil == nil && u.ClearSnooze == nil
 }
 
 // shared reports whether the update changes state everyone with access sees.
 func (u MessageUpdate) shared() bool {
-	return u.Placement != nil || u.FolderID != nil || u.AddLabelIDs != nil || u.RemoveLabelIDs != nil || u.SetLabelIDs != nil
+	return u.Placement != nil || u.FolderID != nil || u.AddLabelIDs != nil || u.RemoveLabelIDs != nil ||
+		u.SetLabelIDs != nil || u.SnoozedUntil != nil || u.ClearSnooze != nil
 }
 
 // need is the highest access any field of the update needs.
@@ -147,11 +151,12 @@ func (s *service) updateMessages(
 		if err := s.lockReferences(tx, mailboxID, ids, update); err != nil {
 			return err
 		}
-		if err := validateMessageUpdate(ids, update, batch); err != nil {
+		now := s.now().UTC()
+		if err := validateMessageUpdate(ids, update, batch, now); err != nil {
 			return err
 		}
 		return s.organize.ApplyMessageChange(tx, positiveDistinct(ids), viewer.MembershipID,
-			domain.MailMessageChange(update), s.now().UTC())
+			domain.MailMessageChange(update), now)
 	})
 }
 
@@ -193,7 +198,7 @@ func (s *service) lockReferences(ctx context.Context, mailboxID uint, ids []uint
 }
 
 // validateMessageUpdate applies the contract's body rules, after access and lookups.
-func validateMessageUpdate(ids []uint, update MessageUpdate, batch bool) error {
+func validateMessageUpdate(ids []uint, update MessageUpdate, batch bool, now time.Time) error {
 	invalid := &ValidationError{}
 	if batch {
 		validateIDList(invalid, "message_ids", ids, 1)
@@ -226,6 +231,15 @@ func validateMessageUpdate(ids []uint, update MessageUpdate, batch bool) error {
 		if slices.Contains(update.RemoveLabelIDs, id) {
 			invalid.add("add_label_ids", "a label may not be both added and removed")
 			break
+		}
+	}
+	if update.SnoozedUntil != nil && update.ClearSnooze != nil && *update.ClearSnooze {
+		invalid.add("snoozed_until", "cannot be set together with clear_snooze")
+	}
+	if update.SnoozedUntil != nil {
+		at := update.SnoozedUntil.UTC()
+		if !at.After(now) || at.After(now.Add(maxSnoozeAhead)) {
+			invalid.add("snoozed_until", "must be in the future and at most 365 days ahead")
 		}
 	}
 	return invalid.orNil()

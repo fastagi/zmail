@@ -82,29 +82,6 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 	}
 }
 
-// MailRolePO is an organization's mail role; names are unique per organization ignoring case.
-type MailRolePO struct {
-	ID             uint   `gorm:"primaryKey"`
-	OrganizationID uint   `gorm:"not null;uniqueIndex:idx_mail_roles_name,priority:1"`
-	Name           string `gorm:"size:64;not null;uniqueIndex:idx_mail_roles_name,priority:2,expression:lower(name)"`
-	Color          string `gorm:"size:16;not null;default:'gray'"`
-	Description    string `gorm:"size:280;not null;default:''"`
-	OwnerUserID    *uint
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
-func (MailRolePO) TableName() string {
-	return "mail_roles"
-}
-
-func (po *MailRolePO) toDomain() *domain.MailRole {
-	return &domain.MailRole{
-		ID: po.ID, OrganizationID: po.OrganizationID, Name: po.Name, Color: domain.MailLabelColor(po.Color),
-		Description: po.Description, OwnerUserID: po.OwnerUserID, CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
-	}
-}
-
 // MailboxMemberPO is one membership's permission on a shared mailbox.
 type MailboxMemberPO struct {
 	MailboxID    uint   `gorm:"primaryKey;autoIncrement:false"`
@@ -189,8 +166,12 @@ type MailMessagePO struct {
 	LastEvent              string  `gorm:"size:16;not null;default:''"`
 	AttachmentCount        int     `gorm:"not null;default:0"`
 	TemplateID             *uint
-	// QueuedReason is set while a message waits for room in the send limit.
+	// QueuedReason is set while a message waits for room in the send limit or a scheduled send.
 	QueuedReason *string `gorm:"size:32"`
+	// ScheduledAt is when a scheduled outbound message becomes due; nil otherwise.
+	ScheduledAt *time.Time
+	// SnoozedUntil hides an inbox message until this instant; nil when not snoozed.
+	SnoozedUntil *time.Time
 	// SendAttemptedAt is when the provider call started; the send limit counts by it.
 	SendAttemptedAt *time.Time
 	// SendLane is the send limit lane the message counts against: personal or broadcast.
@@ -335,6 +316,8 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 	if po.QueuedReason != nil {
 		message.QueuedReason = *po.QueuedReason
 	}
+	message.ScheduledAt = po.ScheduledAt
+	message.SnoozedUntil = po.SnoozedUntil
 	message.SendAttemptedAt = po.SendAttemptedAt
 	message.SendLane = domain.SendLane(po.SendLane)
 	if message.SendLane == "" {
@@ -401,6 +384,8 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		reason := message.QueuedReason
 		po.QueuedReason = &reason
 	}
+	po.ScheduledAt = message.ScheduledAt
+	po.SnoozedUntil = message.SnoozedUntil
 	po.SendAttemptedAt = message.SendAttemptedAt
 	po.SendLane = string(message.SendLane)
 	if po.SendLane == "" {

@@ -195,6 +195,11 @@ func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (i
 	}
 	if lanes.Personal {
 		steps = append(steps, w.dispatcher.DispatchQueuedSends)
+		if waker, ok := w.dispatcher.(domain.MailSnoozeWaker); ok {
+			steps = append(steps, func(ctx context.Context, _ int) (int, error) {
+				return waker.WakeDueSnoozedMessages(ctx, time.Now().UTC())
+			})
+		}
 	}
 	if lanes.Broadcast {
 		steps = append(steps, w.dispatcher.DispatchBroadcasts)

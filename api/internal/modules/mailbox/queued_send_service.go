@@ -97,6 +97,7 @@ func (s *service) sendWaiting(ctx context.Context, organizationID uint, message 
 		return err
 	}
 	message.QueuedReason = ""
+	message.ScheduledAt = nil
 	message.SendAttemptedAt = &attemptedAt
 	// A provider refusal is recorded on the message; only a failure to record stops the worker.
 	_, _, err = s.deliver(ctx, mailbox, message, files, nil)

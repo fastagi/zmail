@@ -843,7 +843,7 @@ func (r *fakeRepository) CountWaitingSends(_ context.Context, organizationID uin
 	var count int64
 	for _, message := range r.messages {
 		mailbox, ok := r.mailboxes[message.MailboxID]
-		if ok && mailbox.OrganizationID == organizationID && message.QueuedReason != "" {
+		if ok && mailbox.OrganizationID == organizationID && message.QueuedReason == domain.MailQueuedForSendLimit {
 			count++
 		}
 	}

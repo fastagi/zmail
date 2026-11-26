@@ -68,7 +68,7 @@ type InboxPage struct {
 // InboxCounts are the viewer's own live counts over the mailboxes they read.
 type InboxCounts struct {
 	// AllUnread is Σ Roles + UngroupedUnread, the unread Inbox mail of every readable mailbox.
-	AllUnread, Today, TodayUnread, Pending, SentWaiting int
+	AllUnread, Today, TodayUnread, Pending, SentWaiting, Snoozed int
 	// Roles has one entry per mail role with a readable mailbox, role id ascending.
 	Roles           []InboxRoleCount
 	UngroupedUnread int
@@ -131,14 +131,16 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 		return page, nil
 	}
 
+	s.wakeSnoozedOpportunistically(ctx)
+	now := s.now().UTC()
 	query := domain.InboxQuery{
 		MailboxIDs: ids, MembershipID: viewer.MembershipID, View: request.View,
 		Unread: request.Unread, HasAttachments: request.HasAttachments, Query: request.Query, GroupThreads: request.GroupThreads,
 		After: request.After, Limit: request.PerPage + 1, Triage: request.Triage,
-		Assignment: request.Assignment, ViewerUserID: viewer.UserID,
+		Assignment: request.Assignment, ViewerUserID: viewer.UserID, Now: now,
 	}
 	if request.View == domain.InboxViewToday {
-		query.DayStart, query.DayEnd = inboxDay(s.now(), request.Location)
+		query.DayStart, query.DayEnd = inboxDay(now, request.Location)
 	}
 	query.Since = inboxDateBound(request.SinceDate, request.Location, 0)
 	query.Until = inboxDateBound(request.UntilDate, request.Location, 1)
@@ -216,6 +218,7 @@ func (s *service) InboxCounts(ctx context.Context, viewer domain.OrganizationCon
 	slices.Sort(ids)
 	slices.SortFunc(readable, func(a, b *domain.Mailbox) int { return cmp.Compare(a.ID, b.ID) })
 
+	s.wakeSnoozedOpportunistically(ctx)
 	unread, err := s.inbox.CountUnreadByMailboxIDs(ctx, viewer.OrganizationID, viewer.MembershipID, ids)
 	if err != nil {
 		return InboxCounts{}, err
@@ -224,8 +227,8 @@ func (s *service) InboxCounts(ctx context.Context, viewer domain.OrganizationCon
 	if err != nil {
 		return InboxCounts{}, err
 	}
-	counts.Today, counts.TodayUnread, counts.Pending, counts.SentWaiting =
-		views.Today, views.TodayUnread, views.Pending, views.SentWaiting
+	counts.Today, counts.TodayUnread, counts.Pending, counts.SentWaiting, counts.Snoozed =
+		views.Today, views.TodayUnread, views.Pending, views.SentWaiting, views.Snoozed
 	if counts.Triage, err = s.triageCounts(ctx, viewer, ids); err != nil {
 		return InboxCounts{}, err
 	}

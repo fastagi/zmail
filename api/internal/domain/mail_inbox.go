@@ -18,12 +18,14 @@ const (
 	InboxViewPending InboxView = "pending"
 	// InboxViewSent is outbound mail in default (each mailbox's Sent).
 	InboxViewSent InboxView = "sent"
+	// InboxViewSnoozed is mail outside the trash whose snooze window is still in the future.
+	InboxViewSnoozed InboxView = "snoozed"
 )
 
 // Valid reports whether the view is a known value.
 func (v InboxView) Valid() bool {
 	switch v {
-	case InboxViewAll, InboxViewToday, InboxViewPending, InboxViewSent:
+	case InboxViewAll, InboxViewToday, InboxViewPending, InboxViewSent, InboxViewSnoozed:
 		return true
 	}
 	return false
@@ -94,6 +96,8 @@ type InboxQuery struct {
 	Since *time.Time
 	// Until keeps messages created before it; nil applies no bound.
 	Until *time.Time
+	// Now overrides the clock for snooze visibility when non-zero.
+	Now time.Time
 	// Limit is how many rows to return at most: the page size plus one, to tell whether more follow.
 	Limit int
 }
@@ -104,6 +108,7 @@ type InboxViewCounts struct {
 	TodayUnread int
 	Pending     int
 	SentWaiting int
+	Snoozed     int
 }
 
 // MailInboxRepository reads the unified inbox across mailboxes.

@@ -111,6 +111,7 @@ func (r *repository) HandOverMailbox(ctx context.Context, mailboxID uint, sealed
 				"status":           string(domain.MailStatusFailed),
 				"failure_code":     failureSendCanceled,
 				"queued_reason":    nil,
+				"scheduled_at":     nil,
 				"send_lease_until": nil,
 				"updated_at":       time.Now().UTC(),
 			}).Error; err != nil {

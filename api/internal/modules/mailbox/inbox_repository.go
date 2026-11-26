@@ -61,11 +61,16 @@ func (r *repository) CountInboxViews(
 		      AND mail_messages.placement NOT IN @hidden AND `+unsealedMessage+`) AS pending,
 		  (SELECT COUNT(*) FROM mail_messages
 		    WHERE mail_messages.queued_reason = @waiting AND mail_messages.mailbox_id IN @mailbox_ids
-		      AND `+unsealedMessage+`) AS sent_waiting
+		      AND `+unsealedMessage+`) AS sent_waiting,
+		  (SELECT COUNT(*) FROM mail_messages
+		    WHERE mail_messages.mailbox_id IN @mailbox_ids AND mail_messages.placement <> @trash
+		      AND mail_messages.snoozed_until IS NOT NULL AND mail_messages.snoozed_until > NOW()
+		      AND `+unsealedMessage+`) AS snoozed
 		FROM (SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE `+unreadByMember+`) AS unread
 		  FROM mail_messages
 		  WHERE mail_messages.mailbox_id IN @mailbox_ids AND mail_messages.direction = @inbound
 		    AND mail_messages.placement <> @trash
+		    AND (mail_messages.snoozed_until IS NULL OR mail_messages.snoozed_until <= NOW())
 		    AND mail_messages.created_at >= @day_start AND mail_messages.created_at < @day_end
 		    AND `+unsealedMessage+`) AS today`, map[string]any{
 		"m":           membershipID,
@@ -150,6 +155,8 @@ func (r *repository) ListInbox(ctx context.Context, query domain.InboxQuery) ([]
 		})
 	case query.View == domain.InboxViewPending:
 		heads, err = inboxPendingHeads(db, query)
+	case query.View == domain.InboxViewSnoozed:
+		heads, err = inboxSnoozedHeads(db, query)
 	default:
 		heads, err = inboxMailboxHeads(db, query)
 	}
@@ -243,11 +250,16 @@ func inboxDirection(view domain.InboxView) domain.MailDirection {
 
 // inboxArgs are the named arguments every inbox head query binds.
 func inboxArgs(query domain.InboxQuery) map[string]any {
+	now := query.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	return map[string]any{
 		"mailbox_ids": query.MailboxIDs,
 		"m":           query.MembershipID,
 		"limit":       query.Limit,
 		"trash":       string(domain.MailPlacementTrash),
+		"now":         now,
 	}
 }
 
@@ -334,15 +346,24 @@ func inboxMailboxHeads(db *gorm.DB, query domain.InboxQuery) ([]inboxHead, error
 		    AND mail_messages.created_at >= @day_start AND mail_messages.created_at < @day_end`
 		args["day_start"], args["day_end"] = query.DayStart, query.DayEnd
 	}
+	snoozeExclude := ""
+	if query.View == domain.InboxViewAll || query.View == domain.InboxViewToday {
+		snoozeExclude = "AND (mail_messages.snoozed_until IS NULL OR mail_messages.snoozed_until <= @now)"
+	}
 	// The newest message of its thread in the view, within its mailbox. Newer messages need no
 	// seal check: they are newer than an unsealed message, so they are unsealed too. The seal
 	// condition itself reads the mailbox row the lateral join already holds, which is
 	// unsealedMessage without a second mailboxes lookup.
 	threadHead := ""
 	if query.GroupThreads {
+		newerSnooze := ""
+		if query.View == domain.InboxViewAll {
+			newerSnooze = "AND (newer.snoozed_until IS NULL OR newer.snoozed_until <= @now)"
+		}
 		threadHead = `AND NOT EXISTS (SELECT 1 FROM mail_messages newer
 			WHERE newer.mailbox_id = mail_messages.mailbox_id AND newer.placement = mail_messages.placement
 			  AND newer.direction = mail_messages.direction AND newer.thread_id = mail_messages.thread_id
+			  ` + newerSnooze + `
 			  AND (newer.created_at, newer.id) > (mail_messages.created_at, mail_messages.id))`
 	}
 	var heads []inboxHead
@@ -353,6 +374,7 @@ func inboxMailboxHeads(db *gorm.DB, query domain.InboxQuery) ([]inboxHead, error
 		  FROM mail_messages
 		  WHERE mail_messages.mailbox_id = box.id AND mail_messages.direction = @direction
 		    `+view+`
+		    `+snoozeExclude+`
 		    AND (box.sealed_before IS NULL OR mail_messages.created_at >= box.sealed_before)
 		    `+inboxFilters(query, args)+inboxTriageFilter(query, args)+`
 		    `+threadHead+`
@@ -360,6 +382,22 @@ func inboxMailboxHeads(db *gorm.DB, query domain.InboxQuery) ([]inboxHead, error
 		WHERE box.id IN @mailbox_ids
 		ORDER BY page.created_at DESC, page.id DESC
 		LIMIT @limit`, args).Scan(&heads).Error
+	return heads, err
+}
+
+// inboxSnoozedHeads serves snoozed: messages outside the trash whose snooze window is still active.
+func inboxSnoozedHeads(db *gorm.DB, query domain.InboxQuery) ([]inboxHead, error) {
+	args := inboxArgs(query)
+	var heads []inboxHead
+	err := db.Raw(`SELECT mail_messages.id, mail_messages.mailbox_id, mail_messages.thread_id, mail_messages.created_at
+		FROM mail_messages
+		WHERE mail_messages.mailbox_id IN @mailbox_ids
+		  AND mail_messages.placement <> @trash
+		  AND mail_messages.snoozed_until IS NOT NULL
+		  AND mail_messages.snoozed_until > @now
+		  AND `+unsealedMessage+`
+		  `+inboxFilters(query, args)+`
+		`+inboxOrder, args).Scan(&heads).Error
 	return heads, err
 }
 

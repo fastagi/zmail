@@ -163,6 +163,30 @@ func TestMailWorkerPurgesRevokedAppPasswords(t *testing.T) {
 	}
 }
 
+type snoozeWakingDispatcher struct {
+	recordingMailDispatcher
+	woken int
+}
+
+func (d *snoozeWakingDispatcher) WakeDueSnoozedMessages(_ context.Context, _ time.Time) (int, error) {
+	d.calls = append(d.calls, "wake-snoozed")
+	return d.woken, nil
+}
+
+func TestMailWorkerWakesDueSnoozedMessages(t *testing.T) {
+	dispatcher := &snoozeWakingDispatcher{
+		recordingMailDispatcher: recordingMailDispatcher{queued: 2},
+		woken:                   3,
+	}
+	processed, err := mailBroadcastWorker{dispatcher: dispatcher}.DispatchWebhooks(context.Background(), 25)
+	if err != nil {
+		t.Fatalf("DispatchWebhooks: %v", err)
+	}
+	if processed != 5 || len(dispatcher.calls) < 3 || dispatcher.calls[1] != "queued" || dispatcher.calls[2] != "wake-snoozed" {
+		t.Fatalf("calls = %v, processed = %d; want queued then wake-snoozed (5)", dispatcher.calls, processed)
+	}
+}
+
 func TestParseMailBroadcastWorkerArgs(t *testing.T) {
 	parsed, err := parseMailBroadcastWorkerArgs([]string{
 		"--batch=50", "--poll=300ms", "--lanes=transactional,personal", "--concurrency=8", "--once",

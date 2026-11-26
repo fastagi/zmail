@@ -79,6 +79,8 @@ type SendInput struct {
 	// IdempotencyKey is optional. A repeated send with the same key and the same content in the
 	// same mailbox returns the first attempt's outcome instead of sending again.
 	IdempotencyKey string
+	// ScheduledAt, when set, queues the message for future delivery instead of sending now.
+	ScheduledAt *time.Time
 }
 
 // Service composes the segregated subdomain interfaces of the mailbox starter.
@@ -113,6 +115,8 @@ type service struct {
 	organize domain.MailOrganizeRepository
 	// inbox reads the unified inbox; nil when repo does not implement it.
 	inbox domain.MailInboxRepository
+	// snooze wakes due snoozed inbox messages; nil when repo does not implement it.
+	snooze domain.MailSnoozeRepository
 	// roles stores mail roles; nil when repo does not implement it.
 	roles domain.MailRoleRepository
 	// directory reads the administration directory; nil when repo does not implement it.
@@ -240,6 +244,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailInboxRepository); ok {
 		inbox = seam
 	}
+	var snooze domain.MailSnoozeRepository
+	if seam, ok := repo.(domain.MailSnoozeRepository); ok {
+		snooze = seam
+	}
 	var roles domain.MailRoleRepository
 	if seam, ok := repo.(domain.MailRoleRepository); ok {
 		roles = seam
@@ -314,7 +322,7 @@ func NewService(
 		notices:       notices,
 		transactional: transactional, accounts: accounts, transactionalLimits: newTransactionalLimits(limits, settings),
 		encryptor: encryptor, fingerprintKey: fingerprintKey,
-		repo: repo, inbox: inbox, roles: roles, directory: directory, ledger: ledger, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		repo: repo, inbox: inbox, snooze: snooze, roles: roles, directory: directory, ledger: ledger, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
@@ -812,6 +820,9 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 			return nil, false, healthErr
 		}
 	}
+	if message.ScheduledAt != nil {
+		return s.queueForSchedule(ctx, mailbox, message)
+	}
 	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, message.SendLane, s.now().Add(-sendLimitWindow))
 	if err != nil {
 		return nil, false, err
@@ -1109,6 +1120,10 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 	if err != nil {
 		return nil, err
 	}
+	scheduledAt, err := validateScheduledAt(s.now().UTC(), input.ScheduledAt)
+	if err != nil {
+		return nil, err
+	}
 
 	idempotencyKey := strings.TrimSpace(input.IdempotencyKey)
 	if !validIdempotencyKey(idempotencyKey) {
@@ -1117,6 +1132,10 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 	fingerprint := ""
 	if idempotencyKey != "" {
 		fingerprint = sendFingerprintWith(to, cc, bcc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
+		if scheduledAt != nil {
+			fingerprint = sendFingerprintWith(to, cc, bcc, cleanText(subject), text, html, inReplyTo,
+				attachmentDigest(attachments)+"|scheduled_at:"+scheduledAt.Format(time.RFC3339Nano))
+		}
 	}
 
 	// The id is chosen before the message is stored, so a replay or a queued send reuses it.
@@ -1133,6 +1152,7 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		MailboxID:              mailbox.ID,
 		Direction:              domain.MailDirectionOutbound,
 		Status:                 domain.MailStatusQueued,
+		ScheduledAt:            scheduledAt,
 		FromAddress:            mailbox.Address,
 		FromName:               mailbox.DisplayName,
 		To:                     to,

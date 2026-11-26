@@ -130,6 +130,8 @@ type SendMailMessageRequest struct {
 	Attachments []MailAttachmentRequest `json:"attachments" binding:"omitempty,max=10,dive"`
 	// Template sends a stored template in place of Subject, Text, and HTML.
 	Template *MailTemplateSendRequest `json:"template"`
+	// ScheduledAt, when set, queues the message for future delivery instead of sending now.
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 }
 
 // MailAttachmentRequest is one file to attach to an outbound message.
@@ -168,43 +170,50 @@ func (r SendMailMessageRequest) input(idempotencyKey string) SendInput {
 		HTML:           r.HTML,
 		InReplyTo:      r.InReplyTo,
 		IdempotencyKey: idempotencyKey,
+		ScheduledAt:    r.ScheduledAt,
 	}
 }
 
-// UpdateMailMessageRequest marks, stars, moves, or labels one message. Every field is optional;
-// the service checks access and the referenced folder and labels before it validates the rules,
-// so binding enforces only JSON types.
+// UpdateMailMessageRequest marks, stars, moves, snoozes, or labels one message. Every field is
+// optional; the service checks access and the referenced folder and labels before it validates the
+// rules, so binding enforces only JSON types.
 type UpdateMailMessageRequest struct {
 	Read      *bool   `json:"read"`
 	Starred   *bool   `json:"starred"`
 	Placement *string `json:"placement"`
 	FolderID  *uint   `json:"folder_id"`
 	// LabelIDs replaces every label of the message.
-	LabelIDs *[]uint `json:"label_ids"`
+	LabelIDs     *[]uint    `json:"label_ids"`
+	SnoozedUntil *time.Time `json:"snoozed_until,omitempty"`
+	ClearSnooze  *bool      `json:"clear_snooze,omitempty"`
 }
 
 func (r UpdateMailMessageRequest) update() MessageUpdate {
 	return MessageUpdate{
-		Read: r.Read, Starred: r.Starred, Placement: placementPointer(r.Placement), FolderID: r.FolderID, SetLabelIDs: r.LabelIDs,
+		Read: r.Read, Starred: r.Starred, Placement: placementPointer(r.Placement), FolderID: r.FolderID,
+		SetLabelIDs: r.LabelIDs, SnoozedUntil: r.SnoozedUntil, ClearSnooze: r.ClearSnooze,
 	}
 }
 
 // UpdateMailMessagesRequest applies one change to up to 100 messages. Like
 // UpdateMailMessageRequest, its rules are checked by the service.
 type UpdateMailMessagesRequest struct {
-	MessageIDs     []uint  `json:"message_ids"`
-	Read           *bool   `json:"read"`
-	Starred        *bool   `json:"starred"`
-	Placement      *string `json:"placement"`
-	FolderID       *uint   `json:"folder_id"`
-	AddLabelIDs    []uint  `json:"add_label_ids"`
-	RemoveLabelIDs []uint  `json:"remove_label_ids"`
+	MessageIDs     []uint     `json:"message_ids"`
+	Read           *bool      `json:"read"`
+	Starred        *bool      `json:"starred"`
+	Placement      *string    `json:"placement"`
+	FolderID       *uint      `json:"folder_id"`
+	AddLabelIDs    []uint     `json:"add_label_ids"`
+	RemoveLabelIDs []uint     `json:"remove_label_ids"`
+	SnoozedUntil   *time.Time `json:"snoozed_until,omitempty"`
+	ClearSnooze    *bool      `json:"clear_snooze,omitempty"`
 }
 
 func (r UpdateMailMessagesRequest) update() MessageUpdate {
 	return MessageUpdate{
 		Read: r.Read, Starred: r.Starred, Placement: placementPointer(r.Placement), FolderID: r.FolderID,
 		AddLabelIDs: r.AddLabelIDs, RemoveLabelIDs: r.RemoveLabelIDs,
+		SnoozedUntil: r.SnoozedUntil, ClearSnooze: r.ClearSnooze,
 	}
 }
 
@@ -242,53 +251,6 @@ type MailFolderResponse struct {
 	ID        uint      `json:"id"`
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
-}
-
-// MailRoleRequest is the whole of a mail role a create or replace sets. Unknown fields are
-// ignored; the service trims and checks every field.
-type MailRoleRequest struct {
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	Description string `json:"description"`
-	// OwnerUserID is the member responsible for the role, for display only; null for none.
-	OwnerUserID *uint `json:"owner_user_id"`
-}
-
-func (r MailRoleRequest) input() MailRoleInput {
-	return MailRoleInput{
-		Name: r.Name, Color: domain.MailLabelColor(r.Color), Description: r.Description, OwnerUserID: r.OwnerUserID,
-	}
-}
-
-// MailRoleResponse is one mail role with the mailboxes in it the caller can see, ascending.
-type MailRoleResponse struct {
-	ID          uint      `json:"id"`
-	Name        string    `json:"name"`
-	Color       string    `json:"color"`
-	Description string    `json:"description"`
-	OwnerUserID *uint     `json:"owner_user_id"`
-	MailboxIDs  []uint    `json:"mailbox_ids"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-func toMailRoleResponse(role *domain.MailRole) MailRoleResponse {
-	mailboxIDs := role.MailboxIDs
-	if mailboxIDs == nil {
-		mailboxIDs = []uint{}
-	}
-	return MailRoleResponse{
-		ID: role.ID, Name: role.Name, Color: string(role.Color), Description: role.Description,
-		OwnerUserID: role.OwnerUserID, MailboxIDs: mailboxIDs, CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
-	}
-}
-
-func toMailRoleResponses(roles []*domain.MailRole) []MailRoleResponse {
-	responses := make([]MailRoleResponse, 0, len(roles))
-	for _, role := range roles {
-		responses = append(responses, toMailRoleResponse(role))
-	}
-	return responses
 }
 
 // MailLabelResponse is one label of a mailbox.
@@ -483,9 +445,10 @@ type MailMessageSummaryResponse struct {
 	Subject     string              `json:"subject"`
 	Read        bool                `json:"read"`
 	FailureCode string              `json:"failure_code"`
-	// QueuedReason is "send_limit" while the message waits for room in the organization's send
-	// limit, and null otherwise.
-	QueuedReason *string `json:"queued_reason"`
+	// QueuedReason is "send_limit" or "scheduled" while the message waits to send, and null otherwise.
+	QueuedReason *string    `json:"queued_reason"`
+	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+	SnoozedUntil *time.Time `json:"snoozed_until,omitempty"`
 	// LastEvent summarizes the delivery events of an outbound message; empty when there are none.
 	LastEvent string `json:"last_event"`
 	// TemplateID names the template the message was rendered from; null when none was used.
@@ -703,6 +666,8 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		Read:            message.Read,
 		FailureCode:     message.FailureCode,
 		QueuedReason:    queuedReasonOf(message),
+		ScheduledAt:     message.ScheduledAt,
+		SnoozedUntil:    message.SnoozedUntil,
 		LastEvent:       string(message.LastEvent),
 		AttachmentCount: message.AttachmentCount,
 		Source:          string(sourceOf(message)),
@@ -870,6 +835,7 @@ type InboxViewCountsResponse struct {
 	TodayUnread int `json:"today_unread"`
 	Pending     int `json:"pending"`
 	SentWaiting int `json:"sent_waiting"`
+	Snoozed     int `json:"snoozed"`
 }
 
 // InboxRoleCountResponse is the unread Inbox mail of one mail role's readable mailboxes.
@@ -896,7 +862,7 @@ func toInboxCountsResponse(counts InboxCounts) InboxCountsResponse {
 	return InboxCountsResponse{
 		Views: InboxViewCountsResponse{
 			AllUnread: counts.AllUnread, Today: counts.Today, TodayUnread: counts.TodayUnread,
-			Pending: counts.Pending, SentWaiting: counts.SentWaiting,
+			Pending: counts.Pending, SentWaiting: counts.SentWaiting, Snoozed: counts.Snoozed,
 		},
 		Roles:           roles,
 		UngroupedUnread: counts.UngroupedUnread,
