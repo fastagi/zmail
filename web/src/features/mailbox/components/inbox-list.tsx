@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
+import { CopyAddressButton } from '@/features/mailbox/components/copy-address-button';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { knownTimeZone } from '@/features/mailbox/components/mail-shared';
 import { rowUnread } from '@/features/mailbox/components/message-rows';
@@ -91,6 +92,7 @@ function useRowTime(zone: string): (iso: string) => string {
 export function InboxListHeader({
   title,
   mailboxSelected,
+  copyAddress = null,
   subtitle,
   unread,
   unreadCount,
@@ -114,6 +116,7 @@ export function InboxListHeader({
   refreshing: boolean;
   title: string;
   mailboxSelected: boolean;
+  copyAddress?: string | null;
   subtitle?: string;
   unread: boolean;
   unreadCount?: number;
@@ -207,7 +210,7 @@ export function InboxListHeader({
             <PanelLeft className="size-4" />
           </Button>
         ) : null}
-        <div className="flex min-w-0 flex-1 items-baseline gap-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <h1
             className={cn(
               'min-w-0 leading-tight font-semibold tracking-[-0.01em]',
@@ -218,6 +221,15 @@ export function InboxListHeader({
           >
             {title}
           </h1>
+          {copyAddress ? (
+            <CopyAddressButton
+              address={copyAddress}
+              label={t('inbox.copyAddress', { address: copyAddress })}
+              copiedLabel={t('inbox.addressCopied', { address: copyAddress })}
+              failedLabel={t('inbox.copyAddressFailed')}
+              size="xs"
+            />
+          ) : null}
           {subtitle ? <span className="shrink-0 text-text-muted">{subtitle}</span> : null}
         </div>
         <Button

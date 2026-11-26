@@ -1,6 +1,7 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { lazy, Suspense, useContext, useId, useState } from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, Mail, Users } from 'lucide-react';
 
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ROUTES } from '@/constants/routes';
+import { usePublicMailboxOptions } from '@/features/mailbox/hooks/use-public-mailbox';
 import { useWorkspaceModeStore } from '@/features/mailbox/stores/workspace-mode';
 import { useCreateOrganization } from '@/features/organization/hooks/use-organizations';
 import { createOrganizationSchema } from '@/features/organization/schemas';
@@ -20,6 +22,67 @@ import {
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
+const ClaimPublicMailboxCard = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/claim-public-mailbox-card'))
+    .ClaimPublicMailboxCard,
+}));
+
+function SimplePersonalModeHero({
+  onStart,
+  isPending,
+}: {
+  onStart: () => void;
+  isPending: boolean;
+}) {
+  const t = useT('organization');
+  return (
+    <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
+          <Mail className="size-5" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1 space-y-1">
+          <h2 className="text-base font-semibold text-foreground">{t('setup.personalTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('setup.personalDescription')}</p>
+          <div className="pt-2">
+            <Button type="button" onClick={onStart} loading={isPending}>
+              {t('setup.personalSubmit')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QueryAwarePersonalHero({
+  onStart,
+  isPending,
+}: {
+  onStart: () => void;
+  isPending: boolean;
+}) {
+  const options = usePublicMailboxOptions();
+  const canClaim =
+    Boolean(options.data?.enabled) &&
+    (options.data?.claimed_count ?? 0) < (options.data?.limit_per_user ?? 0);
+
+  if (canClaim && options.data) {
+    return (
+      <Suspense fallback={<SimplePersonalModeHero onStart={onStart} isPending={isPending} />}>
+        <ClaimPublicMailboxCard
+          options={options.data}
+          variant="hero"
+          onSkip={onStart}
+          skipPending={isPending}
+        />
+      </Suspense>
+    );
+  }
+
+  return <SimplePersonalModeHero onStart={onStart} isPending={isPending} />;
+}
+
 /**
  * The first step for someone who belongs to no team: name it, and go straight on to create the
  * team's first mailbox. The slug is generated; invitees are pointed at their invitation mail.
@@ -28,6 +91,7 @@ export function TeamSetupCard({ className }: { className?: string }) {
   const t = useT('organization');
   const titleId = useId();
   const router = useRouter();
+  const queryClient = useContext(QueryClientContext);
   const setMode = useWorkspaceModeStore(state => state.setMode);
   const personalMutation = useCreateOrganization();
 
@@ -49,26 +113,17 @@ export function TeamSetupCard({ className }: { className?: string }) {
       aria-labelledby={titleId}
       className={cn('rounded-lg border bg-card p-6 text-left shadow-xs sm:p-8', className)}
     >
-      <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 sm:p-5">
-        <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
-            <Mail className="size-5" aria-hidden="true" />
-          </span>
-          <div className="min-w-0 flex-1 space-y-1">
-            <h2 className="text-base font-semibold text-foreground">{t('setup.personalTitle')}</h2>
-            <p className="text-sm text-muted-foreground">{t('setup.personalDescription')}</p>
-            <div className="pt-2">
-              <Button
-                type="button"
-                onClick={startPersonalMode}
-                loading={personalMutation.isPending}
-              >
-                {t('setup.personalSubmit')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {queryClient ? (
+        <QueryAwarePersonalHero
+          onStart={startPersonalMode}
+          isPending={personalMutation.isPending}
+        />
+      ) : (
+        <SimplePersonalModeHero
+          onStart={startPersonalMode}
+          isPending={personalMutation.isPending}
+        />
+      )}
 
       <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
         <div className="h-px flex-1 bg-border" />

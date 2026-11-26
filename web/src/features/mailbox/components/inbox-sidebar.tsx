@@ -10,6 +10,7 @@ import {
   PenLine,
   Send,
   Settings2,
+  Sparkles,
   Star,
 } from 'lucide-react';
 
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Kbd } from '@/components/ui/kbd';
+import { CopyAddressButton } from '@/features/mailbox/components/copy-address-button';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { WorkspaceModeToggle } from '@/features/mailbox/components/workspace-mode-toggle';
 import type { ExternalMailConnection } from '@/features/mailbox/external-mail-schemas';
@@ -57,6 +59,11 @@ export interface InboxSidebarExternal {
   connections: readonly ExternalMailConnection[] | undefined;
   onAdd: (() => void) | null;
   onManage: () => void;
+}
+
+export interface InboxSidebarPublicMailbox {
+  domain: string;
+  onClaim: () => void;
 }
 
 /** The key of a sidebar group: a role id, or `none` for Ungrouped. */
@@ -109,6 +116,7 @@ export function InboxSidebar({
   onShortcuts,
   external = null,
   drafts = null,
+  publicMailbox = null,
 }: {
   /** The organization's name, or its picker. */
   organization: ReactNode;
@@ -135,6 +143,8 @@ export function InboxSidebar({
   external?: InboxSidebarExternal | null;
   /** The caller's saved drafts: how many, and opening their list; null when none may send. */
   drafts?: { count: number | undefined; onOpen: () => void } | null;
+  /** Compact CTA in Personal Mode when the user can still claim a free public `@zmail.im` address. */
+  publicMailbox?: InboxSidebarPublicMailbox | null;
 }) {
   const t = useT('mailbox');
   const tCommon = useT('common');
@@ -461,6 +471,76 @@ export function InboxSidebar({
           );
         })}
       </nav>
+      ) : null}
+
+      {isPersonalMode && teamMailboxes.some(mailbox => mailbox.access.view) ? (
+        <nav
+          aria-label={t('inbox.publicMailbox.myZmailGroup')}
+          className="flex flex-col gap-0.5"
+          data-sidebar-section="personal-zmail"
+        >
+          <div className={cn('items-center gap-2 pt-[18px] pr-1 pb-1.5 pl-3', wide)}>
+            <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
+              {t('inbox.publicMailbox.myZmailGroup')}
+            </p>
+          </div>
+          {teamMailboxes
+            .filter(mailbox => mailbox.access.view)
+            .map(mailbox => (
+              <div key={mailbox.id} className="group flex min-w-0 items-center gap-0.5">
+                <div className="min-w-0 flex-1">
+                  <MailboxRow
+                    mailbox={mailbox}
+                    unread={unreadByMailbox.get(mailbox.id) ?? 0}
+                    selected={mailbox.id === box}
+                    flat
+                    rail={rail}
+                    onSelect={() => onBox(mailbox.id)}
+                  />
+                </div>
+                <CopyAddressButton
+                  address={mailbox.address}
+                  label={t('inbox.copyAddress', { address: mailbox.address })}
+                  copiedLabel={t('inbox.addressCopied', { address: mailbox.address })}
+                  failedLabel={t('inbox.copyAddressFailed')}
+                  size="xs"
+                  className={cn(
+                    'size-6 opacity-70 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
+                    rail && 'hidden lg:inline-flex'
+                  )}
+                />
+              </div>
+            ))}
+        </nav>
+      ) : null}
+
+      {isPersonalMode && publicMailbox ? (
+        <div
+          data-slot="sidebar-public-mailbox-cta"
+          className={cn(
+            'mx-1 mt-3 rounded-xl border border-primary/25 bg-primary/5 p-3 text-left',
+            rail && 'hidden lg:block'
+          )}
+        >
+          <p className="flex items-center gap-1.5 text-xs font-medium text-text-main">
+            <Sparkles className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="truncate">
+              {t('inbox.publicMailbox.sidebarTitle', { domain: publicMailbox.domain })}
+            </span>
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+            {t('inbox.publicMailbox.sidebarDescription')}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="default"
+            className="mt-2.5 h-7 w-full text-xs"
+            onClick={publicMailbox.onClaim}
+          >
+            {t('inbox.publicMailbox.sidebarAction', { domain: publicMailbox.domain })}
+          </Button>
+        </div>
       ) : null}
 
       {isPersonalMode && external && external.onAdd && mine.length === 0 ? (

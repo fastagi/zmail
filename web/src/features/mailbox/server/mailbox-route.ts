@@ -159,6 +159,12 @@ export {
   resendMemberWelcomeMailRoute,
 } from './member-welcome-route';
 export {
+  getPublicMailboxOptionsRoute,
+  getPublicMailboxAvailabilityRoute,
+  claimPublicMailboxRoute,
+  privatePublicMailboxResponse,
+} from './public-mailbox-route';
+export {
   getMailThreadAssignmentRoute,
   updateMailThreadAssignmentRoute,
   listMailThreadNotesRoute,

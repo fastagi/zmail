@@ -65,6 +65,8 @@ import {
 import { useMailDrafts, useOpenMailDraft } from '@/features/mailbox/hooks/use-mail-drafts';
 import type { MailShortcut } from '@/features/mailbox/hooks/use-mail-shortcuts';
 import { useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
+import { usePublicMailboxOptions } from '@/features/mailbox/hooks/use-public-mailbox';
+import { useIsPersonalMode } from '@/features/mailbox/stores/workspace-mode';
 import type { InboxItem, InboxView, MailMessage, MailRole, Mailbox } from '@/features/mailbox/types';
 import { canComposeFrom, isConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
 import { useT } from '@/i18n';
@@ -75,6 +77,7 @@ const SORT_KEY = 'zmail.mailbox-sort';
 export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
+  const isPersonalMode = useIsPersonalMode();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -99,6 +102,18 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
 
   const mailboxes = useMailboxes(organizationId, { live: true });
   const roles = useMailRoles(organizationId);
+  const publicMailboxOptionsQuery = usePublicMailboxOptions({ enabled: isPersonalMode });
+  const publicMailboxOptions = publicMailboxOptionsQuery.data ?? null;
+  const canClaimPublicMailbox =
+    isPersonalMode &&
+    Boolean(publicMailboxOptions?.enabled) &&
+    (publicMailboxOptions?.claimed_count ?? 0) < (publicMailboxOptions?.limit_per_user ?? 0);
+  const [claimPublicOpen, setClaimPublicOpen] = useState(false);
+  const [claimPublicMounted, setClaimPublicMounted] = useState(false);
+  const openClaimPublic = () => {
+    setClaimPublicMounted(true);
+    setClaimPublicOpen(true);
+  };
   // External mail is on while the instance lists a connector; the caller's connections are read
   // only then, since their route answers 404 while it is off.
   const connectors = useExternalMailConnectors(organizationId);
@@ -525,6 +540,12 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
             },
           }
         : null,
+    publicMailbox: canClaimPublicMailbox
+      ? {
+          domain: publicMailboxOptions?.domains[0] ?? 'zmail.im',
+          onClaim: openClaimPublic,
+        }
+      : null,
   };
 
   const runCommand = (command: PaletteCommand) => {
@@ -652,6 +673,12 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
     sidebarProps,
     runCommand,
     useTriageDraft,
+    publicMailboxOptions,
+    canClaimPublicMailbox,
+    claimPublicOpen,
+    setClaimPublicOpen,
+    claimPublicMounted,
+    openClaimPublic,
     showMailbox: urlState.box === null && (mailboxList?.length ?? 0) > 1,
     isFetchingNextPage,
   };

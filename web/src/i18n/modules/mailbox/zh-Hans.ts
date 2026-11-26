@@ -140,6 +140,17 @@ const messages = {
     },
     viewByMailbox: '按邮箱查看',
     openInMailbox: '在邮箱中打开',
+    copyAddress: '复制 {address}',
+    addressCopied: '已复制 {address}',
+    copyAddressFailed: '复制邮箱地址失败',
+    publicMailbox: {
+      myZmailGroup: '我的 Zmail 邮箱',
+      sidebarTitle: '免费领取 @{domain} 邮箱',
+      sidebarDescription: '一键领取专属免费邮箱，立即收发邮件。',
+      sidebarAction: '免费领取 @{domain}',
+      dialogTitle: '免费领取 @{domain} 邮箱',
+      dialogDescription: '挑选一个可用的邮箱前缀，领取后立即进入你的收件箱。',
+    },
     sort: {
       label: '邮箱排序',
       default: '默认顺序',

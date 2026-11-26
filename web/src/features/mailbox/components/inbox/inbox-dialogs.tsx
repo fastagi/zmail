@@ -15,7 +15,9 @@ import {
   visibleRoles,
   type InboxRoleFilter,
   type InboxSidebarExternal,
+  type InboxSidebarPublicMailbox,
 } from '@/features/mailbox/components/inbox-sidebar';
+import type { PublicMailboxOptions } from '@/features/mailbox/services/public-mailbox-service';
 import {
   MailOrganizationName,
   MailPageHeader,
@@ -76,6 +78,10 @@ const MailboxAccessPanel = lazy(async () => {
   const feature = await import('@/features/mailbox/components/mailbox-access-panel');
   return { default: feature.MailboxAccessPanel };
 });
+const ClaimPublicMailboxDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/claim-public-mailbox-dialog'))
+    .ClaimPublicMailboxDialog,
+}));
 
 export interface ActiveDraft {
   mailbox: Mailbox;
@@ -98,6 +104,7 @@ export interface InboxSidebarSharedProps {
   onManageRoles: () => void;
   onShortcuts: () => void;
   drafts: { count: number | undefined; onOpen: () => void } | null;
+  publicMailbox?: InboxSidebarPublicMailbox | null;
 }
 
 /** A state of the page with nothing to list, in the console's ordinary frame and header. */
@@ -227,6 +234,11 @@ export function InboxOverlayDialogs({
   draft,
   onCloseDraft,
   onReopenDraft,
+  claimPublicMounted = false,
+  claimPublicOpen = false,
+  onClaimPublicOpenChange,
+  publicMailboxOptions = null,
+  onPublicMailboxClaimed,
 }: {
   scope: ReadyScope;
   organizationId: number;
@@ -264,6 +276,11 @@ export function InboxOverlayDialogs({
   draft: ActiveDraft | null;
   onCloseDraft: () => void;
   onReopenDraft: (value: ActiveDraft) => () => void;
+  claimPublicMounted?: boolean;
+  claimPublicOpen?: boolean;
+  onClaimPublicOpenChange?: (open: boolean) => void;
+  publicMailboxOptions?: PublicMailboxOptions | null;
+  onPublicMailboxClaimed?: (mailbox: Mailbox) => void;
 }) {
   const t = useT('mailbox');
   /** In the sheet, every choice also closes it. */
@@ -362,6 +379,18 @@ export function InboxOverlayDialogs({
             onClose={onCloseDraft}
             onStored={onCloseDraft}
             onReopen={onReopenDraft(draft)}
+          />
+        </Suspense>
+      ) : null}
+
+      {claimPublicMounted && publicMailboxOptions && onClaimPublicOpenChange && onPublicMailboxClaimed ? (
+        <Suspense fallback={null}>
+          <ClaimPublicMailboxDialog
+            open={claimPublicOpen}
+            onOpenChange={onClaimPublicOpenChange}
+            organizationId={organizationId}
+            options={publicMailboxOptions}
+            onClaimed={onPublicMailboxClaimed}
           />
         </Suspense>
       ) : null}

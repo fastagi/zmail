@@ -44,6 +44,11 @@ const TeamSetupCard = lazy(async () => {
   const feature = await import('@/features/organization/components/team-setup-card');
   return { default: feature.TeamSetupCard };
 });
+// Only someone in Personal Mode empty state who has not claimed yet loads it on demand.
+const ClaimPublicMailboxCard = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/claim-public-mailbox-card'))
+    .ClaimPublicMailboxCard,
+}));
 
 /**
  * The default mail page: every mailbox the user reads in one list, as three panes (§11.0: the
@@ -137,6 +142,17 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     const isPersonalEmpty = isPersonalMode && state.mailboxes.data.length === 0;
     return (
       <InboxFrame scope={scope}>
+        {isPersonalEmpty && state.canClaimPublicMailbox && state.publicMailboxOptions ? (
+          <Suspense fallback={null}>
+            <ClaimPublicMailboxCard
+              options={state.publicMailboxOptions}
+              organizationId={state.organizationId}
+              variant="card"
+              onClaimed={mailbox => state.onBox(mailbox.id)}
+              className="mx-auto max-w-xl"
+            />
+          </Suspense>
+        ) : null}
         <EmptyState
           icon={<Mail className="size-5" aria-hidden="true" />}
           title={t(isPersonalEmpty ? 'inbox.empty.personalNoMailboxes' : 'inbox.empty.noMailboxes')}
@@ -324,6 +340,14 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         draft={state.draft}
         onCloseDraft={() => state.setDraft(null)}
         onReopenDraft={state.reopenDraft}
+        claimPublicMounted={state.claimPublicMounted}
+        claimPublicOpen={state.claimPublicOpen}
+        onClaimPublicOpenChange={state.setClaimPublicOpen}
+        publicMailboxOptions={state.publicMailboxOptions}
+        onPublicMailboxClaimed={mailbox => {
+          state.setClaimPublicOpen(false);
+          state.onBox(mailbox.id);
+        }}
       />
     </div>
   );

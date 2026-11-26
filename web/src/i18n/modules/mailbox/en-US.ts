@@ -146,6 +146,18 @@ const messages = {
     },
     viewByMailbox: 'View by mailbox',
     openInMailbox: 'Open in mailbox',
+    copyAddress: 'Copy {address}',
+    addressCopied: 'Copied {address}',
+    copyAddressFailed: 'Could not copy address',
+    publicMailbox: {
+      myZmailGroup: 'My Zmail',
+      sidebarTitle: 'Free @{domain} email',
+      sidebarDescription: 'Claim your own address for free — ready to receive right away.',
+      sidebarAction: 'Claim @{domain}',
+      dialogTitle: 'Claim your free @{domain} email',
+      dialogDescription:
+        'Choose an available handle. Your new mailbox will appear in your inbox right away.',
+    },
     sort: {
       label: 'Sort mailboxes',
       default: 'Default order',

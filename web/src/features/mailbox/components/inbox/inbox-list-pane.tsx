@@ -247,6 +247,7 @@ export function InboxListPane({
         refreshing={!zoneReady || inboxFetching}
         title={title}
         mailboxSelected={narrowedTo !== null}
+        copyAddress={narrowedTo?.address ?? null}
         subtitle={subtitle}
         unread={urlState.unread}
         unreadCount={listingUnread(counts, urlState)}
