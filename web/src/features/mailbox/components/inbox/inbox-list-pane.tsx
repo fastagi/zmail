@@ -23,6 +23,11 @@ import {
   type filterParams,
   type InboxUrlState,
 } from '@/features/mailbox/components/inbox/inbox-url';
+import { InboxBulkBar } from '@/features/mailbox/components/inbox/inbox-bulk-bar';
+import type {
+  InboxBulkAction,
+  InboxQuickAction,
+} from '@/features/mailbox/components/inbox/use-inbox-actions';
 import {
   InboxList,
   InboxListHeader,
@@ -96,6 +101,14 @@ export function InboxListPane({
   onShowSidebar,
   onReconnectWithPassword,
   mailboxHref,
+  checkedIds,
+  selectedItems = [],
+  bulkPending = false,
+  onToggleSelect,
+  onToggleSelectAll,
+  onClearSelection,
+  onQuickAction,
+  onBulkAction,
 }: {
   organizationId: number;
   title: string;
@@ -132,6 +145,14 @@ export function InboxListPane({
   onShowSidebar: () => void;
   onReconnectWithPassword: (preset: ExternalConnectPreset) => void;
   mailboxHref: (mailboxId: number) => string;
+  checkedIds?: ReadonlySet<number>;
+  selectedItems?: readonly InboxItem[];
+  bulkPending?: boolean;
+  onToggleSelect?: (id: number) => void;
+  onToggleSelectAll?: () => void;
+  onClearSelection?: () => void;
+  onQuickAction?: (item: InboxItem, action: InboxQuickAction) => void;
+  onBulkAction?: (action: InboxBulkAction) => void;
 }) {
   const t = useT('mailbox');
 
@@ -222,6 +243,7 @@ export function InboxListPane({
         // A single mailbox needs no label on every row.
         showMailbox={showMailbox}
         sendable={sendableIds}
+        view={urlState.view}
         timeZone={timeZone}
         onFilterMailbox={onBox}
         selectedId={openItem?.id ?? null}
@@ -229,6 +251,9 @@ export function InboxListPane({
         onLoadMore={onLoadMore}
         hasMore={lastPage.meta.has_more && lastPage.meta.next_cursor !== null}
         loadingMore={isFetchingNextPage}
+        onQuickAction={onQuickAction}
+        checkedIds={checkedIds}
+        onToggleSelect={onToggleSelect}
       />
     );
   }
@@ -296,6 +321,18 @@ export function InboxListPane({
             onChange={tab => onSetListing({ [TRIAGE_PARAM]: tab })}
           />
         </Suspense>
+      ) : null}
+      {selectedItems.length > 0 && onToggleSelectAll && onClearSelection && onBulkAction ? (
+        <InboxBulkBar
+          selectedItems={selectedItems}
+          totalCount={rows.length}
+          sendable={sendableIds}
+          view={urlState.view}
+          busy={bulkPending}
+          onToggleAll={onToggleSelectAll}
+          onClear={onClearSelection}
+          onAction={onBulkAction}
+        />
       ) : null}
       <div data-scroll-pane className="min-h-0 flex-1 overflow-y-auto">
         {list}

@@ -99,6 +99,8 @@ const messages = {
     deleteRow: 'Delete {subject}',
     markRowRead: 'Mark {subject} read',
     markRowUnread: 'Mark {subject} unread',
+    starRow: 'Star {subject}',
+    unstarRow: 'Remove star from {subject}',
   },
   switcher: {
     label: 'Switch mailbox, current: {address}',
@@ -238,6 +240,17 @@ const messages = {
       label: 'Conversation actions',
       archive: 'Archive',
       trash: 'Delete',
+    },
+    quickActions: {
+      label: 'Quick actions for {subject}',
+    },
+    bulk: {
+      toolbarLabel: 'Bulk actions for {count} selected',
+      selected: '{count} selected',
+      selectAll: 'Select all loaded messages',
+      clear: 'Clear selection',
+      markedRead: 'Marked {count} as read',
+      markedUnread: 'Marked {count} as unread',
     },
     noSendPermission: 'You don’t have permission to send from this mailbox.',
     noSendableMailbox: 'You don’t have a mailbox you can send from.',

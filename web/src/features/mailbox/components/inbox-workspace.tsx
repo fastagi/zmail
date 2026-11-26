@@ -277,6 +277,14 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         }}
         onReconnectWithPassword={state.openConnect}
         mailboxHref={state.mailboxHref}
+        checkedIds={state.checkedIds}
+        selectedItems={state.selectedItems}
+        bulkPending={state.bulkPending}
+        onToggleSelect={state.toggleSelect}
+        onToggleSelectAll={state.toggleSelectAll}
+        onClearSelection={state.clearSelection}
+        onQuickAction={state.runQuickAction}
+        onBulkAction={state.runBulkAction}
       />
 
       <InboxReadingSection

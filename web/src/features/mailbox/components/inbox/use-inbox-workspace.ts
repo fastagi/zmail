@@ -35,6 +35,7 @@ import {
   SEARCH_PARAM,
   VIEW_PARAM,
 } from '@/features/mailbox/components/inbox/inbox-url';
+import { useInboxActions } from '@/features/mailbox/components/inbox/use-inbox-actions';
 import type {
   InboxPaneActions,
   InboxReaderNavigation,
@@ -398,6 +399,27 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
 
   const sendable = allMailboxes.filter(canComposeFrom);
   const sendableIds = new Set(sendable.map(mailbox => mailbox.id));
+  const scopeKey = JSON.stringify([
+    urlState.view,
+    urlState.box,
+    urlState.role,
+    urlState.q,
+    urlState.unread,
+    urlState.attachments,
+    urlState.assignment,
+    urlState.date,
+    urlState.triage,
+  ]);
+  const rowActions = useInboxActions({
+    organizationId,
+    rows,
+    sendableIds,
+    view: urlState.view,
+    scopeKey,
+    openItemId: openItem?.id ?? null,
+    onLeaveOpenRow: () => (navigation.onNext ?? navigation.onClose)(),
+    onCloseOpenRow: navigation.onClose,
+  });
   const compose =
     sendable.length > 0
       ? () =>
@@ -495,6 +517,7 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
     },
     escape: () => {
       if (openItem) setOpenParam(null);
+      else if (rowActions.checkedIds.size > 0) rowActions.clearSelection();
     },
   };
 
@@ -681,5 +704,13 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
     openClaimPublic,
     showMailbox: urlState.box === null && (mailboxList?.length ?? 0) > 1,
     isFetchingNextPage,
+    checkedIds: rowActions.checkedIds,
+    selectedItems: rowActions.selectedItems,
+    bulkPending: rowActions.bulkPending,
+    toggleSelect: rowActions.toggleSelect,
+    toggleSelectAll: rowActions.toggleSelectAll,
+    clearSelection: rowActions.clearSelection,
+    runQuickAction: rowActions.runQuickAction,
+    runBulkAction: rowActions.runBulkAction,
   };
 }

@@ -94,6 +94,8 @@ const messages = {
     deleteRow: '删除 {subject}',
     markRowRead: '将 {subject} 标为已读',
     markRowUnread: '将 {subject} 标为未读',
+    starRow: '给 {subject} 加星标',
+    unstarRow: '取消 {subject} 的星标',
   },
   switcher: {
     label: '切换邮箱，当前：{address}',
@@ -230,6 +232,17 @@ const messages = {
       label: '会话操作',
       archive: '归档',
       trash: '删除',
+    },
+    quickActions: {
+      label: '{subject} 的快捷操作',
+    },
+    bulk: {
+      toolbarLabel: '对已选 {count} 封邮件的批量操作',
+      selected: '已选 {count} 封',
+      selectAll: '全选已加载邮件',
+      clear: '取消选择',
+      markedRead: '已将 {count} 封标为已读',
+      markedUnread: '已将 {count} 封标为未读',
     },
     noSendPermission: '你在这个邮箱没有发送权限。',
     noSendableMailbox: '你没有可以发信的邮箱。',

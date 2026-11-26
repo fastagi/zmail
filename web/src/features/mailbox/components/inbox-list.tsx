@@ -8,15 +8,28 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
   type Ref,
 } from 'react';
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
-import { ExternalLink, Inbox, PanelLeft, RefreshCw, Search, X } from 'lucide-react';
+import {
+  Archive,
+  ExternalLink,
+  Inbox,
+  Mail,
+  MailOpen,
+  PanelLeft,
+  RefreshCw,
+  Search,
+  Star,
+  Trash2,
+  X,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Kbd } from '@/components/ui/kbd';
 import {
   Select,
   SelectContent,
@@ -25,6 +38,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  canArchiveInboxItem,
+  canDeleteInboxItem,
+  type InboxQuickAction,
+} from '@/features/mailbox/components/inbox/use-inbox-actions';
 import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
 import { CopyAddressButton } from '@/features/mailbox/components/copy-address-button';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
@@ -35,7 +53,13 @@ import {
   INBOX_DATE_RANGES,
   MAIL_SEARCH_MAX_LENGTH,
 } from '@/features/mailbox/schemas';
-import type { InboxAssignment, InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
+import type {
+  InboxAssignment,
+  InboxItem,
+  InboxPage,
+  InboxView,
+  MailRole,
+} from '@/features/mailbox/types';
 import { displayExternalProviderLabel } from '@/features/mailbox/utils/external-mail';
 import { senderAvatarProps } from '@/features/mailbox/utils/sender-avatar';
 
@@ -353,6 +377,7 @@ export function InboxList({
   roles = null,
   showMailbox = false,
   sendable,
+  view = 'all',
   timeZone,
   selectedId,
   onOpen,
@@ -360,6 +385,9 @@ export function InboxList({
   onLoadMore,
   hasMore,
   loadingMore = false,
+  onQuickAction,
+  checkedIds,
+  onToggleSelect,
 }: {
   /** The listbox's name: the list's title. */
   label: string;
@@ -368,8 +396,10 @@ export function InboxList({
   roles?: ReadonlyMap<number, MailRole> | null;
   /** Whether rows name the mailbox that received them: off for a list of one mailbox. */
   showMailbox?: boolean;
-  /** The mailboxes that may send, whose rows hint at the archive and delete keys. */
+  /** The mailboxes that may send, whose rows allow archive and delete actions. */
   sendable: ReadonlySet<number>;
+  /** Active inbox view, used to hide Archive on Sent mail. */
+  view?: InboxView;
   /** The inbox's zone, in which each row's time is shown. */
   timeZone: string;
   selectedId: number | null;
@@ -378,11 +408,20 @@ export function InboxList({
   onLoadMore: () => void;
   hasMore: boolean;
   loadingMore?: boolean;
+  /** Optional Gmail-style hover quick action handler. */
+  onQuickAction?: (item: InboxItem, action: InboxQuickAction) => void;
+  /** Optional multi-select checked row IDs. */
+  checkedIds?: ReadonlySet<number>;
+  /** Optional toggle callback for multi-select checkboxes. */
+  onToggleSelect?: (id: number) => void;
 }) {
   const t = useT('mailbox');
   const rowTime = useRowTime(timeZone);
   const sentinel = useRef<HTMLDivElement | null>(null);
   const pageCount = pages.length;
+  const hasQuickActions = onQuickAction !== undefined;
+  const selectable = checkedIds !== undefined && onToggleSelect !== undefined;
+  const hasChecked = selectable && checkedIds.size > 0;
 
   // Observed again after every page, so a short page that leaves the end in view loads the next.
   useEffect(() => {
@@ -453,13 +492,18 @@ export function InboxList({
       <ul ref={list} role="listbox" aria-label={label} className="flex flex-col gap-0.5">
         {items.map(item => {
           const unread = rowUnread(item);
+          const starred = item.thread?.starred ?? item.starred;
           const selected = item.id === selectedId;
+          const checked = selectable && checkedIds.has(item.id);
           const count = item.thread?.message_count ?? 1;
           const role = item.role_id === null ? undefined : roles?.get(item.role_id);
           const senderLabel = item.from.name || item.from.address;
+          const subject = item.subject || t('list.noSubject');
           const avatar = senderAvatarProps(senderLabel);
+          const canArchive = hasQuickActions && canArchiveInboxItem(item, sendable, view);
+          const canDelete = hasQuickActions && canDeleteInboxItem(item, sendable);
           return (
-            <li key={item.id} role="presentation" className="relative min-w-0">
+            <li key={item.id} role="presentation" className="group/row relative min-w-0">
               <div
                 role="option"
                 data-row-id={item.id}
@@ -470,11 +514,13 @@ export function InboxList({
                   showMailbox && 'pb-8',
                   unread &&
                     'before:absolute before:inset-y-2 before:left-0 before:w-[2.5px] before:rounded-r-full before:bg-brand',
-                  selected
-                    ? 'bg-blue-50 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/65 dark:ring-blue-800'
-                    : unread
-                      ? 'bg-bg-surface/70 hover:bg-row-hover hover:shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
-                      : 'hover:bg-row-hover hover:shadow-[0_1px_2px_rgba(15,23,42,0.03)]'
+                  checked
+                    ? 'bg-blue-50/80 ring-1 ring-inset ring-blue-200/80 dark:bg-blue-950/50 dark:ring-blue-800/80'
+                    : selected
+                      ? 'bg-blue-50 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/65 dark:ring-blue-800'
+                      : unread
+                        ? 'bg-bg-surface/70 hover:bg-row-hover hover:shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+                        : 'hover:bg-row-hover hover:shadow-[0_1px_2px_rgba(15,23,42,0.03)]'
                 )}
                 onClick={() => onOpen(item)}
                 onKeyDown={event => keyDown(event, item)}
@@ -482,8 +528,12 @@ export function InboxList({
                 <span
                   aria-hidden="true"
                   className={cn(
-                    'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tracking-tight select-none',
-                    avatar.className
+                    'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tracking-tight select-none transition-opacity duration-[120ms] motion-reduce:transition-none',
+                    avatar.className,
+                    selectable &&
+                      (hasChecked
+                        ? 'opacity-0'
+                        : 'group-has-[[data-avatar-select]:hover]/row:opacity-0 group-has-[[data-avatar-select]:focus-within]/row:opacity-0')
                   )}
                 >
                   {avatar.monogram}
@@ -529,18 +579,23 @@ export function InboxList({
                       </span>
                     ) : null}
                     <span className="flex-1" />
-                    {sendable.has(item.mailbox_id) ? (
-                      <span
+                    {starred ? (
+                      <Star
                         aria-hidden="true"
-                        className="flex shrink-0 gap-1 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 motion-reduce:transition-none max-sm:hidden"
-                      >
-                        <Kbd>E</Kbd>
-                        <Kbd>#</Kbd>
-                      </span>
+                        className={cn(
+                          'size-3 shrink-0 fill-amber-500 text-amber-500',
+                          hasQuickActions &&
+                            'transition-opacity duration-[120ms] group-focus-within/row:opacity-0 group-hover/row:opacity-0 motion-reduce:transition-none'
+                        )}
+                      />
                     ) : null}
                     <time
                       dateTime={item.created_at}
-                      className="shrink-0 text-xs text-text-faint tabular-nums"
+                      className={cn(
+                        'shrink-0 text-xs text-text-faint tabular-nums',
+                        hasQuickActions &&
+                          'transition-opacity duration-[120ms] group-focus-within/row:opacity-0 group-hover/row:opacity-0 motion-reduce:transition-none'
+                      )}
                     >
                       {rowTime(item.created_at)}
                     </time>
@@ -551,7 +606,7 @@ export function InboxList({
                       unread ? 'font-semibold text-text-main' : 'text-text-subtle'
                     )}
                   >
-                    {item.subject || t('list.noSubject')}
+                    {subject}
                   </span>
                   {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
                   {item.snippet ? (
@@ -561,6 +616,69 @@ export function InboxList({
                   ) : null}
                 </span>
               </div>
+              {selectable ? (
+                <span
+                  data-avatar-select=""
+                  onClick={event => {
+                    event.stopPropagation();
+                    if (event.target === event.currentTarget) onToggleSelect(item.id);
+                  }}
+                  className={cn(
+                    'absolute top-3 left-3 z-10 flex size-7 cursor-pointer items-center justify-center rounded-full transition-opacity duration-[120ms] motion-reduce:transition-none',
+                    hasChecked ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-within:opacity-100'
+                  )}
+                >
+                  <Checkbox
+                    aria-label={t('list.select', { subject })}
+                    checked={checked}
+                    onCheckedChange={() => onToggleSelect(item.id)}
+                    onClick={event => event.stopPropagation()}
+                  />
+                </span>
+              ) : null}
+              {hasQuickActions ? (
+                <div
+                  role="group"
+                  aria-label={t('inbox.quickActions.label', { subject })}
+                  onClick={event => event.stopPropagation()}
+                  className="absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border-subtle/80 bg-bg-surface/95 px-1 py-0.5 opacity-0 shadow-sm backdrop-blur-xs transition-opacity duration-[120ms] group-focus-within/row:opacity-100 group-hover/row:opacity-100 motion-reduce:transition-none"
+                >
+                  <RowQuickAction
+                    label={t(starred ? 'list.unstarRow' : 'list.starRow', { subject })}
+                    tooltip={t(starred ? 'list.unstar' : 'list.star')}
+                    pressed={starred}
+                    className={starred ? 'text-amber-500 hover:text-amber-600' : undefined}
+                    onClick={() => onQuickAction(item, 'star')}
+                  >
+                    <Star className={cn('size-3.5', starred && 'fill-amber-500 text-amber-500')} />
+                  </RowQuickAction>
+                  <RowQuickAction
+                    label={t(unread ? 'list.markRowRead' : 'list.markRowUnread', { subject })}
+                    tooltip={t(unread ? 'actions.markRead' : 'actions.markUnread')}
+                    onClick={() => onQuickAction(item, 'toggleRead')}
+                  >
+                    {unread ? <MailOpen className="size-3.5" /> : <Mail className="size-3.5" />}
+                  </RowQuickAction>
+                  {canArchive ? (
+                    <RowQuickAction
+                      label={t('list.archiveRow', { subject })}
+                      tooltip={t('actions.archive')}
+                      onClick={() => onQuickAction(item, 'archive')}
+                    >
+                      <Archive className="size-3.5" />
+                    </RowQuickAction>
+                  ) : null}
+                  {canDelete ? (
+                    <RowQuickAction
+                      label={t('list.deleteRow', { subject })}
+                      tooltip={t('actions.delete')}
+                      onClick={() => onQuickAction(item, 'trash')}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </RowQuickAction>
+                  ) : null}
+                </div>
+              ) : null}
               {showMailbox && (
                 <button
                   type="button"
@@ -587,6 +705,45 @@ export function InboxList({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** One icon button inside a row's hover quick-action cluster. */
+function RowQuickAction({
+  label,
+  tooltip,
+  pressed,
+  className,
+  onClick,
+  children,
+}: {
+  label: string;
+  tooltip: string;
+  pressed?: boolean;
+  className?: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      isIcon
+      size="xs"
+      variant="ghost"
+      aria-label={label}
+      aria-pressed={pressed}
+      title={tooltip}
+      className={cn(
+        'size-6 text-text-muted hover:bg-row-hover hover:text-text-main',
+        className
+      )}
+      onClick={event => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </Button>
   );
 }
 
