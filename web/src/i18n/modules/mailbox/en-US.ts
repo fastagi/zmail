@@ -529,6 +529,12 @@ const messages = {
     sessionEndedDraft: 'What you wrote is kept in this browser and opens again after you sign in.',
     signIn: 'Sign in',
     invalidRecipients: 'Not a plain email address: {addresses}',
+    minimize: 'Minimize',
+    restore: 'Restore',
+    expand: 'Full screen',
+    dock: 'Exit full screen',
+    removeRecipient: 'Remove {address}',
+    invalidRecipientChip: 'Invalid email address: {address}',
   },
   emails: {
     title: 'Emails',

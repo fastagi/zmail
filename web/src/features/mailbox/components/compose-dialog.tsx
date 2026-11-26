@@ -3,25 +3,21 @@
 import {
   useContext,
   useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
+  type KeyboardEvent,
 } from 'react';
 import { Send } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -30,7 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import {
   ComposeAttachmentsSection,
@@ -50,6 +45,11 @@ import {
 } from '@/features/mailbox/components/compose-draft-store';
 import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
 import { ComposeErrorAlert } from '@/features/mailbox/components/compose-error-alert';
+import {
+  ComposeWindowShell,
+  type ComposeWindowMode,
+} from '@/features/mailbox/components/compose-window-shell';
+import { RecipientChipsInput } from '@/features/mailbox/components/recipient-chips-input';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
@@ -282,14 +282,35 @@ export function ComposeDialog({
   );
   const toInput = useRef<HTMLTextAreaElement>(null);
   const ccInput = useRef<HTMLTextAreaElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const [windowMode, setWindowMode] = useState<ComposeWindowMode>('docked');
+  const titleId = useId();
+  const descriptionId = useId();
   // Addresses a recipient field holds that are not plain email addresses, shown on that field.
   const [badTo, setBadTo] = useState<string[]>([]);
   const [badCc, setBadCc] = useState<string[]>([]);
-  // The page's composer takes the focus as it opens, so the next Tab stays in the form; the
-  // dialog does the same through its own open focus.
-  useEffect(() => {
-    if (inline) toInput.current?.focus();
+
+  // Remember the trigger element before moving focus into To so closing restores focus to it.
+  useLayoutEffect(() => {
+    if (inline) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) {
+      previousFocusRef.current = active;
+    }
   }, [inline]);
+
+  // Focus the To field as the composer opens (both inline and floating docked).
+  useEffect(() => {
+    toInput.current?.focus();
+  }, [inline]);
+
+  const closeComposer = () => {
+    onClose();
+    if (!inline && previousFocusRef.current?.isConnected) {
+      previousFocusRef.current.focus();
+    }
+  };
 
   /**
    * Names every address of To and Cc that is not a plain email address on its own field and
@@ -380,7 +401,7 @@ export function ComposeDialog({
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
-      onClose();
+      closeComposer();
     } catch (failure) {
       failed(failure);
     }
@@ -400,7 +421,7 @@ export function ComposeDialog({
       markReopenedCompose(draftKey, { ...snapshot, ...state });
       reopen();
     };
-    onClose();
+    closeComposer();
     scheduleUndoableSend(draftKey, {
       delayMs,
       sending: t('compose.sending'),
@@ -433,8 +454,7 @@ export function ComposeDialog({
     });
   };
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitForm = async () => {
     setErrorKey(null);
     if (template) {
       await submitTemplate();
@@ -479,10 +499,28 @@ export function ComposeDialog({
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
-      onClose();
+      closeComposer();
     } catch (failure) {
       // The dialog stays open so the failure cannot be missed or mistaken for a delivery.
       failed(failure);
+    }
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitForm();
+  };
+
+  const handleFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (
+      event.key === 'Enter' &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      !event.nativeEvent.isComposing &&
+      !send.isPending
+    ) {
+      event.preventDefault();
+      void submitForm();
     }
   };
 
@@ -551,8 +589,26 @@ export function ComposeDialog({
     // A new message says it is saved once the API has it; a refusal says it stays in this browser.
     if (keep && !isReplyOrForward) keepOnServer(keep, sayKept);
     else if (keep) sayKept();
-    onClose();
+    closeComposer();
   };
+
+  const handleEscape = useEffectEvent((event: globalThis.KeyboardEvent) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+    const target = event.target;
+    const insideComposer =
+      target instanceof Node && dialogRef.current !== null && dialogRef.current.contains(target);
+    const onDocument = target === document.body || target === document || target === window;
+    if (windowMode === 'expanded' || insideComposer || onDocument) {
+      event.preventDefault();
+      dismiss();
+    }
+  });
+
+  useEffect(() => {
+    if (inline || windowMode === 'minimized') return;
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [inline, windowMode]);
 
   const titleKey =
     draft.mode === 'forward'
@@ -560,11 +616,31 @@ export function ComposeDialog({
       : draft.reply
         ? 'compose.replyTitle'
         : 'compose.title';
+  const defaultTitle = t(titleKey);
+  const displayTitle = subject.trim() || defaultTitle;
+  const descriptionCopy = fromOptions
+    ? t('compose.descriptionPick')
+    : t('compose.description', { address: from.address });
+  const isMinimized = !inline && windowMode === 'minimized';
 
   const form = (
-    // In the dialog the body scrolls and Send stays in view, even on a phone.
-    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-      <DialogBody className="space-y-4">
+    // Keep the form mounted across docked/minimized/expanded so draft state and files stay intact.
+    <form
+      onSubmit={submit}
+      onKeyDown={handleFormKeyDown}
+      className={cn('flex min-h-0 flex-1 flex-col', isMinimized && 'hidden')}
+    >
+      <div
+        className={cn(
+          'flex-1 overflow-y-auto overscroll-contain',
+          inline ? 'space-y-4' : 'space-y-3 px-4 py-3'
+        )}
+      >
+        {!inline ? (
+          <p id={descriptionId} className="text-xs text-muted-foreground">
+            {descriptionCopy}
+          </p>
+        ) : null}
         {fromOptions ? (
           <div className="space-y-2">
             <Label htmlFor="mail-compose-from">{t('compose.from')}</Label>
@@ -588,25 +664,25 @@ export function ComposeDialog({
         ) : null}
         <div className="space-y-2">
           <Label htmlFor="mail-compose-to">{t('compose.to')}</Label>
-          <Textarea
-            className={inline ? 'min-h-10' : undefined}
+          <RecipientChipsInput
+            ref={toInput}
             id="mail-compose-to"
+            name="to"
             value={to}
-            rows={1}
-            spellCheck={false}
             disabled={send.isPending}
             placeholder={t('compose.toPlaceholder')}
-            aria-describedby="mail-compose-recipients-hint"
-            root
-            ref={toInput}
+            ariaDescribedBy="mail-compose-recipients-hint"
+            className={inline ? 'min-h-10' : undefined}
+            removeLabel={address => t('compose.removeRecipient', { address })}
+            invalidChipLabel={address => t('compose.invalidRecipientChip', { address })}
             errorText={
               badTo.length > 0
                 ? t('compose.invalidRecipients', { addresses: badTo.join(', ') })
                 : undefined
             }
-            onChange={event => {
+            onChange={next => {
               setBadTo([]);
-              setTo(event.target.value);
+              setTo(next);
             }}
           />
           <p id="mail-compose-recipients-hint" className="text-xs text-muted-foreground">
@@ -615,23 +691,23 @@ export function ComposeDialog({
         </div>
         <div className="space-y-2">
           <Label htmlFor="mail-compose-cc">{t('compose.cc')}</Label>
-          <Textarea
-            className={inline ? 'min-h-10' : undefined}
-            id="mail-compose-cc"
-            value={cc}
-            rows={1}
-            spellCheck={false}
-            disabled={send.isPending}
-            root
+          <RecipientChipsInput
             ref={ccInput}
+            id="mail-compose-cc"
+            name="cc"
+            value={cc}
+            disabled={send.isPending}
+            className={inline ? 'min-h-10' : undefined}
+            removeLabel={address => t('compose.removeRecipient', { address })}
+            invalidChipLabel={address => t('compose.invalidRecipientChip', { address })}
             errorText={
               badCc.length > 0
                 ? t('compose.invalidRecipients', { addresses: badCc.join(', ') })
                 : undefined
             }
-            onChange={event => {
+            onChange={next => {
               setBadCc([]);
-              setCc(event.target.value);
+              setCc(next);
             }}
           />
         </div>
@@ -670,12 +746,13 @@ export function ComposeDialog({
           }
         />
         {errorKey ? <ComposeErrorAlert errorKey={errorKey} mode={draft.mode} /> : null}
-      </DialogBody>
+      </div>
       {/* Inline, the page scrolls the form; Send stays pinned to its bottom, even on a phone. */}
       <DialogFooter
         className={cn(
-          'mt-4',
-          inline && 'sticky bottom-0 z-10 -mx-4 border-t bg-background px-4 py-3 sm:-mx-8 sm:px-8'
+          inline
+            ? 'sticky bottom-0 z-10 -mx-4 mt-4 border-t bg-background px-4 py-3 sm:-mx-8 sm:px-8'
+            : 'shrink-0 border-t border-border/60 bg-background px-4 py-3'
         )}
       >
         <Button type="button" variant="outline" disabled={send.isPending} onClick={dismiss}>
@@ -690,11 +767,11 @@ export function ComposeDialog({
   if (inline)
     return (
       <section
-        aria-label={t(titleKey)}
+        aria-label={defaultTitle}
         className="mx-auto h-full w-full max-w-3xl space-y-5 overflow-y-auto px-4 pt-5 sm:px-8"
       >
         <header className="border-b pb-4">
-          <h1 className="font-serif text-2xl font-semibold">{t(titleKey)}</h1>
+          <h1 className="font-serif text-2xl font-semibold">{defaultTitle}</h1>
           {!fromOptions && (
             <p className="mt-1 text-sm text-muted-foreground">
               {t('compose.description', { address: from.address })}
@@ -705,24 +782,18 @@ export function ComposeDialog({
       </section>
     );
   return (
-    <Dialog open onOpenChange={open => !open && dismiss()}>
-      <DialogContent
-        closeLabel={t('actions.close')}
-        onOpenAutoFocus={event => {
-          event.preventDefault();
-          toInput.current?.focus();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>{t(titleKey)}</DialogTitle>
-          <DialogDescription>
-            {fromOptions
-              ? t('compose.descriptionPick')
-              : t('compose.description', { address: from.address })}
-          </DialogDescription>
-        </DialogHeader>
-        {form}
-      </DialogContent>
-    </Dialog>
+    <ComposeWindowShell
+      dialogRef={dialogRef}
+      windowMode={windowMode}
+      onWindowModeChange={setWindowMode}
+      titleId={titleId}
+      descriptionId={descriptionId}
+      accessibleTitle={defaultTitle}
+      displayTitle={displayTitle}
+      closeDisabled={send.isPending}
+      onDismiss={dismiss}
+    >
+      {form}
+    </ComposeWindowShell>
   );
 }

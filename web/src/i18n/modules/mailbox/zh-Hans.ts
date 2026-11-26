@@ -514,6 +514,12 @@ const messages = {
     sessionEndedDraft: '已写的内容保存在此浏览器中，重新登录后会再次打开。',
     signIn: '登录',
     invalidRecipients: '不是有效的邮箱地址：{addresses}',
+    minimize: '最小化',
+    restore: '还原',
+    expand: '全屏展开',
+    dock: '收起到底部',
+    removeRecipient: '移除 {address}',
+    invalidRecipientChip: '无效邮箱地址：{address}',
   },
   emails: {
     title: '收发记录',
