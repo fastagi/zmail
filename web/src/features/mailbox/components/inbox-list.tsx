@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -21,7 +20,6 @@ import {
   MailOpen,
   PanelLeft,
   RefreshCw,
-  Search,
   Star,
   Trash2,
   X,
@@ -29,30 +27,19 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   canArchiveInboxItem,
   canDeleteInboxItem,
   type InboxQuickAction,
 } from '@/features/mailbox/components/inbox/use-inbox-actions';
+import { InboxSearchBar } from '@/features/mailbox/components/inbox-search-bar';
 import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
 import { CopyAddressButton } from '@/features/mailbox/components/copy-address-button';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { knownTimeZone } from '@/features/mailbox/components/mail-shared';
 import { rowUnread } from '@/features/mailbox/components/message-rows';
-import {
-  INBOX_ASSIGNMENTS,
-  INBOX_DATE_RANGES,
-  MAIL_SEARCH_MAX_LENGTH,
-} from '@/features/mailbox/schemas';
+import { INBOX_ASSIGNMENTS, INBOX_DATE_RANGES } from '@/features/mailbox/schemas';
 import type {
   InboxAssignment,
   InboxItem,
@@ -68,7 +55,6 @@ import { cn } from '@/utils';
 
 type ListTab = 'all' | 'unread' | 'attachments' | InboxAssignment;
 type DateRange = (typeof INBOX_DATE_RANGES)[number];
-const ANY_DATE_RANGE = '__all__';
 
 /** How far below the visible rows the next page starts loading. */
 const loadAheadMargin = '240px';
@@ -163,28 +149,6 @@ export function InboxListHeader({
   searchRef?: Ref<HTMLInputElement>;
 }) {
   const t = useT('mailbox');
-  const [search, setSearch] = useState(q);
-  const [committed, setCommitted] = useState(q);
-  // A search changed from outside (a reset URL, another view) shows in the field.
-  if (committed !== q) {
-    setCommitted(q);
-    setSearch(q);
-  }
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    onSearch(search.trim());
-  };
-  const change = (value: string) => {
-    setSearch(value);
-    if (value.trim() === '' && q !== '') onSearch('');
-  };
-  /** `Esc` clears the field; an empty field leaves `Esc` to the page. */
-  const escape = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Escape' || search === '') return;
-    event.preventDefault();
-    change('');
-  };
   const selectTab = (value: ListTab) => {
     if (value === 'attachments') onAttachmentsChange?.(true);
     else if (value === 'unread') onUnreadChange(true);
@@ -294,57 +258,17 @@ export function InboxListHeader({
           </Button>
         ) : null}
       </div>
-      <form
-        role="search"
-        aria-label={t('inbox.search.label')}
-        onSubmit={submit}
-        className="mt-3 flex gap-2"
-      >
-        <div className="relative min-w-0 flex-1">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-text-muted"
-            aria-hidden="true"
-          />
-          <Input
-            ref={searchRef}
-            type="search"
-            value={search}
-            maxLength={MAIL_SEARCH_MAX_LENGTH}
-            aria-label={t('inbox.search.label')}
-            placeholder={t('inbox.search.placeholder')}
-            className="h-8 pl-8 text-[13px]"
-            onChange={event => change(event.target.value)}
-            onKeyDown={escape}
-          />
-        </div>
-        {onDateRangeChange ? (
-          <Select
-            value={dateRange ?? ANY_DATE_RANGE}
-            onValueChange={value =>
-              onDateRangeChange(value === ANY_DATE_RANGE ? null : (value as DateRange))
-            }
-          >
-            <SelectTrigger
-              size="sm"
-              aria-label={t('inbox.date.label')}
-              className={cn(
-                'shrink-0 border-border-main bg-bg-surface px-2 text-[13px]',
-                dateRange ? 'font-medium text-text-main' : 'text-text-muted'
-              )}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value={ANY_DATE_RANGE}>{t('inbox.date.any')}</SelectItem>
-              {INBOX_DATE_RANGES.map(range => (
-                <SelectItem key={range} value={range}>
-                  {t(`inbox.date.${range}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null}
-      </form>
+      <InboxSearchBar
+        q={q}
+        onSearch={onSearch}
+        unread={unread}
+        onUnreadChange={onUnreadChange}
+        attachments={attachments}
+        onAttachmentsChange={onAttachmentsChange}
+        dateRange={dateRange}
+        onDateRangeChange={onDateRangeChange}
+        searchRef={searchRef}
+      />
       <div
         role="tablist"
         aria-label={t('inbox.tabs.label')}

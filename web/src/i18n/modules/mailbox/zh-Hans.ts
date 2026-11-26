@@ -2313,6 +2313,31 @@ const messages = {
       readOnly: '来自 {provider} 的只读副本，请在 {provider} 中回复。',
     },
   },
+  quickReply: {
+    reply: '回复',
+    replyAll: '全部回复',
+    forward: '转发',
+    replyAria: '页内回复',
+    replyAllAria: '页内全部回复',
+    forwardAria: '转发此邮件',
+    replyTo: '回复 {recipient}',
+    replyAllTo: '全部回复 {recipients}',
+    cc: '抄送：{recipients}',
+    popOut: '弹出到浮窗',
+    placeholder: '输入快捷回复内容…',
+    send: '发送',
+    sending: '正在发送…',
+    shortcutHint: '⌘↵ 发送',
+    discard: '收起快捷回复',
+  },
+  searchChips: {
+    label: '快捷搜索筛选',
+    toggle: '展开或收起快捷筛选',
+    unread: '未读',
+    hasAttachment: '有附件',
+    last7Days: '近 7 天',
+    last30Days: '近 30 天',
+  },
 } as const satisfies LocaleMessageShape<MailboxMessages>;
 
 export default messages;

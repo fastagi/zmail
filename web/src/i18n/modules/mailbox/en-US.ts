@@ -2440,6 +2440,31 @@ const messages = {
       readOnly: 'Read-only copy from {provider}. Reply from {provider} itself.',
     },
   },
+  quickReply: {
+    reply: 'Reply',
+    replyAll: 'Reply all',
+    forward: 'Forward',
+    replyAria: 'Reply inline',
+    replyAllAria: 'Reply all inline',
+    forwardAria: 'Forward message',
+    replyTo: 'Reply to {recipient}',
+    replyAllTo: 'Reply all to {recipients}',
+    cc: 'Cc: {recipients}',
+    popOut: 'Pop out',
+    placeholder: 'Write a quick reply…',
+    send: 'Send',
+    sending: 'Sending…',
+    shortcutHint: '⌘↵ to send',
+    discard: 'Close quick reply',
+  },
+  searchChips: {
+    label: 'Quick search filters',
+    toggle: 'Toggle quick filters',
+    unread: 'Unread',
+    hasAttachment: 'Has attachment',
+    last7Days: 'Past 7 days',
+    last30Days: 'Past 30 days',
+  },
 } as const;
 
 export default messages;

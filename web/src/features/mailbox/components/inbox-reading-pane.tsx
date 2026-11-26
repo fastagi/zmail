@@ -19,6 +19,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { InboxTriagePanel } from '@/features/mailbox/components/inbox-triage-panel';
+import { InlineQuickReply } from '@/features/mailbox/components/inline-quick-reply';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { originOf, toastWithUndo } from '@/features/mailbox/components/message-actions';
 import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-rows';
@@ -425,6 +426,19 @@ export function InboxReadingPane({
           />
         ) : null}
         {body}
+        {canReply && !unavailable && (replyTarget || newest) ? (
+          <InlineQuickReply
+            key={`quick-reply-${item.id}`}
+            organizationId={organizationId}
+            mailboxId={item.mailbox_id}
+            mailboxAddress={item.mailbox_address}
+            replyTarget={replyTarget}
+            forwardTarget={newest}
+            onPopOutReply={navigation.onReply}
+            onPopOutReplyAll={navigation.onReplyAll}
+            onForward={navigation.onForward}
+          />
+        ) : null}
       </div>
     </div>
   );
