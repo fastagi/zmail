@@ -28,7 +28,7 @@ export type PaletteCommand =
 const GROUP_LIMIT = 5;
 /** The pause after the last keystroke before mail is searched (§11.8). */
 export const MAIL_SEARCH_DELAY_MS = 250;
-const PALETTE_VIEWS: readonly InboxView[] = ['all', 'today', 'pending', 'sent'];
+const PALETTE_VIEWS: readonly InboxView[] = ['all', 'today', 'pending', 'snoozed', 'sent'];
 
 type MailSearch =
   | { status: 'idle' }

@@ -9,6 +9,7 @@ import {
   toastWithUndo,
   type MailOrigin,
 } from '@/features/mailbox/components/message-actions';
+import { useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
 import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-rows';
 import { updateInChunks } from '@/features/mailbox/components/messages/message-list-helpers';
 import { useUpdateInboxMessage, useUpdateInboxMessages } from '@/features/mailbox/hooks/use-inbox';
@@ -45,6 +46,15 @@ export function canArchiveInboxItem(
 /** Whether a row can be moved to the trash from the unified inbox listing. */
 export function canDeleteInboxItem(item: InboxItem, sendable: ReadonlySet<number>): boolean {
   return sendable.has(item.mailbox_id) && item.placement !== 'trash';
+}
+
+/** Whether a row can be snoozed or unsnoozed from the unified inbox listing. */
+export function canSnoozeInboxItem(
+  item: InboxItem,
+  sendable: ReadonlySet<number>,
+  view: InboxView = 'all'
+): boolean {
+  return sendable.has(item.mailbox_id) && item.placement !== 'trash' && view !== 'sent';
 }
 
 function setRowReadState(item: InboxItem, read: boolean): InboxItem {
@@ -97,6 +107,7 @@ export function useInboxActions({
   rows,
   sendableIds,
   view,
+  timeZone,
   scopeKey,
   openItemId,
   onLeaveOpenRow,
@@ -106,12 +117,14 @@ export function useInboxActions({
   rows: readonly InboxItem[];
   sendableIds: ReadonlySet<number>;
   view: InboxView;
+  timeZone?: string;
   scopeKey: string;
   openItemId: number | null;
   onLeaveOpenRow: () => void;
   onCloseOpenRow: () => void;
 }) {
   const t = useT('mailbox');
+  const formatDateTime = useDateTimeFormat(timeZone);
   const queryClient = useQueryClient();
   const updateInbox = useUpdateInboxMessages(organizationId);
   const updateStar = useUpdateInboxMessage(organizationId);
@@ -355,6 +368,76 @@ export function useInboxActions({
     ]
   );
 
+  const runSnooze = useCallback(
+    async (item: InboxItem, snoozedUntil: string | null) => {
+      if (movingIds.current.has(item.id) || !canSnoozeInboxItem(item, sendableIds, view)) return;
+
+      const ids = rowMessageIds(item);
+      const previousSnooze = item.snoozed_until ?? null;
+      const clearing = snoozedUntil === null;
+      const removesFromView = clearing ? view === 'snoozed' : view !== 'snoozed';
+
+      movingIds.current.add(item.id);
+      const rollback = removesFromView
+        ? snapshotAndPatch(items => items.filter(row => row.id !== item.id))
+        : snapshotAndPatch(items =>
+            items.map(row => (row.id === item.id ? { ...row, snoozed_until: snoozedUntil } : row))
+          );
+      if (removesFromView) {
+        if (openItemId === item.id) onLeaveOpenRow();
+        setCheckedIds(prev => {
+          if (!prev.has(item.id)) return prev;
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      }
+
+      const undoChange = (change: Omit<UpdateMailMessagesInput, 'message_ids'>) =>
+        mutateMailbox(item.mailbox_id, ids, change).catch((failure: unknown) => {
+          toast.error(t(resolveMailboxErrorKey(failure)));
+        });
+
+      try {
+        await mutateMailbox(
+          item.mailbox_id,
+          ids,
+          clearing ? { clear_snooze: true } : { snoozed_until: snoozedUntil }
+        );
+        if (clearing) {
+          if (previousSnooze) {
+            toastWithUndo(t('messages.unsnoozed'), t('actions.undo'), () =>
+              undoChange({ snoozed_until: previousSnooze })
+            );
+          } else {
+            toast.success(t('messages.unsnoozed'));
+          }
+        } else {
+          const time = formatDateTime.format(new Date(snoozedUntil));
+          toastWithUndo(t('messages.snoozed', { time }), t('actions.undo'), () =>
+            undoChange(previousSnooze ? { snoozed_until: previousSnooze } : { clear_snooze: true })
+          );
+        }
+      } catch (failure) {
+        rollback();
+        toast.error(t(resolveMailboxErrorKey(failure)));
+      } finally {
+        movingIds.current.delete(item.id);
+      }
+    },
+    [
+      formatDateTime,
+      mutateMailbox,
+      onLeaveOpenRow,
+      openItemId,
+      sendableIds,
+      setCheckedIds,
+      snapshotAndPatch,
+      t,
+      view,
+    ]
+  );
+
   return {
     checkedIds,
     selectedItems,
@@ -364,5 +447,6 @@ export function useInboxActions({
     clearSelection,
     runQuickAction,
     runBulkAction,
+    runSnooze,
   };
 }

@@ -51,7 +51,9 @@ import {
   type ComposeWindowMode,
 } from '@/features/mailbox/components/compose-window-shell';
 import { RecipientChipsInput } from '@/features/mailbox/components/recipient-chips-input';
+import { ScheduleSendMenu } from '@/features/mailbox/components/schedule-send-menu';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
@@ -81,18 +83,8 @@ import { mailSignatureBlock } from '@/features/mailbox/signature-schemas';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-export {
-  type ComposeMode,
-  type ComposeDraft,
-  type QuotedReplyCopy,
-  type ForwardDraftCopy,
-  emptyDraft,
-  replyDraft,
-  quotedReplyDraft,
-  replyAllRecipients,
-  replyAllDraft,
-  forwardDraft,
-} from '@/features/mailbox/components/compose-drafts';
+export type { ComposeMode, ComposeDraft, QuotedReplyCopy, ForwardDraftCopy } from '@/features/mailbox/components/compose-drafts';
+export { emptyDraft, replyDraft, quotedReplyDraft, replyAllRecipients, replyAllDraft, forwardDraft } from '@/features/mailbox/components/compose-drafts';
 
 type Sender = Pick<Mailbox, 'id' | 'address'>;
 
@@ -121,6 +113,7 @@ export function ComposeDialog({
   onReopen?: () => void;
 }) {
   const t = useT('mailbox');
+  const formatDateTime = useDateTimeFormat();
   const organizationId = useMailOrganizationId();
   // A draft kept when the dialog last closed takes the place of the starting text.
   // Drafts belong to the signed-in user; the composer reads them once as it opens.
@@ -260,18 +253,7 @@ export function ComposeDialog({
     );
     // Files still being read back are not forgotten in the meantime.
     if (!restoringFiles || files.length > 0) writeComposeDraftFiles(draftKey, files);
-  }, [
-    draftKey,
-    startingDraft,
-    to,
-    cc,
-    subject,
-    body,
-    files,
-    lostFiles,
-    knownSavedId,
-    restoringFiles,
-  ]);
+  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles, knownSavedId, restoringFiles]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
@@ -357,9 +339,30 @@ export function ComposeDialog({
     }
   };
 
-  const submitTemplate = async () => {
-    if (!template) return;
-    if (!checkRecipients()) return;
+  const completeSent = (
+    stored: { queued_reason?: string | null; scheduled_at?: string | null },
+    scheduledAt?: string
+  ) => {
+    const targetIso = stored.scheduled_at ?? scheduledAt;
+    if (targetIso || stored.queued_reason === 'scheduled') {
+      toast.success(
+        t('compose.scheduleSend.scheduled', {
+          time: formatDateTime.format(new Date(targetIso ?? Date.now())),
+        })
+      );
+    } else {
+      toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
+    }
+    sentRef.current = true;
+    forgetSaved();
+    writeComposeDraft(draftKey, null);
+    writeComposeDraftFiles(draftKey, null);
+    onStored?.();
+    closeComposer();
+  };
+
+  const submitTemplate = async (scheduledAt?: string) => {
+    if (!template || !checkRecipients()) return;
     const recipients = normalizeRecipientLists(splitRecipients(to), splitRecipients(cc));
     if (!recipients) {
       setErrorKey('errors.messageInvalid');
@@ -369,7 +372,6 @@ export function ComposeDialog({
       setErrorKey('errors.attachmentsInvalid');
       return;
     }
-    // An empty field is left out, so the template's fallback applies.
     const variables = Object.fromEntries(
       template.variables
         .map(name => [name, (values[name] ?? '').trim()] as const)
@@ -382,15 +384,9 @@ export function ComposeDialog({
         ...(recipients.cc.length > 0 ? { cc: recipients.cc } : {}),
         template: { id: template.id, variables },
         ...(attachments.length > 0 ? { attachments } : {}),
+        ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
       });
-      // At the send limit the message waits; nobody is shown how much of the limit is used.
-      toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
-      sentRef.current = true;
-      forgetSaved();
-      writeComposeDraft(draftKey, null);
-      writeComposeDraftFiles(draftKey, null);
-      onStored?.();
-      closeComposer();
+      completeSent(stored, scheduledAt);
     } catch (failure) {
       failed(failure);
     }
@@ -443,10 +439,10 @@ export function ComposeDialog({
     });
   };
 
-  const submitForm = async () => {
+  const submitForm = async (scheduledAt?: string) => {
     setErrorKey(null);
     if (template) {
-      await submitTemplate();
+      await submitTemplate(scheduledAt);
       return;
     }
     if (!checkRecipients()) return;
@@ -474,21 +470,15 @@ export function ComposeDialog({
         text: normalized.text,
         ...(normalized.in_reply_to === '' ? {} : { in_reply_to: normalized.in_reply_to }),
         ...(attachments.length > 0 ? { attachments } : {}),
+        ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
       };
       const delayMs = undoSendDelayMs();
-      if (onReopen && delayMs > 0 && !isReplyOrForward) {
+      if (!scheduledAt && onReopen && delayMs > 0 && !isReplyOrForward) {
         sendLater(input, delayMs, onReopen);
         return;
       }
       const stored = await send.mutateAsync(input);
-      // At the send limit the message waits; nobody is shown how much of the limit is used.
-      toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
-      sentRef.current = true;
-      forgetSaved();
-      writeComposeDraft(draftKey, null);
-      writeComposeDraftFiles(draftKey, null);
-      onStored?.();
-      closeComposer();
+      completeSent(stored, scheduledAt);
     } catch (failure) {
       // The dialog stays open so the failure cannot be missed or mistaken for a delivery.
       failed(failure);
@@ -749,9 +739,12 @@ export function ComposeDialog({
         <Button type="button" variant="outline" disabled={send.isPending} onClick={dismiss}>
           {t('actions.cancel')}
         </Button>
-        <Button type="submit" loading={send.isPending} icon={<Send className="size-4" />}>
-          {t('actions.send')}
-        </Button>
+        <div className="inline-flex items-center">
+          <Button type="submit" loading={send.isPending} icon={<Send className="size-4" />} className="rounded-r-none">
+            {t('actions.send')}
+          </Button>
+          <ScheduleSendMenu disabled={send.isPending} onSchedule={iso => void submitForm(iso)} />
+        </div>
       </DialogFooter>
     </form>
   );

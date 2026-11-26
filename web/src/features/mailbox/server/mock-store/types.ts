@@ -162,6 +162,8 @@ export interface MockMessageChange {
   add_label_ids?: number[];
   remove_label_ids?: number[];
   label_ids?: number[];
+  snoozed_until?: string;
+  clear_snooze?: boolean;
 }
 
 /**

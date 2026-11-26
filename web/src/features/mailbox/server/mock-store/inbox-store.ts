@@ -137,7 +137,9 @@ export function listUnifiedInbox(
   if (needle !== undefined && Array.from(needle).length === 1) {
     return { ok: false, error: 'search_too_broad' };
   }
-  const day = viewerDay(ctx.dependencies.now(), query.tz);
+  const now = ctx.dependencies.now();
+  const nowMs = now.getTime();
+  const day = viewerDay(now, query.tz);
   const since = query.since === undefined ? -Infinity : dayStart(query.since, query.tz, 0);
   const until = query.until === undefined ? Infinity : dayStart(query.until, query.tz, 1);
   const rows: { item: InboxItem; createdAt: bigint }[] = [];
@@ -152,7 +154,7 @@ export function listUnifiedInbox(
     const matching = ctx
       .visibleMessages(state)
       .map(message => ctx.forViewer(state, message, viewer))
-      .filter(message => inInboxView(message, query, needle, day))
+      .filter(message => inInboxView(message, query, needle, day, nowMs))
       .filter(message => {
         const created = Date.parse(message.created_at);
         return created >= since && created < until;
@@ -215,8 +217,17 @@ export function getUnifiedInboxCounts(
   viewer: MailboxViewer,
   tz: string
 ): InboxCounts {
-  const day = viewerDay(ctx.dependencies.now(), tz);
-  const views = { all_unread: 0, today: 0, today_unread: 0, pending: 0, sent_waiting: 0 };
+  const now = ctx.dependencies.now();
+  const nowMs = now.getTime();
+  const day = viewerDay(now, tz);
+  const views = {
+    all_unread: 0,
+    today: 0,
+    today_unread: 0,
+    pending: 0,
+    sent_waiting: 0,
+    snoozed: 0,
+  };
   const mailboxes: InboxCounts['mailboxes'] = [];
   const roles = new Map<number, number>();
   let ungrouped = 0;
@@ -228,12 +239,19 @@ export function getUnifiedInboxCounts(
     for (const stored of ctx.visibleMessages(state)) {
       const message = ctx.forViewer(state, stored, viewer);
       const isUnread = !message.read;
-      if (inInboxView(message, { view: 'all' }) && isUnread) unread += 1;
-      if (inInboxView(message, { view: 'today' }, undefined, day)) {
+      if (inInboxView(message, { view: 'all' }, undefined, undefined, nowMs) && isUnread) {
+        unread += 1;
+      }
+      if (inInboxView(message, { view: 'today' }, undefined, day, nowMs)) {
         views.today += 1;
         if (isUnread) views.today_unread += 1;
       }
-      if (inInboxView(message, { view: 'pending' })) views.pending += 1;
+      if (inInboxView(message, { view: 'pending' }, undefined, undefined, nowMs)) {
+        views.pending += 1;
+      }
+      if (inInboxView(message, { view: 'snoozed' }, undefined, undefined, nowMs)) {
+        views.snoozed += 1;
+      }
       if (message.queued_reason === 'send_limit' && message.placement !== 'trash') {
         views.sent_waiting += 1;
       }
@@ -287,6 +305,10 @@ export function getMailStats(
   return entries;
 }
 
+function isActivelySnoozed(message: MailMessage, nowMs: number): boolean {
+  return Boolean(message.snoozed_until && Date.parse(message.snoozed_until) > nowMs);
+}
+
 /**
  * `message` is as the viewer sees it; see `listUnifiedInbox` for the views. `needle` is the
  * lowercased search, which replaces the view; `day` is needed for `today` only.
@@ -295,7 +317,8 @@ function inInboxView(
   message: MailMessage,
   query: Pick<MockInboxQuery, 'view' | 'unread' | 'hasAttachments'>,
   needle?: string,
-  day?: ViewerDay
+  day?: ViewerDay,
+  nowMs = Date.now()
 ): boolean {
   const unread = message.direction === 'inbound' && !message.read;
   if (query.unread !== undefined && unread !== query.unread) return false;
@@ -308,9 +331,10 @@ function inInboxView(
   if (needle !== undefined) {
     return message.placement !== 'trash' && matchesSearch(message, needle);
   }
+  const snoozed = isActivelySnoozed(message, nowMs);
   switch (query.view) {
     case 'all':
-      return message.direction === 'inbound' && message.placement === 'default';
+      return message.direction === 'inbound' && message.placement === 'default' && !snoozed;
     case 'sent':
       return message.direction === 'outbound' && message.placement === 'default';
     case 'today': {
@@ -319,12 +343,17 @@ function inInboxView(
         day !== undefined &&
         message.direction === 'inbound' &&
         message.placement !== 'trash' &&
+        !snoozed &&
         at >= day.start &&
         at < day.end
       );
     }
     case 'pending':
-      return message.starred && message.placement !== 'archive' && message.placement !== 'trash';
+      return (
+        message.starred && message.placement !== 'archive' && message.placement !== 'trash' && !snoozed
+      );
+    case 'snoozed':
+      return message.placement !== 'trash' && snoozed;
     default:
       return false;
   }

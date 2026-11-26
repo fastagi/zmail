@@ -21,6 +21,11 @@ export async function PUT(request: Request, context: RouteContext) {
   return privateMailboxResponse(await updateMailMessageRoute(request, mailboxId, messageId));
 }
 
+export async function PATCH(request: Request, context: RouteContext) {
+  const { mailboxId, messageId } = await context.params;
+  return privateMailboxResponse(await updateMailMessageRoute(request, mailboxId, messageId));
+}
+
 export async function DELETE(request: Request, context: RouteContext) {
   const { mailboxId, messageId } = await context.params;
   return privateMailboxResponse(await deleteMailMessageRoute(request, mailboxId, messageId));

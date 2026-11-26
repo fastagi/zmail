@@ -301,6 +301,7 @@ export async function sendMailMessageRoute(
         html: 'html',
         in_reply_to: 'in_reply_to',
         attachments: 'attachments',
+        scheduled_at: 'scheduled_at',
       },
     });
   }
@@ -313,7 +314,17 @@ export async function sendMailMessageRoute(
 async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>> {
   const body = await jsonObject(request, maxSendBodyBytes);
   if (!body.ok) return body;
-  const { to, cc, subject, text, html, in_reply_to: inReplyTo, attachments, template } = body.value;
+  const {
+    to,
+    cc,
+    subject,
+    text,
+    html,
+    in_reply_to: inReplyTo,
+    attachments,
+    template,
+    scheduled_at: scheduledAt,
+  } = body.value;
   const errors: Record<string, string[]> = {};
   if (!addressList(to) || to.length === 0) errors.to = ['The to field is invalid'];
   if (cc !== undefined && !addressList(cc)) errors.cc = ['The cc field is invalid'];
@@ -340,6 +351,12 @@ async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>>
   if (attachments !== undefined && !attachmentList(attachments)) {
     errors.attachments = ['The attachments field is invalid'];
   }
+  if (
+    scheduledAt !== undefined &&
+    (!boundedString(scheduledAt, 64) || Number.isNaN(Date.parse(scheduledAt)))
+  ) {
+    errors.scheduled_at = ['The scheduled_at field is invalid'];
+  }
   if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
   return {
     ok: true,
@@ -352,6 +369,7 @@ async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>>
       ...(typeof inReplyTo === 'string' ? { in_reply_to: inReplyTo } : {}),
       ...(attachmentList(attachments) ? { attachments } : {}),
       ...(templateReference(template) ? { template } : {}),
+      ...(typeof scheduledAt === 'string' ? { scheduled_at: scheduledAt } : {}),
     },
   };
 }

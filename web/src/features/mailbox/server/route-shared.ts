@@ -268,7 +268,7 @@ export function privateMailboxHeaders(): Headers {
   return privateNoStoreHeaders(undefined, ['Cookie', 'Organization-Id']);
 }
 
-export function success<T>(data: T, status: 200 | 201 = 200): NextResponse {
+export function success<T>(data: T, status: 200 | 201 | 202 = 200): NextResponse {
   return apiSuccessResponse(data, { status, headers: privateMailboxHeaders() });
 }
 
@@ -383,7 +383,11 @@ export function attachmentList(value: unknown): value is AttachmentInput[] {
 }
 
 export function mockSendResponse(result: MockMailSendResult): NextResponse {
-  if (result.ok) return success(result.message, 201);
+  if (result.ok) {
+    const status =
+      result.message.status === 'queued' && result.message.queued_reason === 'scheduled' ? 202 : 201;
+    return success(result.message, status);
+  }
   switch (result.error) {
     case 'mailbox_not_found':
       return mailboxNotFound();

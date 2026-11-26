@@ -415,6 +415,7 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
     rows,
     sendableIds,
     view: urlState.view,
+    timeZone,
     scopeKey,
     openItemId: openItem?.id ?? null,
     onLeaveOpenRow: () => (navigation.onNext ?? navigation.onClose)(),
@@ -712,5 +713,6 @@ export function useInboxWorkspace({ canManage }: { canManage: boolean }) {
     clearSelection: rowActions.clearSelection,
     runQuickAction: rowActions.runQuickAction,
     runBulkAction: rowActions.runBulkAction,
+    runSnooze: rowActions.runSnooze,
   };
 }

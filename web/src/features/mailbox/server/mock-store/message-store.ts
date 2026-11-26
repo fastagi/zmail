@@ -398,6 +398,19 @@ export function sendMailboxMessage(
   if (!normalized) return { ok: false, error: 'invalid' };
   const drafts = input.attachments ?? [];
   if (!attachmentsWithinLimits(drafts)) return { ok: false, error: 'invalid' };
+  let scheduledAt: string | null = null;
+  if (input.scheduled_at !== undefined) {
+    const parsed = Date.parse(input.scheduled_at);
+    const nowMs = ctx.dependencies.now().getTime();
+    if (
+      Number.isNaN(parsed) ||
+      parsed < nowMs + 60_000 ||
+      parsed > nowMs + 365 * 24 * 60 * 60 * 1_000
+    ) {
+      return { ok: false, error: 'invalid' };
+    }
+    scheduledAt = new Date(parsed).toISOString();
+  }
 
   const id = ctx.nextMessageId++;
   // A reply joins the thread of the message it answers, when that message is in this mailbox.
@@ -424,21 +437,23 @@ export function sendMailboxMessage(
   });
   const sentAt = ctx.timestamp();
   // As the API's send call does: one message-level `accepted`, then what the provider
-  // reported for each recipient. The mock's provider delivers to everyone at once.
-  const events: MailEvent[] = [
-    { type: 'accepted', recipient: '', detail: '', occurred_at: sentAt },
-    ...[...normalized.to, ...normalized.cc].map((recipient): MailEvent => ({
-      type: 'delivered',
-      recipient,
-      detail: '',
-      occurred_at: sentAt,
-    })),
-  ];
+  // reported for each recipient. Scheduled sends wait queued without provider events yet.
+  const events: MailEvent[] = scheduledAt
+    ? []
+    : [
+        { type: 'accepted', recipient: '', detail: '', occurred_at: sentAt },
+        ...[...normalized.to, ...normalized.cc].map((recipient): MailEvent => ({
+          type: 'delivered',
+          recipient,
+          detail: '',
+          occurred_at: sentAt,
+        })),
+      ];
   const message: MailMessage = {
     id,
     mailbox_id: mailboxId,
     direction: 'outbound',
-    status: 'sent',
+    status: scheduledAt ? 'queued' : 'sent',
     from: { address: state.mailbox.address, name: state.mailbox.display_name },
     to: normalized.to,
     cc: normalized.cc,
@@ -446,8 +461,9 @@ export function sendMailboxMessage(
     // A member wrote it, so it starts out read.
     read: true,
     failure_code: '',
-    queued_reason: null,
-    last_event: 'delivered',
+    queued_reason: scheduledAt ? 'scheduled' : null,
+    ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
+    last_event: scheduledAt ? '' : 'delivered',
     attachment_count: attachments.length,
     template_id: templateId,
     placement: 'default',
@@ -488,7 +504,9 @@ function applyMessageChange(
     change.folder_id !== undefined ||
     change.add_label_ids !== undefined ||
     change.remove_label_ids !== undefined ||
-    change.label_ids !== undefined;
+    change.label_ids !== undefined ||
+    change.snoozed_until !== undefined ||
+    change.clear_snooze !== undefined;
   const found = ctx.authorize(organizationId, mailboxId, viewer, shared ? 'send' : 'view');
   if (!found.ok) return found;
   const { state } = found;
@@ -512,7 +530,7 @@ function applyMessageChange(
     ...(change.label_ids ?? []),
   ]);
   if (labelIds.some(id => !state.labels.has(id))) return { ok: false, error: 'label_not_found' };
-  const fields = changeErrors(messageIds, change, batch, shared);
+  const fields = changeErrors(messageIds, change, batch, shared, ctx.dependencies.now().getTime());
   if (Object.keys(fields).length > 0) return { ok: false, error: 'validation', fields };
 
   for (const stored of messages as MailMessage[]) {
@@ -531,6 +549,11 @@ function applyMessageChange(
       for (const id of change.add_label_ids ?? []) next.add(id);
       for (const id of change.remove_label_ids ?? []) next.delete(id);
       message = { ...message, label_ids: [...next].sort((left, right) => left - right) };
+    }
+    if (change.clear_snooze) {
+      message = { ...message, snoozed_until: null };
+    } else if (change.snoozed_until !== undefined) {
+      message = { ...message, snoozed_until: new Date(Date.parse(change.snoozed_until)).toISOString() };
     }
     state.messages.set(message.id, message);
   }

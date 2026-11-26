@@ -285,6 +285,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         onClearSelection={state.clearSelection}
         onQuickAction={state.runQuickAction}
         onBulkAction={state.runBulkAction}
+        onSnooze={state.runSnooze}
       />
 
       <InboxReadingSection

@@ -560,6 +560,8 @@ const messageChangeFieldMap = {
   label_ids: 'label_ids',
   add_label_ids: 'add_label_ids',
   remove_label_ids: 'remove_label_ids',
+  snoozed_until: 'snoozed_until',
+  clear_snooze: 'clear_snooze',
 } as const;
 
 const organizeFieldMap = { name: 'name', color: 'color' } as const;
@@ -580,10 +582,14 @@ async function messageChangeBody(
   const errors: Record<string, string[]> = {};
   const present = (key: string) => value[key] !== undefined && value[key] !== null;
   const change: MockMessageChange = {};
-  for (const key of ['read', 'starred'] as const) {
+  for (const key of ['read', 'starred', 'clear_snooze'] as const) {
     if (!present(key)) continue;
     if (typeof value[key] === 'boolean') change[key] = value[key];
     else errors[key] = [`The ${key} field must be a boolean`];
+  }
+  if (present('snoozed_until')) {
+    if (boundedString(value.snoozed_until, 64)) change.snoozed_until = value.snoozed_until;
+    else errors.snoozed_until = ['The snoozed_until field must be a timestamp string'];
   }
   if (present('placement')) {
     if (boundedString(value.placement, 32)) change.placement = value.placement;

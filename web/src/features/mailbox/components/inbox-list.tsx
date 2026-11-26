@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { useLocale } from 'next-intl';
 import {
   Archive,
+  Clock,
   ExternalLink,
   Inbox,
   Mail,
@@ -31,8 +32,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   canArchiveInboxItem,
   canDeleteInboxItem,
+  canSnoozeInboxItem,
   type InboxQuickAction,
 } from '@/features/mailbox/components/inbox/use-inbox-actions';
+import { SnoozeMenu } from '@/features/mailbox/components/snooze-menu';
 import { InboxSearchBar } from '@/features/mailbox/components/inbox-search-bar';
 import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
 import { CopyAddressButton } from '@/features/mailbox/components/copy-address-button';
@@ -310,6 +313,7 @@ export function InboxList({
   hasMore,
   loadingMore = false,
   onQuickAction,
+  onSnooze,
   checkedIds,
   onToggleSelect,
 }: {
@@ -334,6 +338,8 @@ export function InboxList({
   loadingMore?: boolean;
   /** Optional Gmail-style hover quick action handler. */
   onQuickAction?: (item: InboxItem, action: InboxQuickAction) => void;
+  /** Optional Gmail-style Snooze / Unsnooze handler. */
+  onSnooze?: (item: InboxItem, snoozedUntil: string | null) => void;
   /** Optional multi-select checked row IDs. */
   checkedIds?: ReadonlySet<number>;
   /** Optional toggle callback for multi-select checkboxes. */
@@ -343,9 +349,10 @@ export function InboxList({
   const rowTime = useRowTime(timeZone);
   const sentinel = useRef<HTMLDivElement | null>(null);
   const pageCount = pages.length;
-  const hasQuickActions = onQuickAction !== undefined;
+  const hasQuickActions = onQuickAction !== undefined || onSnooze !== undefined;
   const selectable = checkedIds !== undefined && onToggleSelect !== undefined;
   const hasChecked = selectable && checkedIds.size > 0;
+  const [snoozeOpenId, setSnoozeOpenId] = useState<number | null>(null);
 
   // Observed again after every page, so a short page that leaves the end in view loads the next.
   useEffect(() => {
@@ -424,8 +431,10 @@ export function InboxList({
           const senderLabel = item.from.name || item.from.address;
           const subject = item.subject || t('list.noSubject');
           const avatar = senderAvatarProps(senderLabel);
-          const canArchive = hasQuickActions && canArchiveInboxItem(item, sendable, view);
-          const canDelete = hasQuickActions && canDeleteInboxItem(item, sendable);
+          const canArchive = onQuickAction !== undefined && canArchiveInboxItem(item, sendable, view);
+          const canDelete = onQuickAction !== undefined && canDeleteInboxItem(item, sendable);
+          const canSnooze = onSnooze !== undefined && canSnoozeInboxItem(item, sendable, view);
+          const snoozeOpen = snoozeOpenId === item.id;
           return (
             <li key={item.id} role="presentation" className="group/row relative min-w-0">
               <div
@@ -509,7 +518,8 @@ export function InboxList({
                         className={cn(
                           'size-3 shrink-0 fill-amber-500 text-amber-500',
                           hasQuickActions &&
-                            'transition-opacity duration-[120ms] group-focus-within/row:opacity-0 group-hover/row:opacity-0 motion-reduce:transition-none'
+                            'transition-opacity duration-[120ms] group-focus-within/row:opacity-0 group-hover/row:opacity-0 motion-reduce:transition-none',
+                          snoozeOpen && 'opacity-0'
                         )}
                       />
                     ) : null}
@@ -518,7 +528,8 @@ export function InboxList({
                       className={cn(
                         'shrink-0 text-xs text-text-faint tabular-nums',
                         hasQuickActions &&
-                          'transition-opacity duration-[120ms] group-focus-within/row:opacity-0 group-hover/row:opacity-0 motion-reduce:transition-none'
+                          'transition-opacity duration-[120ms] group-focus-within/row:opacity-0 group-hover/row:opacity-0 motion-reduce:transition-none',
+                        snoozeOpen && 'opacity-0'
                       )}
                     >
                       {rowTime(item.created_at)}
@@ -532,6 +543,14 @@ export function InboxList({
                   >
                     {subject}
                   </span>
+                  {view === 'snoozed' && item.snoozed_until ? (
+                    <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                      <Clock className="size-3 shrink-0" aria-hidden="true" />
+                      <span>
+                        {t('inbox.snooze.untilBadge', { time: rowTime(item.snoozed_until) })}
+                      </span>
+                    </span>
+                  ) : null}
                   {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
                   {item.snippet ? (
                     <span className="mt-0.5 block truncate text-[12.5px] text-text-muted">
@@ -565,24 +584,44 @@ export function InboxList({
                   role="group"
                   aria-label={t('inbox.quickActions.label', { subject })}
                   onClick={event => event.stopPropagation()}
-                  className="absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border-subtle/80 bg-bg-surface/95 px-1 py-0.5 opacity-0 shadow-sm backdrop-blur-xs transition-opacity duration-[120ms] group-focus-within/row:opacity-100 group-hover/row:opacity-100 motion-reduce:transition-none"
+                  className={cn(
+                    'absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border-subtle/80 bg-bg-surface/95 px-1 py-0.5 opacity-0 shadow-sm backdrop-blur-xs transition-opacity duration-[120ms] group-focus-within/row:opacity-100 group-hover/row:opacity-100 motion-reduce:transition-none',
+                    snoozeOpen && 'opacity-100'
+                  )}
                 >
-                  <RowQuickAction
-                    label={t(starred ? 'list.unstarRow' : 'list.starRow', { subject })}
-                    tooltip={t(starred ? 'list.unstar' : 'list.star')}
-                    pressed={starred}
-                    className={starred ? 'text-amber-500 hover:text-amber-600' : undefined}
-                    onClick={() => onQuickAction(item, 'star')}
-                  >
-                    <Star className={cn('size-3.5', starred && 'fill-amber-500 text-amber-500')} />
-                  </RowQuickAction>
-                  <RowQuickAction
-                    label={t(unread ? 'list.markRowRead' : 'list.markRowUnread', { subject })}
-                    tooltip={t(unread ? 'actions.markRead' : 'actions.markUnread')}
-                    onClick={() => onQuickAction(item, 'toggleRead')}
-                  >
-                    {unread ? <MailOpen className="size-3.5" /> : <Mail className="size-3.5" />}
-                  </RowQuickAction>
+                  {onQuickAction ? (
+                    <>
+                      <RowQuickAction
+                        label={t(starred ? 'list.unstarRow' : 'list.starRow', { subject })}
+                        tooltip={t(starred ? 'list.unstar' : 'list.star')}
+                        pressed={starred}
+                        className={starred ? 'text-amber-500 hover:text-amber-600' : undefined}
+                        onClick={() => onQuickAction(item, 'star')}
+                      >
+                        <Star className={cn('size-3.5', starred && 'fill-amber-500 text-amber-500')} />
+                      </RowQuickAction>
+                      <RowQuickAction
+                        label={t(unread ? 'list.markRowRead' : 'list.markRowUnread', { subject })}
+                        tooltip={t(unread ? 'actions.markRead' : 'actions.markUnread')}
+                        onClick={() => onQuickAction(item, 'toggleRead')}
+                      >
+                        {unread ? <MailOpen className="size-3.5" /> : <Mail className="size-3.5" />}
+                      </RowQuickAction>
+                    </>
+                  ) : null}
+                  {canSnooze ? (
+                    <SnoozeMenu
+                      label={t('list.snoozeRow', { subject })}
+                      tooltip={t('actions.snooze')}
+                      timeZone={timeZone}
+                      isSnoozed={view === 'snoozed' || Boolean(item.snoozed_until)}
+                      onOpenChange={open =>
+                        setSnoozeOpenId(current => (open ? item.id : current === item.id ? null : current))
+                      }
+                      onSnooze={iso => onSnooze(item, iso)}
+                      onUnsnooze={() => onSnooze(item, null)}
+                    />
+                  ) : null}
                   {canArchive ? (
                     <RowQuickAction
                       label={t('list.archiveRow', { subject })}

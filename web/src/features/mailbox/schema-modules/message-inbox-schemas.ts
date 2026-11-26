@@ -82,8 +82,10 @@ const logSummaryShape = {
   subject: string(),
   read: boolean(),
   failure_code: string(),
-  // "send_limit" while the message waits for room in the organization's send limit.
-  queued_reason: nullable(literal('send_limit')),
+  // "send_limit" or "scheduled" while the message waits to send.
+  queued_reason: nullable(union([literal('send_limit'), literal('scheduled')])),
+  scheduled_at: optional(nullable(timestampSchema)),
+  snoozed_until: optional(nullable(timestampSchema)),
   last_event: mailEventSummarySchema,
   attachment_count: nonnegativeIntegerSchema,
   // Where the message came from; optional until every API emits it, and missing reads as `zmail`.
@@ -160,7 +162,7 @@ export const mailLogPageEnvelopeSchema = strictObject({
   links: pageLinksSchema,
 });
 
-export const INBOX_VIEWS = ['all', 'today', 'pending', 'sent'] as const;
+export const INBOX_VIEWS = ['all', 'today', 'pending', 'snoozed', 'sent'] as const;
 /** Shared-conversation assignment filters of the unified inbox; see `contracts/MAILBOXES.md`. */
 export const INBOX_ASSIGNMENTS = ['mine', 'unassigned', 'closed'] as const;
 /** The longest `tz` the unified inbox accepts. */
@@ -202,6 +204,7 @@ export const inboxCountsSchema = strictObject({
     today_unread: nonnegativeIntegerSchema,
     pending: nonnegativeIntegerSchema,
     sent_waiting: nonnegativeIntegerSchema,
+    snoozed: optional(nonnegativeIntegerSchema),
   }),
   roles: array(strictObject({ role_id: safeIdSchema, unread: nonnegativeIntegerSchema })),
   ungrouped_unread: nonnegativeIntegerSchema,
@@ -264,6 +267,7 @@ export const sendMailMessageSchema = strictObject({
   template: optional(
     strictObject({ id: safeIdSchema, variables: optional(templateVariablesSchema) })
   ),
+  scheduled_at: optional(timestampSchema),
 });
 
 /** A file to send; `content` is standard base64. */
@@ -283,6 +287,8 @@ export const updateMailMessageSchema = strictObject({
   folder_id: optional(safeIdSchema),
   // The complete set of the message's labels, replacing the current one.
   label_ids: optional(array(safeIdSchema)),
+  snoozed_until: optional(timestampSchema),
+  clear_snooze: optional(boolean()),
 });
 
 /** One change for 1 to 100 messages; a label may not be both added and removed. */
@@ -294,6 +300,8 @@ export const updateMailMessagesSchema = strictObject({
   folder_id: optional(safeIdSchema),
   add_label_ids: optional(array(safeIdSchema)),
   remove_label_ids: optional(array(safeIdSchema)),
+  snoozed_until: optional(timestampSchema),
+  clear_snooze: optional(boolean()),
 });
 
 export const mailFolderInputSchema = strictObject({ name: string() });

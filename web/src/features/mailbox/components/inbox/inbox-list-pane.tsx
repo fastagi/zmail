@@ -109,6 +109,7 @@ export function InboxListPane({
   onClearSelection,
   onQuickAction,
   onBulkAction,
+  onSnooze,
 }: {
   organizationId: number;
   title: string;
@@ -153,6 +154,7 @@ export function InboxListPane({
   onClearSelection?: () => void;
   onQuickAction?: (item: InboxItem, action: InboxQuickAction) => void;
   onBulkAction?: (action: InboxBulkAction) => void;
+  onSnooze?: (item: InboxItem, snoozedUntil: string | null) => void;
 }) {
   const t = useT('mailbox');
 
@@ -252,6 +254,7 @@ export function InboxListPane({
         hasMore={lastPage.meta.has_more && lastPage.meta.next_cursor !== null}
         loadingMore={isFetchingNextPage}
         onQuickAction={onQuickAction}
+        onSnooze={onSnooze}
         checkedIds={checkedIds}
         onToggleSelect={onToggleSelect}
       />

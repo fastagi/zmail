@@ -4,6 +4,7 @@ import { lazy, Suspense, useState, type ReactNode } from 'react';
 import {
   ArrowDownWideNarrow,
   CalendarDays,
+  Clock,
   FileText,
   Inbox,
   Lock,
@@ -42,10 +43,11 @@ const viewIcons = {
   all: Inbox,
   today: CalendarDays,
   pending: Star,
+  snoozed: Clock,
   sent: Send,
 } as const satisfies Record<InboxView, unknown>;
 
-const viewOrder: readonly InboxView[] = ['all', 'today', 'pending', 'sent'];
+const viewOrder: readonly InboxView[] = ['all', 'today', 'pending', 'snoozed', 'sent'];
 
 /** A role narrowing of the list: a role id, or `none` for the mailboxes without one. */
 export type InboxRoleFilter = number | 'none';
@@ -154,6 +156,7 @@ export function InboxSidebar({
     all: views?.all_unread,
     today: views?.today,
     pending: views?.pending,
+    snoozed: views?.snoozed,
     sent: undefined,
   };
   // All mail narrowed to a role or mailbox is that role or mailbox; other views stay marked.

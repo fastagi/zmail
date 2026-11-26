@@ -211,7 +211,7 @@ export const mailEventKey = {
 interface MailDeliveryState {
   status: MailStatus;
   last_event: MailEventSummary;
-  queued_reason?: 'send_limit' | null;
+  queued_reason?: 'send_limit' | 'scheduled' | null;
 }
 
 /**
@@ -227,9 +227,11 @@ export function shownMailEvent(message: MailDeliveryState): MailEventType | null
 export function mailBadgeKey(message: MailDeliveryState) {
   const event = shownMailEvent(message);
   if (event) return mailEventKey[event];
-  // Waiting for the send limit reads differently from a send whose provider call is in flight.
+  // Waiting for the send limit or a scheduled time reads differently from an in-flight queue.
   if (message.status === 'queued' && message.queued_reason === 'send_limit')
     return 'emails.statusWaiting';
+  if (message.status === 'queued' && message.queued_reason === 'scheduled')
+    return 'emails.statusScheduled';
   return mailStatusKey[message.status];
 }
 

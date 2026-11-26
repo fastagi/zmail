@@ -125,6 +125,8 @@ export function logSummaryOf(message: MailMessage): Omit<MailLogEntry, 'mailbox_
     read: message.read,
     failure_code: message.failure_code,
     queued_reason: message.queued_reason,
+    ...(message.scheduled_at ? { scheduled_at: message.scheduled_at } : {}),
+    ...(message.snoozed_until ? { snoozed_until: message.snoozed_until } : {}),
     last_event: message.last_event,
     attachment_count: message.attachment_count,
     // As in the API: the connector id for a synced copy, `zmail` for Zmail's own mail.
@@ -222,7 +224,8 @@ export function changeErrors(
   messageIds: number[],
   change: MockMessageChange,
   batch: boolean,
-  shared: boolean
+  shared: boolean,
+  nowMs = Date.now()
 ): Record<string, string[]> {
   const fields: Record<string, string[]> = {};
   if (batch) checkIdList(fields, 'message_ids', messageIds, 1);
@@ -245,6 +248,16 @@ export function changeErrors(
   if (change.label_ids) checkIdList(fields, 'label_ids', change.label_ids, 0);
   if (change.add_label_ids?.some(id => change.remove_label_ids?.includes(id))) {
     addField(fields, 'add_label_ids', 'a label may not be both added and removed');
+  }
+  if (change.snoozed_until !== undefined && change.clear_snooze) {
+    addField(fields, 'snoozed_until', 'cannot be set together with clear_snooze');
+  }
+  if (change.snoozed_until !== undefined) {
+    const at = Date.parse(change.snoozed_until);
+    const maxAheadMs = 365 * 24 * 60 * 60 * 1_000;
+    if (Number.isNaN(at) || at <= nowMs || at > nowMs + maxAheadMs) {
+      addField(fields, 'snoozed_until', 'must be in the future and at most 365 days ahead');
+    }
   }
   return fields;
 }

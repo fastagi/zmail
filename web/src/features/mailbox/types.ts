@@ -270,7 +270,7 @@ export interface MailLogFilters {
   q?: string;
 }
 
-export type InboxView = 'all' | 'today' | 'pending' | 'sent';
+export type InboxView = 'all' | 'today' | 'pending' | 'snoozed' | 'sent';
 
 /**
  * Filters of the unified inbox, combined with AND; an absent field does not narrow it. `roleId`
