@@ -9,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
@@ -29,7 +28,9 @@ import {
 import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import {
   ComposeAttachmentsSection,
+  ComposeDropOverlay,
   encodeComposeAttachments,
+  useComposeAttachmentsInput,
 } from '@/features/mailbox/components/compose-attachments-section';
 import { ComposeContentFields } from '@/features/mailbox/components/compose-content-fields';
 import {
@@ -55,8 +56,6 @@ import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
 import {
-  MAIL_ATTACHMENTS_MAX_BYTES,
-  MAIL_MAX_ATTACHMENTS,
   normalizeMailMessage,
   normalizeRecipient,
   normalizeRecipientLists,
@@ -327,29 +326,19 @@ export function ComposeDialog({
     else if (ccInvalid.length > 0) ccInput.current?.focus();
     return toInvalid.length === 0 && ccInvalid.length === 0;
   };
-  const filesTooMany = files.length + carried.length > MAIL_MAX_ATTACHMENTS;
-  const filesTooLarge =
-    files.reduce((total, file) => total + file.size, 0) +
-      carried.reduce((total, file) => total + file.size, 0) >
-    MAIL_ATTACHMENTS_MAX_BYTES;
-
-  const encodeAttachments = () =>
-    encodeComposeAttachments({
-      organizationId,
-      forwarded: draft.forwarded,
-      carried,
+  const { filesTooMany, filesTooLarge, isDragOver, addFiles, formAttachmentProps } =
+    useComposeAttachmentsInput({
       files,
+      carried,
+      disabled: send.isPending,
+      setFiles,
+      setLostFiles,
+      onClearError: () => setErrorKey(null),
+      onInvalidAttachments: () => setErrorKey('errors.attachmentsInvalid'),
     });
 
-  const addFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const chosen = Array.from(event.target.files ?? []);
-    // Clear the input so the same file can be chosen again after it is removed.
-    event.target.value = '';
-    setErrorKey(null);
-    setFiles(current => [...current, ...chosen]);
-    // Attaching anything settles the reminder; removing files later does not bring it back.
-    setLostFiles([]);
-  };
+  const encodeAttachments = () =>
+    encodeComposeAttachments({ organizationId, forwarded: draft.forwarded, carried, files });
 
   /**
    * A refused send. When the session ended, what is written is kept as this browser's draft, so
@@ -628,8 +617,10 @@ export function ComposeDialog({
     <form
       onSubmit={submit}
       onKeyDown={handleFormKeyDown}
-      className={cn('flex min-h-0 flex-1 flex-col', isMinimized && 'hidden')}
+      {...formAttachmentProps}
+      className={cn('relative flex min-h-0 flex-1 flex-col', isMinimized && 'hidden')}
     >
+      {isDragOver ? <ComposeDropOverlay /> : null}
       <div
         className={cn(
           'flex-1 overflow-y-auto overscroll-contain',
